@@ -1,5 +1,6 @@
-import React, { ReactNode } from 'react';
-import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar } from 'lucide-react';
+import React, { ReactNode, useState, useEffect } from 'react';
+import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar, Star } from 'lucide-react';
+import { getWatchlist } from '../services/storageService';
 
 interface LayoutProps {
   children: ReactNode;
@@ -11,6 +12,28 @@ interface LayoutProps {
 }
 
 const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, globalSeason, setGlobalSeason, hasData }) => {
+  const [watchlistCount, setWatchlistCount] = useState(0);
+
+  // Update watchlist count when view changes or periodically
+  useEffect(() => {
+    const updateCount = () => {
+      setWatchlistCount(getWatchlist().length);
+    };
+    updateCount();
+    
+    // Listen for storage events to update count
+    const handleStorage = () => updateCount();
+    window.addEventListener('storage', handleStorage);
+    
+    // Also check when switching views
+    const interval = setInterval(updateCount, 2000);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(interval);
+    };
+  }, [currentView]);
+
   return (
     <div className="flex h-screen bg-slate-900 text-slate-100 overflow-hidden">
       {/* Sidebar */}
@@ -37,6 +60,21 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
           >
             <Gem className="w-6 h-6" />
             <span className="hidden lg:block">Gem Hunter</span>
+          </button>
+
+          <button 
+             onClick={() => onNavigate('WATCHLIST')}
+             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'WATCHLIST' ? 'bg-yellow-500/10 text-yellow-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
+          >
+            <div className="relative">
+              <Star className="w-6 h-6" />
+              {watchlistCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 text-slate-950 text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {watchlistCount > 9 ? '9+' : watchlistCount}
+                </span>
+              )}
+            </div>
+            <span className="hidden lg:block">Watchlist</span>
           </button>
 
           <button 

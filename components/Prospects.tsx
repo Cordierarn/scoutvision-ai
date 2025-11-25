@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId } from '../types';
 import { getAvailableLeagues } from '../utils/scoringUtils';
-import { Filter, Gem, Sliders, ChevronRight, Trophy, Coins, TrendingUp, Eye, Minus, Plus, RefreshCw, AlertCircle, Save, Trash2, X, Check } from 'lucide-react';
+import { Filter, Gem, Sliders, ChevronRight, Trophy, Coins, TrendingUp, Eye, Minus, Plus, RefreshCw, AlertCircle, Save, Trash2, X, Check, Download, Star } from 'lucide-react';
 import { queryService } from '../services/queryService';
+import { exportProspects } from '../utils/exportUtils';
+import { isInWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 
 interface ProspectsProps {
   data: PlayerData[];
@@ -252,6 +254,41 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
   const [marketValueLimit, setMarketValueLimit] = useState<number>(30000000); // 30M default
   const [minMinutesPlayed, setMinMinutesPlayed] = useState<number>(500); // Min 500 minutes
   const [selectedLeague, setSelectedLeague] = useState<string>('');
+  
+  // --- Watchlist State ---
+  const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set());
+  
+  // Update watchlist IDs for UI
+  useEffect(() => {
+    const updateWatchlistIds = () => {
+      const ids = new Set<string>();
+      // We check which players are in watchlist
+      data.forEach(p => {
+        if (isInWatchlist(p)) {
+          ids.add(getPlayerSeasonId(p));
+        }
+      });
+      setWatchlistIds(ids);
+    };
+    updateWatchlistIds();
+  }, [data]);
+
+  const toggleWatchlist = (player: PlayerData, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const playerId = getPlayerSeasonId(player);
+    
+    if (watchlistIds.has(playerId)) {
+      removeFromWatchlist(player);
+      setWatchlistIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(playerId);
+        return newSet;
+      });
+    } else {
+      addToWatchlist(player);
+      setWatchlistIds(prev => new Set(prev).add(playerId));
+    }
+  };
   
   // --- Role Engine State ---
   const [presets, setPresets] = useState<Record<string, RolePreset>>(() => {
@@ -702,7 +739,18 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-900">
          
          <div className="p-6 pb-2">
-            <h1 className="text-2xl font-bold text-white mb-2">Scouting Results</h1>
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="text-2xl font-bold text-white">Scouting Results</h1>
+              {filteredPlayers.length > 0 && (
+                <button
+                  onClick={() => exportProspects(filteredPlayers, selectedRole, Object.keys(effectiveThresholds))}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Export ({filteredPlayers.length})
+                </button>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2 text-sm text-slate-400 items-center">
                 {selectedRole ? (
                     <>
@@ -799,13 +847,26 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                             </td>
                                         ))}
                                         <td className="p-4 text-center">
-                                            <button 
-                                                onClick={() => onSelectPlayer(player)}
-                                                className="p-2 hover:bg-emerald-500/20 rounded-lg text-slate-400 hover:text-emerald-400 transition-all"
-                                                title="View Profile"
-                                            >
-                                                <Eye className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex items-center justify-center gap-1">
+                                              <button 
+                                                  onClick={(e) => toggleWatchlist(player, e)}
+                                                  className={`p-2 rounded-lg transition-all ${
+                                                    watchlistIds.has(getPlayerSeasonId(player))
+                                                      ? 'bg-yellow-500/20 text-yellow-400'
+                                                      : 'hover:bg-yellow-500/10 text-slate-500 hover:text-yellow-400'
+                                                  }`}
+                                                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                                              >
+                                                  <Star className={`w-4 h-4 ${watchlistIds.has(getPlayerSeasonId(player)) ? 'fill-yellow-400' : ''}`} />
+                                              </button>
+                                              <button 
+                                                  onClick={() => onSelectPlayer(player)}
+                                                  className="p-2 hover:bg-emerald-500/20 rounded-lg text-slate-400 hover:text-emerald-400 transition-all"
+                                                  title="View Profile"
+                                              >
+                                                  <Eye className="w-4 h-4" />
+                                              </button>
+                                            </div>
                                         </td>
                                     </tr>
                                     );

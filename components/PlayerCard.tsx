@@ -1,10 +1,11 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PlayerData, ShotEvent, extractSeason, getSeasonColor } from '../types';
-import { ArrowLeft, Sparkles, Trophy, Target, Activity, MapPin, Footprints, Ruler, FileText, Download, Share2, Settings2, X, Check, Search, Plus, Award, ChevronRight, Layout, Crosshair } from 'lucide-react';
+import { ArrowLeft, Sparkles, Trophy, Target, Activity, MapPin, Footprints, Ruler, FileText, Download, Share2, Settings2, X, Check, Search, Plus, Award, ChevronRight, Layout, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, Legend } from 'recharts';
 import { generateScoutReport } from '../services/geminiService';
 import { getBestRoles } from '../utils/scoringUtils';
+import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -16,12 +17,24 @@ interface PlayerCardProps {
   shotEvents: ShotEvent[];
 }
 
-type ComparisonMode = 'all' | 'position' | 'team' | 'league';
+type ComparisonMode = 'all' | 'position' | 'league' | 'position_league';
 
-const DEFAULT_METRICS = [
-  'Goals', 'xG', 'Assists', 'xA', 'Passes per 90', 
-  'Accurate passes, %', 'Successful defensive actions per 90', 'Duels won, %'
-];
+// Les métriques par défaut seront maintenant calculées dynamiquement selon la position
+
+// Labels for comparison modes
+const COMPARISON_LABELS: Record<ComparisonMode, string> = {
+  all: 'vs All Players',
+  position: 'vs Same Position',
+  league: 'vs Same League',
+  position_league: 'vs Position in League'
+};
+
+const COMPARISON_SHORT_LABELS: Record<ComparisonMode, string> = {
+  all: 'All',
+  position: 'Position',
+  league: 'League',
+  position_league: 'Pos+League'
+};
 
 // Coordinate mapping for the positional pitch view
 // All values are percentages { top, left }
@@ -65,12 +78,76 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('position');
   const [isExporting, setIsExporting] = useState(false);
   
+  // Get position-based default metrics
+  const defaultMetrics = useMemo(() => {
+    const positionMetrics = getRadarMetricsForPosition(player.Position);
+    return filterAvailableMetrics(positionMetrics, player);
+  }, [player]);
+  
   // Custom Metric Config State
-  const [activeMetrics, setActiveMetrics] = useState<string[]>(DEFAULT_METRICS);
+  const [activeMetrics, setActiveMetrics] = useState<string[]>([]);
   const [showMetricConfig, setShowMetricConfig] = useState(false);
   const [metricSearch, setMetricSearch] = useState('');
   
+  // Initialize metrics when player changes
+  useEffect(() => {
+    const positionMetrics = getRadarMetricsForPosition(player.Position);
+    const available = filterAvailableMetrics(positionMetrics, player);
+    setActiveMetrics(available.length > 0 ? available : ['xG', 'xA', 'Goals', 'Assists']);
+  }, [player]);
+  
   const printRef = useRef<HTMLDivElement>(null);
+
+  // Position category for display
+  const positionCategory = useMemo(() => {
+    const cat = getPositionCategory(player.Position);
+    return getPositionCategoryLabel(cat);
+  }, [player]);
+
+  // US-05: Find same player in other seasons for evolution tracking
+  const playerSeasons = useMemo(() => {
+    const currentSeason = extractSeason(player.League);
+    
+    // Find all versions of this player (same name, same team or different team)
+    const samePlayer = allPlayers.filter(p => 
+      p.Player === player.Player && 
+      extractSeason(p.League) !== currentSeason
+    );
+    
+    // Return sorted by season (most recent first)
+    return [player, ...samePlayer].sort((a, b) => {
+      const seasonA = extractSeason(a.League);
+      const seasonB = extractSeason(b.League);
+      return seasonB.localeCompare(seasonA);
+    });
+  }, [player, allPlayers]);
+
+  // Calculate evolution data if we have multiple seasons
+  const evolutionData = useMemo(() => {
+    if (playerSeasons.length < 2) return null;
+    
+    const currentSeason = playerSeasons[0];
+    const previousSeason = playerSeasons[1];
+    
+    const metrics = activeMetrics.slice(0, 8); // Take first 8 for comparison
+    
+    return metrics.map(key => {
+      const currentVal = Number(currentSeason[key]) || 0;
+      const previousVal = Number(previousSeason[key]) || 0;
+      const diff = currentVal - previousVal;
+      const percentChange = previousVal !== 0 ? ((diff / previousVal) * 100) : (currentVal > 0 ? 100 : 0);
+      
+      return {
+        metric: key,
+        shortMetric: key.length > 20 ? key.substring(0, 17) + '...' : key,
+        current: currentVal,
+        previous: previousVal,
+        diff,
+        percentChange: Math.round(percentChange),
+        trend: diff > 0.01 ? 'up' : diff < -0.01 ? 'down' : 'stable'
+      };
+    });
+  }, [playerSeasons, activeMetrics]);
 
   // Available Numeric Keys
   const availableMetrics = useMemo(() => {
@@ -123,11 +200,28 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
   const cohort = useMemo(() => {
     return allPlayers.filter(p => {
       if (comparisonMode === 'position') return p.Position === player.Position;
-      if (comparisonMode === 'team') return p.Team === player.Team;
       if (comparisonMode === 'league') return p.League === player.League;
+      if (comparisonMode === 'position_league') return p.Position === player.Position && p.League === player.League;
       return true; // 'all'
     });
   }, [allPlayers, player, comparisonMode]);
+
+  // Cohort description for display
+  const cohortDescription = useMemo(() => {
+    const count = cohort.length;
+    switch (comparisonMode) {
+      case 'position':
+        return `${count} ${player.Position}s worldwide`;
+      case 'league':
+        const leagueName = player.League?.split(' ').slice(0, -1).join(' ') || 'League';
+        return `${count} players in ${leagueName}`;
+      case 'position_league':
+        const league = player.League?.split(' ').slice(0, -1).join(' ') || 'League';
+        return `${count} ${player.Position}s in ${league}`;
+      default:
+        return `${count} players total`;
+    }
+  }, [cohort, comparisonMode, player]);
 
   const chartData = useMemo(() => {
     return activeMetrics.map(key => {
@@ -146,6 +240,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
           percentile = 100;
       }
 
+      // Calculate actual rank position
+      const rank = values.length - countBelow;
+
       // Dynamic label creation
       const label = key.length > 15 ? key.substring(0, 12) + '..' : key;
 
@@ -155,10 +252,26 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
         A: percentile,
         fullMark: 100,
         rawValue: val,
-        cohortSize: values.length
+        cohortSize: values.length,
+        rank: rank,
+        topPercent: Math.round((rank / values.length) * 100)
       };
     });
   }, [player, cohort, activeMetrics]);
+
+  // Calculate average percentile for summary
+  const averagePercentile = useMemo(() => {
+    if (chartData.length === 0) return 0;
+    return Math.round(chartData.reduce((sum, d) => sum + d.A, 0) / chartData.length);
+  }, [chartData]);
+
+  // Get top 3 metrics where player excels
+  const topMetrics = useMemo(() => {
+    return [...chartData]
+      .sort((a, b) => b.A - a.A)
+      .slice(0, 3)
+      .filter(m => m.A >= 70);
+  }, [chartData]);
 
   const handleGenerateReport = async () => {
     setLoadingReport(true);
@@ -386,21 +499,49 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                 )}
 
                 {/* Comparison Controls */}
-                <div className="bg-slate-900 rounded-lg p-1 flex items-center justify-between border border-slate-800 mb-6 relative z-10">
-                    {(['position', 'team', 'league'] as ComparisonMode[]).map(mode => (
+                <div className="bg-slate-900 rounded-lg p-1 flex items-center justify-between border border-slate-800 mb-4 relative z-10">
+                    {(['all', 'position', 'league', 'position_league'] as ComparisonMode[]).map(mode => (
                         <button
                             key={mode}
                             onClick={() => setComparisonMode(mode)}
-                            className={`flex-1 py-1.5 text-[10px] uppercase font-bold tracking-wider rounded-md transition-all ${
+                            className={`flex-1 py-1.5 text-[9px] uppercase font-bold tracking-wider rounded-md transition-all ${
                                 comparisonMode === mode 
                                 ? 'bg-emerald-500 text-slate-950 shadow-sm' 
                                 : 'text-slate-500 hover:text-slate-300'
                             }`}
                         >
-                            {mode}
+                            {COMPARISON_SHORT_LABELS[mode]}
                         </button>
                     ))}
                 </div>
+                
+                {/* Cohort Info & Average Percentile */}
+                <div className="flex items-center justify-between mb-4 px-1">
+                  <div className="text-[10px] text-slate-500">
+                    <span className="text-slate-400 font-medium">{cohort.length}</span> {cohortDescription.split(' ').slice(1).join(' ')}
+                  </div>
+                  <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${
+                    averagePercentile >= 80 ? 'bg-emerald-500/20 text-emerald-400' :
+                    averagePercentile >= 60 ? 'bg-blue-500/20 text-blue-400' :
+                    averagePercentile >= 40 ? 'bg-yellow-500/20 text-yellow-400' :
+                    'bg-slate-500/20 text-slate-400'
+                  }`}>
+                    <BarChart3 className="w-3 h-3" />
+                    Top {100 - averagePercentile}%
+                  </div>
+                </div>
+                
+                {/* Top Metrics Badges */}
+                {topMetrics.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-4">
+                    {topMetrics.map(m => (
+                      <div key={m.fullSubject} className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 rounded-full text-[10px] text-emerald-400 border border-emerald-500/20">
+                        <TrendingUp className="w-3 h-3" />
+                        Top {m.topPercent}% {m.subject}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="flex-1 min-h-[350px] w-full relative -ml-2">
                     <ResponsiveContainer width="100%" height="100%">
@@ -460,6 +601,96 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                     <p className="text-[10px] text-slate-500 uppercase tracking-widest">Cohort Size: {cohort.length} players</p>
                 </div>
             </div>
+
+            {/* US-05: Season Evolution Comparison */}
+            {evolutionData && playerSeasons.length >= 2 && (
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-blue-400" /> Season Evolution
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {playerSeasons.slice(0, 2).map((ps, idx) => {
+                      const season = extractSeason(ps.League);
+                      const colors = getSeasonColor(season);
+                      return (
+                        <span key={season} className={`px-2 py-1 rounded text-[10px] font-bold ${colors.bg} ${colors.text} border ${colors.border}`}>
+                          {season}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  {evolutionData.map(item => (
+                    <div key={item.metric} className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-lg hover:bg-slate-900 transition-colors">
+                      {/* Trend Icon */}
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                        item.trend === 'up' ? 'bg-emerald-500/20 text-emerald-400' :
+                        item.trend === 'down' ? 'bg-red-500/20 text-red-400' :
+                        'bg-slate-700/50 text-slate-500'
+                      }`}>
+                        {item.trend === 'up' ? <TrendingUp className="w-3 h-3" /> :
+                         item.trend === 'down' ? <TrendingDown className="w-3 h-3" /> :
+                         <Minus className="w-3 h-3" />}
+                      </div>
+                      
+                      {/* Metric Name */}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-slate-300 font-medium truncate" title={item.metric}>
+                          {item.shortMetric}
+                        </div>
+                      </div>
+                      
+                      {/* Previous Value */}
+                      <div className="text-xs text-slate-500 font-mono w-14 text-right">
+                        {item.previous % 1 !== 0 ? item.previous.toFixed(2) : item.previous}
+                      </div>
+                      
+                      {/* Arrow */}
+                      <div className="text-slate-600">→</div>
+                      
+                      {/* Current Value */}
+                      <div className="text-xs text-white font-mono font-bold w-14 text-right">
+                        {item.current % 1 !== 0 ? item.current.toFixed(2) : item.current}
+                      </div>
+                      
+                      {/* Change Indicator */}
+                      <div className={`text-[10px] font-bold px-2 py-0.5 rounded w-16 text-center ${
+                        item.trend === 'up' ? 'bg-emerald-500/20 text-emerald-400' :
+                        item.trend === 'down' ? 'bg-red-500/20 text-red-400' :
+                        'bg-slate-700 text-slate-400'
+                      }`}>
+                        {item.trend === 'up' ? '+' : ''}{item.percentChange}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Summary */}
+                <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between">
+                  <div className="text-xs text-slate-500">
+                    Comparing {extractSeason(playerSeasons[1].League)} → {extractSeason(playerSeasons[0].League)}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500">Improved:</span>
+                    <span className="text-xs font-bold text-emerald-400">
+                      {evolutionData.filter(e => e.trend === 'up').length}/{evolutionData.length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* No Evolution Data Message */}
+            {playerSeasons.length < 2 && (
+              <div className="bg-slate-950/50 border border-slate-800/50 border-dashed rounded-3xl p-6 text-center">
+                <TrendingUp className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">Season evolution unavailable</p>
+                <p className="text-xs text-slate-600">Only one season of data found for this player</p>
+              </div>
+            )}
 
             {/* Positional Map (Mini Pitch) */}
             <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">

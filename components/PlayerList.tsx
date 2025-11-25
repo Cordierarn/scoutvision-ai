@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import { PlayerData, extractSeason, getSeasonColor } from '../types';
-import { Search, ChevronDown, ChevronUp, Eye, Filter, SlidersHorizontal, Plus, X, Calendar } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId } from '../types';
+import { Search, ChevronDown, ChevronUp, Eye, Filter, SlidersHorizontal, Plus, X, Calendar, Download, Star } from 'lucide-react';
+import { exportToCSV } from '../utils/exportUtils';
+import { isInWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 
 interface PlayerListProps {
   data: PlayerData[];
@@ -26,6 +28,40 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
   // Advanced Filters State
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [activeFilters, setActiveFilters] = useState<FilterCondition[]>([]);
+
+  // Watchlist State
+  const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set());
+  
+  // Update watchlist IDs for UI
+  useEffect(() => {
+    const updateWatchlistIds = () => {
+      const ids = new Set<string>();
+      data.forEach(p => {
+        if (isInWatchlist(p)) {
+          ids.add(getPlayerSeasonId(p));
+        }
+      });
+      setWatchlistIds(ids);
+    };
+    updateWatchlistIds();
+  }, [data]);
+
+  const toggleWatchlist = (player: PlayerData, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const playerId = getPlayerSeasonId(player);
+    
+    if (watchlistIds.has(playerId)) {
+      removeFromWatchlist(player);
+      setWatchlistIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(playerId);
+        return newSet;
+      });
+    } else {
+      addToWatchlist(player);
+      setWatchlistIds(prev => new Set(prev).add(playerId));
+    }
+  };
 
   const positions = useMemo(() => {
     const posSet = new Set(data.map(p => p.Position).filter(Boolean));
@@ -161,6 +197,17 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                   {positions.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
+              
+              <button
+                onClick={() => exportToCSV(filteredAndSortedData.slice(0, 500), 'players')}
+                disabled={filteredAndSortedData.length === 0}
+                className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors text-sm disabled:opacity-50"
+                title="Export first 500 results"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+              
               <div className="px-3 py-2 bg-slate-900 rounded-lg text-sm text-slate-400 whitespace-nowrap">
                 {filteredAndSortedData.length} Players found
               </div>
@@ -290,7 +337,18 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
               <div className="col-span-1 p-4 text-sm font-mono text-right text-slate-300">
                 {(Number(player.xA) || 0).toFixed(2)}
               </div>
-              <div className="col-span-1 p-4 flex justify-center">
+              <div className="col-span-1 p-4 flex justify-center gap-1">
+                <button 
+                  onClick={(e) => toggleWatchlist(player, e)}
+                  className={`p-2 rounded-lg transition-all ${
+                    watchlistIds.has(getPlayerSeasonId(player))
+                      ? 'bg-yellow-500/20 text-yellow-400'
+                      : 'bg-slate-800 text-slate-500 hover:text-yellow-400 hover:bg-yellow-500/10'
+                  }`}
+                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                >
+                  <Star className={`w-4 h-4 ${watchlistIds.has(getPlayerSeasonId(player)) ? 'fill-yellow-400' : ''}`} />
+                </button>
                 <button 
                   onClick={() => onSelectPlayer(player)}
                   className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:bg-emerald-500 hover:text-white transition-all shadow-sm hover:shadow-emerald-500/20"

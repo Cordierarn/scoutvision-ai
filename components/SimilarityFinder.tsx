@@ -3,6 +3,14 @@ import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId } from '..
 import { Search, GitCompare, ArrowRight, User, Check, X } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend } from 'recharts';
 import { queryService } from '../services/queryService';
+import { 
+  getSimilarityMetricsForPosition, 
+  getRadarMetricsForPosition, 
+  filterAvailableMetrics,
+  getPositionCategory,
+  getPositionCategoryLabel,
+  getTopPerformingMetrics
+} from '../utils/positionMetrics';
 
 interface SimilarityFinderProps {
   data: PlayerData[];
@@ -27,14 +35,29 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
   const [searchTerm, setSearchTerm] = useState('');
   const [referencePlayer, setReferencePlayer] = useState<PlayerData | null>(null);
   const [samePositionOnly, setSamePositionOnly] = useState(true);
+  const [useTopMetrics, setUseTopMetrics] = useState(true); // New: use player's best metrics
 
-  // 1. Identify numeric metric keys valid for calculation
+  // 1. Get position-specific metrics for the reference player
   const metricKeys = useMemo(() => {
-    if (data.length === 0) return [];
-    return Object.keys(data[0]).filter(key => 
-      !EXCLUDED_KEYS.includes(key) && typeof data[0][key] === 'number'
-    );
-  }, [data]);
+    if (!referencePlayer) return [];
+    
+    if (useTopMetrics) {
+      // Use player's top performing metrics (where they excel)
+      const cohort = data.filter(p => samePositionOnly ? p.Position === referencePlayer.Position : true);
+      return getTopPerformingMetrics(referencePlayer, cohort, 12);
+    } else {
+      // Use position-based metrics
+      const positionMetrics = getSimilarityMetricsForPosition(referencePlayer.Position);
+      return filterAvailableMetrics(positionMetrics, referencePlayer);
+    }
+  }, [referencePlayer, data, samePositionOnly, useTopMetrics]);
+
+  // Position category label
+  const positionCategory = useMemo(() => {
+    if (!referencePlayer) return '';
+    const cat = getPositionCategory(referencePlayer.Position);
+    return getPositionCategoryLabel(cat);
+  }, [referencePlayer]);
 
   // 2. Pre-calculate Min/Max for normalization
   const bounds = useMemo(() => {
@@ -93,22 +116,19 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
     return results;
   }, [referencePlayer, data, metricKeys, bounds, samePositionOnly]);
 
-  // Chart Data Preparation
+  // Chart Data Preparation - Uses position-specific metrics
   const getChartData = (target: PlayerData) => {
     if (!referencePlayer) return [];
     
-    // Select a few key metrics for the radar visual (not all 50+)
-    const visualMetrics = [
-      'xG', 'xA', 'Successful defensive actions per 90', 
-      'Duels won, %', 'Accurate passes, %', 'Progressive runs per 90'
-    ];
-
-    const availableMetrics = visualMetrics.filter(k => metricKeys.includes(k));
+    // Use position-based radar metrics (8 most relevant for this position)
+    const radarMetrics = getRadarMetricsForPosition(referencePlayer.Position);
+    const availableMetrics = filterAvailableMetrics(radarMetrics, referencePlayer).slice(0, 8);
 
     return availableMetrics.map(key => {
-      const max = bounds[key].max;
+      const max = bounds[key]?.max || 1;
       return {
         subject: key.length > 15 ? key.substring(0, 12) + '..' : key,
+        fullSubject: key,
         Reference: Math.round((Number(referencePlayer[key]) / max) * 100),
         Target: Math.round((Number(target[key]) / max) * 100),
         fullMark: 100
@@ -228,14 +248,58 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                 </div>
 
                 <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-lg">
-                     <h3 className="text-sm font-semibold text-slate-300 mb-3">Filters</h3>
-                     <label className="flex items-center gap-3 cursor-pointer group">
-                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${samePositionOnly ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
-                             {samePositionOnly && <Check className="w-3 h-3 text-slate-950" />}
-                        </div>
-                        <input type="checkbox" className="hidden" checked={samePositionOnly} onChange={() => setSamePositionOnly(!samePositionOnly)} />
-                        <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">Same position only</span>
-                     </label>
+                     <h3 className="text-sm font-semibold text-slate-300 mb-3">Similarity Settings</h3>
+                     
+                     <div className="space-y-3">
+                       {/* Position Category Badge */}
+                       <div className="flex items-center justify-between text-xs">
+                         <span className="text-slate-500">Position Type</span>
+                         <span className="px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded font-medium">{positionCategory}</span>
+                       </div>
+                       
+                       {/* Metrics Used Count */}
+                       <div className="flex items-center justify-between text-xs">
+                         <span className="text-slate-500">Metrics Analyzed</span>
+                         <span className="text-slate-300 font-mono">{metricKeys.length}</span>
+                       </div>
+                       
+                       <div className="h-px bg-slate-800 my-2"></div>
+                       
+                       {/* Same Position Filter */}
+                       <label className="flex items-center gap-3 cursor-pointer group">
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${samePositionOnly ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
+                               {samePositionOnly && <Check className="w-3 h-3 text-slate-950" />}
+                          </div>
+                          <input type="checkbox" className="hidden" checked={samePositionOnly} onChange={() => setSamePositionOnly(!samePositionOnly)} />
+                          <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">Same position only</span>
+                       </label>
+                       
+                       {/* Top Metrics Toggle */}
+                       <label className="flex items-center gap-3 cursor-pointer group">
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${useTopMetrics ? 'bg-purple-500 border-purple-500' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
+                               {useTopMetrics && <Check className="w-3 h-3 text-slate-950" />}
+                          </div>
+                          <input type="checkbox" className="hidden" checked={useTopMetrics} onChange={() => setUseTopMetrics(!useTopMetrics)} />
+                          <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">Use player's best metrics</span>
+                       </label>
+                     </div>
+                     
+                     {/* Metrics Preview */}
+                     {metricKeys.length > 0 && (
+                       <div className="mt-4 pt-3 border-t border-slate-800">
+                         <div className="text-[10px] uppercase text-slate-600 font-bold mb-2">Comparison Metrics</div>
+                         <div className="flex flex-wrap gap-1">
+                           {metricKeys.slice(0, 6).map(m => (
+                             <span key={m} className="px-1.5 py-0.5 bg-slate-900 rounded text-[9px] text-slate-500 truncate max-w-[80px]" title={m}>
+                               {m.replace(' per 90', '').replace(', %', '%')}
+                             </span>
+                           ))}
+                           {metricKeys.length > 6 && (
+                             <span className="px-1.5 py-0.5 text-[9px] text-slate-600">+{metricKeys.length - 6}</span>
+                           )}
+                         </div>
+                       </div>
+                     )}
                 </div>
             </div>
 

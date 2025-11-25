@@ -9,6 +9,7 @@ import PlayerComparison from './components/PlayerComparison';
 import ScoutReport from './components/ScoutReport';
 import TeamAnalysis from './components/TeamAnalysis';
 import Prospects from './components/Prospects';
+import Watchlist from './components/Watchlist';
 import { PlayerData, TeamStats, ShotEvent, ViewState } from './types';
 import { dataLoader, LoadingState } from './services/dataLoader';
 
@@ -132,6 +133,10 @@ const App: React.FC = () => {
 
       {view === ViewState.PROSPECTS && (
         <Prospects data={filteredData} onSelectPlayer={handleSelectPlayer} />
+      )}
+
+      {view === ViewState.WATCHLIST && (
+        <Watchlist onSelectPlayer={handleSelectPlayer} />
       )}
 
       {view === ViewState.DASHBOARD && (
