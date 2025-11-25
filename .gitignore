@@ -23,9 +23,15 @@ dist-ssr
 *.sln
 *.sw?
 
-# Data files - exclude CSV data
+# Data files - Add your own CSV files
 public/data/*.csv
+data/*.csv
 *.csv
 
-# Keep the data folder structure
-!public/data/.gitkeep
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Old project folders
+ScoutVisonV2/
