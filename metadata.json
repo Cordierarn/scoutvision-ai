@@ -1,0 +1,5 @@
+{
+  "name": "Copy of ScoutVision AI",
+  "description": "A professional football scouting platform. Upload CSV data to analyze player metrics, visualize performance via radar charts, and generate AI-powered scouting reports using Gemini.",
+  "requestFramePermissions": []
+}

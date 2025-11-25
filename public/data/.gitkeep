@@ -1,0 +1,7 @@
+# This folder should contain CSV data files:
+# - players.csv (player statistics from Wyscout)
+# - shots.csv (shot events data)
+# - teams.csv (team statistics - optional)
+#
+# These files are not included in the repository for data protection reasons.
+# Contact the repository owner for sample data or use your own Wyscout exports.
