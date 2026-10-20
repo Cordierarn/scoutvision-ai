@@ -3,7 +3,15 @@
  * Service optimisé avec cache et index pour des requêtes rapides
  */
 
-import { PlayerData, TeamStats, ShotEvent } from '../types';
+import { PlayerData, TeamStats } from '../types';
+
+/**
+ * Clé d'équipe unique : une même équipe a une entrée par compétition et par saison
+ * (ex. "Bayern München · Bundesliga 2024-25" et "Bayern München · Champions League 2024-25")
+ */
+export function getTeamKey(team: string, league: string): string {
+  return `${team} · ${league}`;
+}
 
 // ============================================
 // TYPES
@@ -11,7 +19,6 @@ import { PlayerData, TeamStats, ShotEvent } from '../types';
 
 interface TeamIndex {
   players: PlayerData[];
-  shots: ShotEvent[];
   stats: TeamStats | null;
 }
 
@@ -37,7 +44,6 @@ class OptimizedQueryService {
   // Données sources
   private allPlayers: PlayerData[] = [];
   private allTeams: TeamStats[] = [];
-  private allShots: ShotEvent[] = [];
   
   // Liste des équipes triées (calculée une fois)
   private sortedTeamNames: string[] = [];
@@ -47,13 +53,12 @@ class OptimizedQueryService {
   /**
    * Initialise les index avec les données
    */
-  initialize(players: PlayerData[], teams: TeamStats[], shots: ShotEvent[]): void {
+  initialize(players: PlayerData[], teams: TeamStats[]): void {
     console.log('⚡ Building optimized indexes...');
     const start = performance.now();
     
     this.allPlayers = players;
     this.allTeams = teams;
-    this.allShots = shots;
     
     // Construire l'index par équipe
     this.buildTeamIndex();
@@ -80,33 +85,22 @@ class OptimizedQueryService {
     
     // Index des joueurs par équipe
     this.allPlayers.forEach(player => {
-      const teamName = player.Team;
-      if (!teamName || typeof teamName !== 'string' || teamName.trim() === '') return;
+      if (!player.Team || typeof player.Team !== 'string' || player.Team.trim() === '') return;
+      const teamName = getTeamKey(player.Team, player.League);
       
       if (!this.teamIndex.has(teamName)) {
-        this.teamIndex.set(teamName, { players: [], shots: [], stats: null });
+        this.teamIndex.set(teamName, { players: [], stats: null });
       }
       this.teamIndex.get(teamName)!.players.push(player);
     });
     
-    // Index des tirs par équipe
-    this.allShots.forEach(shot => {
-      const teamName = shot.team;
-      if (!teamName || typeof teamName !== 'string') return;
-      
-      if (!this.teamIndex.has(teamName)) {
-        this.teamIndex.set(teamName, { players: [], shots: [], stats: null });
-      }
-      this.teamIndex.get(teamName)!.shots.push(shot);
-    });
-    
     // Stats d'équipe
     this.allTeams.forEach(ts => {
-      const teamName = ts.team;
-      if (!teamName || typeof teamName !== 'string') return;
+      if (!ts.team || typeof ts.team !== 'string') return;
+      const teamName = getTeamKey(ts.team, ts.league);
       
       if (!this.teamIndex.has(teamName)) {
-        this.teamIndex.set(teamName, { players: [], shots: [], stats: null });
+        this.teamIndex.set(teamName, { players: [], stats: null });
       }
       this.teamIndex.get(teamName)!.stats = ts;
     });
@@ -123,7 +117,7 @@ class OptimizedQueryService {
         this.leagueIndex.set(league, new Set());
       }
       if (player.Team) {
-        this.leagueIndex.get(league)!.add(player.Team);
+        this.leagueIndex.get(league)!.add(getTeamKey(player.Team, league));
       }
     });
   }
@@ -195,11 +189,16 @@ class OptimizedQueryService {
   }
 
   /**
-   * Récupère les tirs d'une équipe (O(1) avec index)
+   * Nom, logo et compétition d'une équipe à partir de sa clé
    */
-  getTeamShots(teamName: string): ShotEvent[] {
-    const teamData = this.teamIndex.get(teamName);
-    return teamData?.shots || [];
+  getTeamInfo(teamKey: string): { name: string; logo?: string; competition?: string } {
+    const teamData = this.teamIndex.get(teamKey);
+    const player = teamData?.players[0];
+    return {
+      name: player?.Team ?? teamData?.stats?.team ?? teamKey.split(' · ')[0],
+      logo: (player?.['Team logo'] as string | undefined) ?? teamData?.stats?.image,
+      competition: player?.Competition ?? teamData?.stats?.competition,
+    };
   }
 
   /**

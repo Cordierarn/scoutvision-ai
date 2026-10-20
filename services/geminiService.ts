@@ -66,7 +66,7 @@ export async function generateScoutReport(
       contents: prompt,
     });
 
-    const report = response.text || "Failed to generate report.";
+    const report = response.text || "Le rapport n'a pas pu être généré.";
     
     // Mettre en cache
     reportCache.set(cacheKey, { report, timestamp: Date.now() });
@@ -74,7 +74,7 @@ export async function generateScoutReport(
     return report;
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "Error generating report. Please check your API key and try again.";
+    return "Erreur lors de la génération du rapport. Vérifiez la clé API Gemini et réessayez.";
   }
 }
 
@@ -90,6 +90,7 @@ export interface ScoutReportOptions {
   percentileProfile?: PlayerPercentileProfile;
   bestRoles?: RoleScoreResult[];
   shotStats?: ShotStats;
+  insights?: string[];          // indicateurs avancés déjà formulés (RAPM, finition, valeur...)
 }
 
 /**
@@ -141,6 +142,10 @@ function buildScoutReportPrompt(
     additionalContext += `\n**Shooting Profile:** ${stats.total} shots, ${stats.goals} goals, ${stats.xG.toFixed(2)} xG (${stats.conversion.toFixed(1)}% conversion)`;
   }
 
+  if (options?.insights && options.insights.length > 0) {
+    additionalContext += `\n**Advanced Indicators:**\n${options.insights.map(line => `- ${line}`).join('\n')}`;
+  }
+
   const languageInstruction = language !== 'en' 
     ? `\n**IMPORTANT:** Write the entire report in ${language === 'fr' ? 'French' : language === 'es' ? 'Spanish' : 'German'}.`
     : '';
@@ -160,6 +165,7 @@ ${additionalContext}
 
 **INSTRUCTIONS:**
 Follow the strict structure below based on professional scouting standards.
+**Reading the data:** Per-90 values are shrunk toward the role average when minutes are low. Fields ending in " pct" are percentiles (0-100) among players of the same role and the same competition level. Use the Advanced Indicators with their stated caveats: a low-reliability RAPM, a small shot sample or a model value estimate are hints, not facts. The "Rating" field is a match-rating average that over-weights attacking actions; do not base the verdict on it.
 **Crucial:** Do not use vague, subjective terms (e.g., "good technique", "nice passing", "composed"). 
 Instead, use **Football Action Language**: clear, specific observations derived from the data (e.g., "Progresses play via high-volume dribbling," "Effective in aerial duels but passive in ground challenges").
 
@@ -168,7 +174,7 @@ Instead, use **Football Action Language**: clear, specific observations derived 
 ### 1. Context & Profile
 *   **Context**: List League, Team, Age, Position, and Matches/Minutes Played.
 *   **Tactical Role**: Infer the player's specific tactical role based on the stats (e.g., "Ball-Playing Defender," "Box-to-Box Destroyer," "Inverted Winger").
-*   **Physical Profile**: Height, Weight, Foot.
+*   **Physical Profile**: Height and preferred foot when available.
 
 ### 2. Performance Analysis
 *Analyze the data to infer on-pitch behavior. Use specific action language.*
@@ -193,270 +199,4 @@ Instead, use **Football Action Language**: clear, specific observations derived 
 ---
 **Format:** Use Markdown with clear bold headers. Keep the tone objective, professional, and concise (max ${wordLimit} words).
 `;
-}
-
-// ============================================
-// COMPARISON ANALYSIS
-// ============================================
-
-/**
- * Génère une analyse comparative entre deux joueurs
- */
-export async function generateComparisonAnalysis(
-  playerA: PlayerData,
-  playerB: PlayerData,
-  metrics: string[]
-): Promise<string> {
-  try {
-    const ai = initGenAI();
-    
-    const prompt = `
-You are a football analytics expert. Compare these two players based on their statistics.
-
-**Player A: ${playerA.Player}** (${playerA.Team}, ${playerA.Position})
-${JSON.stringify(
-  Object.fromEntries(
-    metrics.map(m => [m, playerA[m]])
-  ),
-  null, 2
-)}
-
-**Player B: ${playerB.Player}** (${playerB.Team}, ${playerB.Position})
-${JSON.stringify(
-  Object.fromEntries(
-    metrics.map(m => [m, playerB[m]])
-  ),
-  null, 2
-)}
-
----
-
-Provide a concise (200 words max) comparison covering:
-1. **Statistical Edge**: Who excels in which areas based on the numbers
-2. **Profile Differences**: How their playing styles differ
-3. **Best Fit**: Which scenarios/teams would suit each player better
-
-Use specific metrics to support your analysis. Be objective and data-driven.
-Format in Markdown.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    return response.text || "Failed to generate comparison.";
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Error generating comparison analysis.";
-  }
-}
-
-// ============================================
-// TRANSFER ANALYSIS
-// ============================================
-
-/**
- * Génère une analyse de valeur de transfert
- */
-export async function generateTransferAnalysis(
-  player: PlayerData,
-  marketContext?: {
-    averageValueForPosition?: number;
-    recentTransfers?: { player: string; value: number }[];
-  }
-): Promise<string> {
-  try {
-    const ai = initGenAI();
-    
-    let contextStr = '';
-    if (marketContext?.averageValueForPosition) {
-      contextStr += `\nAverage market value for ${player.Position}: €${(marketContext.averageValueForPosition / 1000000).toFixed(1)}M`;
-    }
-    if (marketContext?.recentTransfers) {
-      contextStr += `\nRecent comparable transfers: ${marketContext.recentTransfers.map(t => `${t.player} (€${(t.value / 1000000).toFixed(1)}M)`).join(', ')}`;
-    }
-
-    const prompt = `
-You are a football transfer market analyst. Evaluate the transfer value proposition for this player.
-
-**Player Profile:**
-- Name: ${player.Player}
-- Age: ${player.Age}
-- Position: ${player.Position}
-- Team: ${player.Team}
-- League: ${player.League}
-- Current Estimated Value: €${((Number(player['Market value']) || 0) / 1000000).toFixed(1)}M
-- Minutes Played: ${player['Minutes played']}
-
-**Key Performance Metrics:**
-- Goals: ${player.Goals || 0}, xG: ${player.xG || 0}
-- Assists: ${player.Assists || 0}, xA: ${player.xA || 0}
-- Duels Won: ${player['Duels won, %'] || 0}%
-${contextStr}
-
----
-
-Provide a brief (150 words) transfer analysis covering:
-1. **Value Assessment**: Is the current valuation fair based on performance?
-2. **Risk Factors**: Age, injury concerns (if applicable), contract situation
-3. **Upside Potential**: Growth trajectory and value appreciation potential
-4. **Recommended Bid Range**: Suggest a realistic price range
-
-Be specific and market-aware.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    return response.text || "Failed to generate transfer analysis.";
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Error generating transfer analysis.";
-  }
-}
-
-// ============================================
-// TEAM ANALYSIS
-// ============================================
-
-/**
- * Génère une analyse tactique d'équipe
- */
-export async function generateTeamAnalysis(
-  teamStats: Record<string, number | string>,
-  teamName: string,
-  league: string
-): Promise<string> {
-  try {
-    const ai = initGenAI();
-    
-    const prompt = `
-You are a tactical analyst. Analyze this team's playing style based on their statistics.
-
-**Team:** ${teamName} (${league})
-
-**Statistics:**
-${JSON.stringify(teamStats, null, 2)}
-
----
-
-Provide a brief (200 words) tactical analysis covering:
-1. **Playing Style**: Possession-based, direct, counter-attacking, pressing, etc.
-2. **Strengths**: What they do well statistically
-3. **Vulnerabilities**: Areas of statistical weakness
-4. **Tactical Profile**: Best suited formation and player types
-
-Use data to support conclusions. Format in Markdown.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    return response.text || "Failed to generate team analysis.";
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Error generating team analysis.";
-  }
-}
-
-// ============================================
-// PROSPECT EVALUATION
-// ============================================
-
-/**
- * Génère une évaluation de prospect/wonderkid
- */
-export async function generateProspectEvaluation(
-  player: PlayerData,
-  cohortPercentiles?: Record<string, number>
-): Promise<string> {
-  try {
-    const ai = initGenAI();
-    
-    const age = Number(player.Age) || 0;
-    const isYoungProspect = age <= 21;
-    
-    let percentileContext = '';
-    if (cohortPercentiles) {
-      const topMetrics = Object.entries(cohortPercentiles)
-        .filter(([_, p]) => p >= 80)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
-      
-      if (topMetrics.length > 0) {
-        percentileContext = `\n**Standout Metrics (vs age group):** ${topMetrics.map(([m, p]) => `${m}: ${p}th`).join(', ')}`;
-      }
-    }
-
-    const prompt = `
-You are a youth academy director evaluating a ${isYoungProspect ? 'young prospect' : 'developing player'}.
-
-**Player Profile:**
-- Name: ${player.Player}
-- Age: ${player.Age}
-- Position: ${player.Position}
-- Team: ${player.Team}
-- League: ${player.League}
-- Market Value: €${((Number(player['Market value']) || 0) / 1000000).toFixed(1)}M
-- Minutes This Season: ${player['Minutes played']}
-${percentileContext}
-
-**Current Performance:**
-${JSON.stringify(
-  Object.fromEntries(
-    Object.entries(player)
-      .filter(([k, v]) => typeof v === 'number' && !['Age', 'Height', 'Weight', 'Market value'].includes(k))
-      .slice(0, 15)
-  ),
-  null, 2
-)}
-
----
-
-Provide a prospect evaluation (200 words) covering:
-1. **Current Level**: Where does he stand now for his age?
-2. **Projection**: What type of player could he become?
-3. **Development Priorities**: 2-3 specific areas to work on
-4. **Timeline**: When might he be ready for top-level football?
-5. **Comparisons**: Any stylistic player comparisons (be specific)
-
-Be realistic but identify genuine potential. Format in Markdown.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    return response.text || "Failed to generate prospect evaluation.";
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Error generating prospect evaluation.";
-  }
-}
-
-// ============================================
-// UTILITIES
-// ============================================
-
-/**
- * Efface le cache des rapports
- */
-export function clearReportCache(): void {
-  reportCache.clear();
-}
-
-/**
- * Retourne les statistiques du cache
- */
-export function getCacheStats(): { size: number; entries: string[] } {
-  return {
-    size: reportCache.size,
-    entries: Array.from(reportCache.keys())
-  };
 }

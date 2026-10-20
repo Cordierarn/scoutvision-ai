@@ -28,7 +28,7 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, currentStep, st
 
       {/* Title */}
       <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">ScoutVision AI</h1>
-      <p className="text-slate-400 mb-8">Loading football intelligence...</p>
+      <p className="text-slate-400 mb-8">Chargement des données football...</p>
 
       {/* Progress Bar */}
       <div className="w-full max-w-md mb-6">
@@ -47,7 +47,7 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, currentStep, st
       {/* Loading Indicator */}
       <div className="flex items-center gap-2 text-slate-400 mb-8">
         <Loader2 className="w-5 h-5 animate-spin" />
-        <span className="text-sm">Initializing database...</span>
+        <span className="text-sm">Initialisation...</span>
       </div>
 
       {/* Stats Preview (when available) */}
@@ -55,15 +55,15 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, currentStep, st
         <div className="grid grid-cols-3 gap-4 mt-4">
           <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 text-center">
             <div className="text-2xl font-bold text-emerald-400">{stats.playerCount.toLocaleString()}</div>
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Players</div>
+            <div className="text-xs text-slate-500 uppercase tracking-wider">Joueurs</div>
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 text-center">
             <div className="text-2xl font-bold text-blue-400">{stats.teamCount.toLocaleString()}</div>
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Teams</div>
+            <div className="text-xs text-slate-500 uppercase tracking-wider">Équipes</div>
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 text-center">
             <div className="text-2xl font-bold text-purple-400">{stats.shotCount.toLocaleString()}</div>
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Shots</div>
+            <div className="text-xs text-slate-500 uppercase tracking-wider">Tirs</div>
           </div>
         </div>
       )}

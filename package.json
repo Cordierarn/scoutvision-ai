@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "data:pull": "bash scripts/pull_data.sh",
+    "data:prepare": "python3 scripts/prepare_data.py"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",

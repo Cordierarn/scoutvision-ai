@@ -1,5 +1,4 @@
-
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import LoadingScreen from './components/LoadingScreen';
 import PlayerList from './components/PlayerList';
@@ -10,52 +9,79 @@ import ScoutReport from './components/ScoutReport';
 import TeamAnalysis from './components/TeamAnalysis';
 import Prospects from './components/Prospects';
 import Watchlist from './components/Watchlist';
-import { PlayerData, TeamStats, ShotEvent, ViewState } from './types';
-import { dataLoader, LoadingState } from './services/dataLoader';
+import Forecast from './components/Forecast';
+import { PlayerData, TeamStats, ViewState } from './types';
+import { dataLoader, DataIndex, LoadingState } from './services/dataLoader';
+import { queryService } from './services/queryService';
+
+const ALL_SEASONS = 'All';
 
 const App: React.FC = () => {
   // Loading state
   const [isLoading, setIsLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState(0);
-  const [loadingStep, setLoadingStep] = useState('Initializing...');
+  const [loadingStep, setLoadingStep] = useState('Initialisation...');
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Data state
-  const [rawData, setRawData] = useState<PlayerData[]>([]);
+  const [dataIndex, setDataIndex] = useState<DataIndex | null>(null);
+  const [players, setPlayers] = useState<PlayerData[]>([]);
   const [teamStats, setTeamStats] = useState<TeamStats[]>([]);
-  const [shotEvents, setShotEvents] = useState<ShotEvent[]>([]);
-  
+
   // App state
   const [view, setView] = useState<string>(ViewState.TEAM_ANALYSIS);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerData | null>(null);
-  const [globalSeason, setGlobalSeason] = useState<string>('All');
+  const [globalSeason, setGlobalSeason] = useState<string>('');
 
-  // Charger les données au démarrage
+  // Charger l'index puis la saison la plus récente
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const result = await dataLoader.loadAllData((state: LoadingState) => {
-          setLoadingProgress(state.progress);
-          setLoadingStep(state.currentStep);
-          if (state.error) {
-            setLoadError(state.error);
-          }
-        });
-
-        setRawData(result.players);
-        setTeamStats(result.teams);
-        setShotEvents(result.shots);
+    dataLoader.loadIndex()
+      .then(index => {
+        if (index.seasons.length === 0) {
+          throw new Error('Aucune saison disponible. Lancez d\'abord npm run data:pull ou scripts/prepare_data.py.');
+        }
+        setDataIndex(index);
+        setGlobalSeason(index.seasons[index.seasons.length - 1].id);
+      })
+      .catch(error => {
+        console.error('Failed to load data index:', error);
+        setLoadError(error instanceof Error ? error.message : 'Erreur inconnue');
         setIsLoading(false);
-        
-      } catch (error) {
-        console.error('Failed to load data:', error);
-        setLoadError(error instanceof Error ? error.message : 'Unknown error');
-        setIsLoading(false);
-      }
-    };
-
-    loadData();
+      });
   }, []);
+
+  // Charger les données de la saison sélectionnée
+  useEffect(() => {
+    if (!dataIndex || !globalSeason) return;
+    let cancelled = false;
+
+    const seasons = globalSeason === ALL_SEASONS
+      ? dataIndex.seasons.map(s => s.id)
+      : [globalSeason];
+
+    setIsLoading(true);
+    dataLoader.loadSeasons(seasons, (state: LoadingState) => {
+      if (cancelled) return;
+      setLoadingProgress(state.progress);
+      setLoadingStep(state.currentStep);
+    })
+      .then(data => {
+        if (cancelled) return;
+        queryService.initialize(data.players, data.teams);
+        setPlayers(data.players);
+        setTeamStats(data.teams);
+        setSelectedPlayer(null);
+        setIsLoading(false);
+      })
+      .catch(error => {
+        if (cancelled) return;
+        console.error('Failed to load season data:', error);
+        setLoadError(error instanceof Error ? error.message : 'Erreur inconnue');
+        setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [dataIndex, globalSeason]);
 
   const handleNavigate = (newView: string) => {
     setView(newView);
@@ -69,31 +95,11 @@ const App: React.FC = () => {
     setView(ViewState.PLAYER_DETAIL);
   };
 
-  // Filtrage par saison
-  const filteredData = useMemo(() => {
-    if (rawData.length === 0) return [];
-    if (globalSeason === 'All') return rawData;
-
-    return rawData.filter(p => {
-      const league = String(p.League || '');
-      
-      if (globalSeason === '24-25') {
-        return league.includes('2024-25') || (league.endsWith(' 2024') && !league.includes('2024-25'));
-      }
-      
-      if (globalSeason === '25-26') {
-        return league.includes('2025-26') || (league.endsWith(' 2025') && !league.includes('2025-26'));
-      }
-
-      return true;
-    });
-  }, [rawData, globalSeason]);
-
   // Afficher l'écran de chargement
   if (isLoading) {
     return (
-      <LoadingScreen 
-        progress={loadingProgress} 
+      <LoadingScreen
+        progress={loadingProgress}
         currentStep={loadingStep}
       />
     );
@@ -103,67 +109,70 @@ const App: React.FC = () => {
   if (loadError) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-8">
-        <div className="text-red-400 text-xl mb-4">Failed to load data</div>
+        <div className="text-red-400 text-xl mb-4">Échec du chargement des données</div>
         <div className="text-slate-400 mb-8">{loadError}</div>
-        <button 
+        <button
           onClick={() => window.location.reload()}
           className="px-6 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600"
         >
-          Retry
+          Réessayer
         </button>
       </div>
     );
   }
 
+  const seasonOptions = [
+    ...(dataIndex?.seasons.map(s => s.id).reverse() ?? []),
+    ALL_SEASONS,
+  ];
+
   return (
-    <Layout 
-      onNavigate={handleNavigate} 
+    <Layout
+      onNavigate={handleNavigate}
       currentView={view}
       globalSeason={globalSeason}
       setGlobalSeason={setGlobalSeason}
+      seasonOptions={seasonOptions}
       hasData={true}
     >
       {view === ViewState.TEAM_ANALYSIS && (
-        <TeamAnalysis 
-          playerData={filteredData} 
+        <TeamAnalysis
+          playerData={players}
           teamStats={teamStats}
-          shotEvents={shotEvents}
         />
       )}
 
       {view === ViewState.PROSPECTS && (
-        <Prospects data={filteredData} onSelectPlayer={handleSelectPlayer} />
+        <Prospects data={players} onSelectPlayer={handleSelectPlayer} />
       )}
+
+      {view === ViewState.FORECAST && <Forecast />}
 
       {view === ViewState.WATCHLIST && (
         <Watchlist onSelectPlayer={handleSelectPlayer} />
       )}
 
       {view === ViewState.DASHBOARD && (
-        <PlayerList data={filteredData} onSelectPlayer={handleSelectPlayer} />
+        <PlayerList data={players} onSelectPlayer={handleSelectPlayer} />
       )}
 
       {view === ViewState.SIMILARITY && (
-        <SimilarityFinder data={filteredData} onSelectPlayer={handleSelectPlayer} />
+        <SimilarityFinder data={players} onSelectPlayer={handleSelectPlayer} />
       )}
 
       {view === ViewState.COMPARISON && (
-        <PlayerComparison data={filteredData} />
+        <PlayerComparison data={players} />
       )}
 
       {view === ViewState.SCOUT_REPORT && (
-        <ScoutReport 
-          data={filteredData} 
-          shotEvents={shotEvents}
-        />
+        <ScoutReport data={players} />
       )}
-      
+
       {view === ViewState.PLAYER_DETAIL && selectedPlayer && (
-        <PlayerCard 
-          player={selectedPlayer} 
+        <PlayerCard
+          player={selectedPlayer}
           onBack={() => setView(ViewState.DASHBOARD)}
-          allPlayers={filteredData}
-          shotEvents={shotEvents}
+          allPlayers={players}
         />
       )}
     </Layout>

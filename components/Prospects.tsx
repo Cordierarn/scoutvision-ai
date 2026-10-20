@@ -1,257 +1,34 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId } from '../types';
+import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
 import { getAvailableLeagues } from '../utils/scoringUtils';
-import { Filter, Gem, Sliders, ChevronRight, Trophy, Coins, TrendingUp, Eye, Minus, Plus, RefreshCw, AlertCircle, Save, Trash2, X, Check, Download, Star } from 'lucide-react';
+import { RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, roleIndex } from '../utils/rolePresets';
+import { Filter, Gem, Sliders, ChevronRight, Trophy, Coins, TrendingUp, Eye, Minus, Plus, RefreshCw, AlertCircle, Save, Trash2, X, Check, Download, Star, Hand, Shield, MoveHorizontal, Anchor, Repeat, Wand2, Zap, Crosshair, Flag, Scale, Wrench } from 'lucide-react';
 import { queryService } from '../services/queryService';
 import { exportProspects } from '../utils/exportUtils';
-import { isInWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
+import { metricLabel, positionLabel } from '../utils/labels';
+import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
+import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
 
 interface ProspectsProps {
   data: PlayerData[];
   onSelectPlayer: (player: PlayerData) => void;
 }
 
-interface RolePreset {
-  positions: string[];
-  metrics: Record<string, number>;
-  custom?: boolean;
-  category?: string;
-}
+// v2 : seuils en percentiles (les presets v1 étaient en valeurs absolues Wyscout)
+// Valeur du modèle au moins égale à ce multiple de la valeur Transfermarkt
+const UNDERVALUED_RATIO = 1.5;
 
-// Default Presets - Organized by Position Category
-const DEFAULT_ROLE_PRESETS: Record<string, RolePreset> = {
-  // ====== 1. GARDIEN DE BUT (Goalkeeper) ======
-  'Gardien de Ligne (Shot Stopper)': {
-    positions: ['GK'],
-    category: '🧤 Gardien de But',
-    metrics: {
-      'Save rate, %': 74,
-      'Prevented goals per 90': 0.10,
-      'xG against per 90': 1.2
-    }
-  },
-  'Gardien Libéro (Sweeper Keeper)': {
-    positions: ['GK'],
-    category: '🧤 Gardien de But',
-    metrics: {
-      'Exits per 90': 1.5,
-      'Accurate passes, %': 85,
-      'Accurate long passes, %': 55
-    }
-  },
+const LS_KEY = 'scoutvision_role_presets_v2';
 
-  // ====== 2. DÉFENSEUR CENTRAL (Centre Back) ======
-  'Relanceur (Ball Playing Defender)': {
-    positions: ['CB', 'LCB', 'RCB'],
-    category: '🛡️ Défenseur Central',
-    metrics: {
-      'Forward passes per 90': 20,
-      'Progressive passes per 90': 9,
-      'Accurate long passes, %': 60,
-      'Passes to final third per 90': 7
-    }
-  },
-  'Stoppeur (No-Nonsense Defender)': {
-    positions: ['CB', 'LCB', 'RCB'],
-    category: '🛡️ Défenseur Central',
-    metrics: {
-      'Defensive duels won, %': 72,
-      'Aerial duels won, %': 65,
-      'Successful defensive actions per 90': 10,
-      'Shots blocked per 90': 0.7
-    }
-  },
-  'Défenseur d\'Anticipation (Cover Defender)': {
-    positions: ['CB', 'LCB', 'RCB'],
-    category: '🛡️ Défenseur Central',
-    metrics: {
-      'PAdj Interceptions': 7.5,
-      'Interceptions per 90': 6
-    }
-  },
-
-  // ====== 3. LATÉRAUX (Full Back / Wing Back) ======
-  'Latéral Offensif (Wing Back)': {
-    positions: ['RB', 'LB', 'RWB', 'LWB'],
-    category: '🏃 Latéraux',
-    metrics: {
-      'Crosses per 90': 4,
-      'Progressive runs per 90': 2.5,
-      'Dribbles per 90': 4,
-      'Accelerations per 90': 1.5
-    }
-  },
-  'Latéral Défensif': {
-    positions: ['RB', 'LB', 'RWB', 'LWB'],
-    category: '🏃 Latéraux',
-    metrics: {
-      'Defensive duels won, %': 68,
-      'PAdj Sliding tackles': 2,
-      'Successful defensive actions per 90': 9
-    }
-  },
-  'Latéral Intérieur (Inverted)': {
-    positions: ['RB', 'LB', 'RWB', 'LWB'],
-    category: '🏃 Latéraux',
-    metrics: {
-      'Passes per 90': 55,
-      'Passes to final third per 90': 6,
-      'Smart passes per 90': 0.8
-    }
-  },
-
-  // ====== 4. MILIEU DÉFENSIF (Defensive Midfielder) ======
-  'Sentinelle (Anchor Man)': {
-    positions: ['DMF', 'LDMF', 'RDMF'],
-    category: '⚔️ Milieu Défensif',
-    metrics: {
-      'PAdj Interceptions': 7,
-      'Defensive duels won, %': 65,
-      'Aerial duels won, %': 60,
-      'Successful defensive actions per 90': 11
-    }
-  },
-  'Regista (Deep-lying Playmaker)': {
-    positions: ['DMF', 'LDMF', 'RDMF', 'LCMF', 'RCMF'],
-    category: '⚔️ Milieu Défensif',
-    metrics: {
-      'Passes per 90': 65,
-      'Accurate passes, %': 90,
-      'Forward passes per 90': 22,
-      'Passes to final third per 90': 9
-    }
-  },
-
-  // ====== 5. MILIEU CENTRAL / RELAYEUR (Central Midfielder) ======
-  'Box-to-Box': {
-    positions: ['CMF', 'LCMF', 'RCMF', 'DMF'],
-    category: '🔄 Milieu Central',
-    metrics: {
-      'Touches in box per 90': 2.5,
-      'Progressive runs per 90': 2,
-      'Successful defensive actions per 90': 8,
-      'Shots per 90': 1.2
-    }
-  },
-  'Milieu Percuteur (Ball Carrier)': {
-    positions: ['CMF', 'LCMF', 'RCMF', 'AMF'],
-    category: '🔄 Milieu Central',
-    metrics: {
-      'Dribbles per 90': 5,
-      'Successful dribbles, %': 60,
-      'Progressive runs per 90': 3.5,
-      'Fouls suffered per 90': 1.8
-    }
-  },
-
-  // ====== 6. MILIEU OFFENSIF (Attacking Midfielder) ======
-  'Meneur de Jeu Avancé (Number 10)': {
-    positions: ['AMF', 'LAMF', 'RAMF'],
-    category: '🎯 Milieu Offensif',
-    metrics: {
-      'Smart passes per 90': 1.8,
-      'Key passes per 90': 0.9,
-      'xA per 90': 0.25,
-      'Deep completions per 90': 1.5
-    }
-  },
-  'Neuf et Demi (Shadow Striker)': {
-    positions: ['AMF', 'LAMF', 'RAMF', 'CF'],
-    category: '🎯 Milieu Offensif',
-    metrics: {
-      'Goals per 90': 0.35,
-      'xG per 90': 0.30,
-      'Touches in box per 90': 4.5,
-      'Shots per 90': 2.5
-    }
-  },
-
-  // ====== 7. AILIERS (Wingers) ======
-  'Ailier de Débordement (Classic Winger)': {
-    positions: ['LW', 'RW', 'LWF', 'RWF', 'LAMF', 'RAMF'],
-    category: '⚡ Ailiers',
-    metrics: {
-      'Crosses per 90': 5,
-      'Accurate crosses, %': 35,
-      'Dribbles per 90': 6.5,
-      'Accelerations per 90': 2
-    }
-  },
-  'Attaquant Intérieur (Inside Forward)': {
-    positions: ['LW', 'RW', 'LWF', 'RWF', 'LAMF', 'RAMF'],
-    category: '⚡ Ailiers',
-    metrics: {
-      'Shots per 90': 2.8,
-      'Touches in box per 90': 5.5,
-      'Non-penalty goals per 90': 0.40
-    }
-  },
-  'Créateur Excentré (Wide Playmaker)': {
-    positions: ['LW', 'RW', 'LWF', 'RWF', 'LAMF', 'RAMF'],
-    category: '⚡ Ailiers',
-    metrics: {
-      'Key passes per 90': 0.8,
-      'Crosses to goalie box per 90': 0.5,
-      'xA per 90': 0.28
-    }
-  },
-
-  // ====== 8. AVANT-CENTRE (Striker) ======
-  'Renard des Surfaces (Poacher)': {
-    positions: ['CF'],
-    category: '⚽ Avant-Centre',
-    metrics: {
-      'Goals per 90': 0.55,
-      'xG per 90': 0.50,
-      'Goal conversion, %': 20,
-      'Touches in box per 90': 5
-    }
-  },
-  'Pivot (Target Man)': {
-    positions: ['CF'],
-    category: '⚽ Avant-Centre',
-    metrics: {
-      'Aerial duels per 90': 8,
-      'Aerial duels won, %': 55,
-      'Back passes per 90': 3
-    }
-  },
-  'Faux Neuf (False Nine)': {
-    positions: ['CF', 'AMF'],
-    category: '⚽ Avant-Centre',
-    metrics: {
-      'Smart passes per 90': 1.2,
-      'Key passes per 90': 0.6,
-      'Passes per 90': 25
-    }
-  },
-  'Attaquant de Profondeur (Advanced Forward)': {
-    positions: ['CF'],
-    category: '⚽ Avant-Centre',
-    metrics: {
-      'Offensive duels per 90': 12,
-      'Progressive runs per 90': 2.5,
-      'Accelerations per 90': 1.8
-    }
-  },
-
-  // ====== 9. SPÉCIALISTES (Bonus) ======
-  'Spécialiste Coups de Pied Arrêtés': {
-    positions: ['AMF', 'LAMF', 'RAMF', 'CMF', 'LCMF', 'RCMF', 'LW', 'RW', 'CF'],
-    category: '🎲 Spécialistes',
-    metrics: {
-      'Direct free kicks on target, %': 40,
-      'Key passes per 90': 0.5
-    }
-  }
-};
-
-const LS_KEY = 'scoutvision_role_presets';
+// Icône de chaque catégorie de rôle (utils/rolePresets.ts)
+const CATEGORY_ICONS = { Hand, Shield, MoveHorizontal, Anchor, Repeat, Wand2, Zap, Crosshair, Flag };
 
 const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
   // --- General Filters ---
   const [ageLimit, setAgeLimit] = useState<number>(23);
   const [marketValueLimit, setMarketValueLimit] = useState<number>(30000000); // 30M default
+  const [contractMonths, setContractMonths] = useState<number>(0);       // 0 = any contract end
+  const [undervaluedOnly, setUndervaluedOnly] = useState<boolean>(false); // model value >= 1.5x market
   const [minMinutesPlayed, setMinMinutesPlayed] = useState<number>(500); // Min 500 minutes
   const [selectedLeague, setSelectedLeague] = useState<string>('');
   
@@ -261,14 +38,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
   // Update watchlist IDs for UI
   useEffect(() => {
     const updateWatchlistIds = () => {
-      const ids = new Set<string>();
-      // We check which players are in watchlist
-      data.forEach(p => {
-        if (isInWatchlist(p)) {
-          ids.add(getPlayerSeasonId(p));
-        }
-      });
-      setWatchlistIds(ids);
+      // Une seule lecture du localStorage, au lieu d'une par joueur
+      setWatchlistIds(new Set(getWatchlist().map(w => getPlayerSeasonId(w.player))));
     };
     updateWatchlistIds();
   }, [data]);
@@ -298,7 +69,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
             return { ...DEFAULT_ROLE_PRESETS, ...JSON.parse(saved) };
         }
     } catch (e) {
-        console.error("Failed to load presets", e);
+        console.error("Échec du chargement des presets", e);
     }
     return DEFAULT_ROLE_PRESETS;
   });
@@ -321,10 +92,11 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
   // Get all available numeric keys for the builder
   const availableMetrics = useMemo(() => {
     if (data.length === 0) return [];
-    return Object.keys(data[0]).filter(key => 
-      typeof data[0][key] === 'number' && 
-      !['Age', 'Market value', 'Height', 'Weight', 'Matches played', 'Minutes played'].includes(key)
-    ).sort();
+    // Métriques ayant un percentile par rôle : le seuil d'un preset est un percentile
+    return Object.keys(data[0])
+      .filter(key => key.endsWith(' pct'))
+      .map(key => key.slice(0, -4))
+      .sort();
   }, [data]);
 
   const availablePositions = useMemo(() => {
@@ -408,6 +180,13 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
       setNewPresetMetrics(newPresetMetrics.filter(m => m.key !== key));
   };
 
+  // Fin de contrat au plus tard dans `contractMonths` mois
+  const contractDeadline = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + contractMonths);
+    return d;
+  }, [contractMonths]);
+
   // --- Core Filtering Logic ---
   const { filteredPlayers, effectiveThresholds } = useMemo(() => {
     if (!selectedRole || !presets[selectedRole]) return { filteredPlayers: [], effectiveThresholds: {} };
@@ -417,8 +196,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
     // 1. Calculate Effective Thresholds (Base * Multiplier)
     const currentThresholds: Record<string, number> = {};
     Object.entries(preset.metrics).forEach(([key, baseVal]) => {
-      // Round to 2 decimals for display cleanliness
-      currentThresholds[key] = parseFloat((baseVal * strictnessMultiplier).toFixed(2));
+      // Percentile minimum, plafonné à 99
+      currentThresholds[key] = Math.min(99, Math.round(baseVal * strictnessMultiplier));
     });
 
     // 2. Filter Players
@@ -426,42 +205,41 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
       // A. General Filters
       if ((Number(p.Age) || 100) > ageLimit) return false;
       if ((Number(p["Market value"]) || 0) > marketValueLimit) return false;
+      if (contractMonths > 0) {
+        const end = p["Contract expires"] ? new Date(p["Contract expires"]) : null;
+        if (!end || end > contractDeadline) return false;
+      }
+      if (undervaluedOnly) {
+        const market = Number(p["Market value"]);
+        const estimate = Number(p["Estimated value"]);
+        if (!market || !estimate || estimate / market < UNDERVALUED_RATIO) return false;
+      }
       if ((Number(p["Minutes played"]) || 0) < minMinutesPlayed) return false;
       if (selectedLeague && p.League !== selectedLeague) return false;
 
       // B. Strict Position Check
       if (!preset.positions.includes(p.Position)) return false;
 
-      // C. Role Metric Check (Strict: Must pass ALL thresholds)
-      for (const [key, minVal] of Object.entries(currentThresholds)) {
-        const playerVal = Number(p[key]) || 0;
-        if (playerVal < minVal) return false;
+      // C. Role Metric Check (Strict: Must pass ALL percentile thresholds)
+      for (const [key, minPct] of Object.entries(currentThresholds)) {
+        const playerPct = Number(p[`${key} pct`]) || 0;
+        if (playerPct < minPct) return false;
       }
 
       return true;
     });
 
-    // 3. Sort by "Performance Score" (Sum of key metrics / thresholds)
+    // 3. Sort by "Performance Score" (mean percentile on the role metrics)
     // This sorts "Best" candidates to the top
-    players.sort((a, b) => {
-      let scoreA = 0;
-      let scoreB = 0;
-      Object.entries(currentThresholds).forEach(([key, threshold]) => {
-         const valA = Number(a[key]) || 0;
-         const valB = Number(b[key]) || 0;
-         // Avoid div by zero
-         const t = threshold === 0 ? 1 : threshold; 
-         scoreA += valA / t;
-         scoreB += valB / t;
-      });
-      return scoreB - scoreA;
-    });
+    players.sort((a, b) => roleIndex(b, preset) - roleIndex(a, preset));
 
     return { filteredPlayers: players, effectiveThresholds: currentThresholds };
-  }, [data, presets, selectedRole, strictnessMultiplier, ageLimit, marketValueLimit, minMinutesPlayed, selectedLeague]);
+  }, [data, presets, selectedRole, strictnessMultiplier, ageLimit, marketValueLimit, minMinutesPlayed, selectedLeague,
+      contractMonths, undervaluedOnly, contractDeadline]);
 
 
   const formatCurrency = (val: number) => {
+    if (!val) return '–';
     if (val >= 1000000) return `€${(val / 1000000).toFixed(1)}M`;
     if (val >= 1000) return `€${(val / 1000).toFixed(0)}K`;
     return `€${val}`;
@@ -474,9 +252,9 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
       <div className="w-96 bg-slate-950 border-r border-slate-800 flex flex-col h-full overflow-hidden shrink-0 transition-all">
         <div className="p-6 border-b border-slate-800 bg-slate-950/50">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Gem className="w-5 h-5 text-emerald-400" /> Gem Hunter
+                <Gem className="w-5 h-5 text-emerald-400" /> Chasseur de pépites
             </h2>
-            <p className="text-slate-500 text-xs mt-1">Automated Role-Based Scouting</p>
+            <p className="text-slate-500 text-xs mt-1">Scouting automatique par rôle</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
@@ -485,46 +263,49 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
             <div className="space-y-4">
                  <div className="flex items-center justify-between">
                      <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                        <Sliders className="w-3 h-3" /> Select Role
+                        <Sliders className="w-3 h-3" /> Choisir un rôle
                     </h3>
                     <button 
                         onClick={() => setIsCreatorMode(!isCreatorMode)}
                         className={`text-xs px-2 py-1 rounded border transition-colors ${isCreatorMode ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-bold' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
                     >
-                        {isCreatorMode ? 'Cancel' : '+ Create Preset'}
+                        {isCreatorMode ? 'Annuler' : '+ Créer un preset'}
                     </button>
                  </div>
 
                  {!isCreatorMode ? (
                      <>
-                        <select 
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-200 text-sm focus:ring-emerald-500 focus:border-emerald-500 font-medium"
-                            value={selectedRole}
-                            onChange={(e) => handleRoleChange(e.target.value)}
-                        >
-                            <option value="">-- Choose Tactical Role --</option>
-                            {/* Group by category */}
-                            {(() => {
-                              const categories = new Map<string, string[]>();
-                              roles.forEach(r => {
-                                const cat = presets[r].category || '🔧 Custom';
-                                if (!categories.has(cat)) categories.set(cat, []);
-                                categories.get(cat)!.push(r);
-                              });
-                              return Array.from(categories.entries()).map(([cat, roleList]) => (
-                                <optgroup key={cat} label={cat}>
-                                  {roleList.map(r => (
-                                    <option key={r} value={r}>{r} {presets[r].custom ? '⭐' : ''}</option>
-                                  ))}
-                                </optgroup>
-                              ));
-                            })()}
-                        </select>
+                        <div className="space-y-3">
+                            {[...ROLE_CATEGORIES, { key: 'custom', label: 'Mes presets', icon: 'Wrench' as const }].map(cat => {
+                                const list = roles.filter(r => (presets[r].custom ? 'custom' : presets[r].category) === cat.key);
+                                if (list.length === 0) return null;
+                                const Icon = cat.key === 'custom' ? Wrench : CATEGORY_ICONS[cat.icon as keyof typeof CATEGORY_ICONS];
+                                return (
+                                    <div key={cat.key}>
+                                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 uppercase font-semibold mb-1.5">
+                                            <Icon className="w-3.5 h-3.5" /> {cat.label}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {list.map(r => (
+                                                <button
+                                                    key={r}
+                                                    onClick={() => handleRoleChange(r)}
+                                                    title={presets[r].description}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${selectedRole === r ? 'bg-emerald-500 border-emerald-500 text-slate-950 font-semibold' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-white'}`}
+                                                >
+                                                    {r}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
 
                         {selectedRole && (
                             <div className="bg-slate-900 rounded-xl p-4 border border-slate-800 animate-fade-in-down">
                                 <div className="flex justify-between items-center mb-3">
-                                    <span className="text-xs text-slate-400 font-semibold uppercase">Filter Strictness</span>
+                                    <span className="text-xs text-slate-400 font-semibold uppercase">Exigence des filtres</span>
                                     <div className="flex items-center gap-2">
                                         <span className={`text-sm font-mono font-bold ${strictnessMultiplier > 1 ? 'text-red-400' : strictnessMultiplier < 1 ? 'text-emerald-400' : 'text-white'}`}>
                                             {Math.round(strictnessMultiplier * 100)}%
@@ -541,21 +322,21 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                     <button 
                                         onClick={() => adjustStrictness(-0.1)}
                                         className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center gap-1 transition-colors border border-slate-700 hover:border-emerald-500/50"
-                                        title="Lower thresholds by 10%"
+                                        title="Baisser les seuils de 10 %"
                                     >
                                         <Minus className="w-4 h-4" /> 10%
                                     </button>
                                     <button 
                                         onClick={() => setStrictnessMultiplier(1.0)}
                                         className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700 transition-colors"
-                                        title="Reset to base values"
+                                        title="Revenir aux seuils de base"
                                     >
                                         <RefreshCw className="w-4 h-4" />
                                     </button>
                                     <button 
                                         onClick={() => adjustStrictness(0.1)}
                                         className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center gap-1 transition-colors border border-slate-700 hover:border-red-500/50"
-                                        title="Increase thresholds by 10%"
+                                        title="Relever les seuils de 10 %"
                                     >
                                         <Plus className="w-4 h-4" /> 10%
                                     </button>
@@ -565,10 +346,10 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                      </>
                  ) : (
                      <div className="bg-slate-900 rounded-xl p-4 border border-slate-700 space-y-4 animate-fade-in">
-                         <h4 className="text-sm font-bold text-white mb-2">Build Custom Preset</h4>
+                         <h4 className="text-sm font-bold text-white mb-2">Créer un preset</h4>
                          
                          <div>
-                             <label className="text-xs text-slate-500 uppercase font-bold">Preset Name</label>
+                             <label className="text-xs text-slate-500 uppercase font-bold">Nom du preset</label>
                              <input 
                                 type="text" 
                                 className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white mt-1"
@@ -579,7 +360,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                          </div>
 
                          <div>
-                             <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Positions</label>
+                             <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Postes</label>
                              <div className="flex flex-wrap gap-2">
                                  {availablePositions.map(pos => (
                                      <button
@@ -587,19 +368,19 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                         onClick={() => togglePosition(pos)}
                                         className={`text-xs px-2 py-1 rounded border ${newPresetPositions.includes(pos) ? 'bg-emerald-500 border-emerald-500 text-slate-950 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400'}`}
                                      >
-                                         {pos}
+                                         {positionLabel(pos)}
                                      </button>
                                  ))}
                              </div>
                          </div>
 
                          <div>
-                             <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Metrics Thresholds</label>
+                             <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Seuils par métrique</label>
                              <div className="relative mb-2">
                                 <input 
                                     type="text" 
                                     className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-white"
-                                    placeholder="Search metrics to add..."
+                                    placeholder="Rechercher une métrique..."
                                     value={metricSearch}
                                     onChange={(e) => setMetricSearch(e.target.value)}
                                 />
@@ -611,7 +392,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                                 onClick={() => addMetricToPreset(k)}
                                                 className="block w-full text-left px-2 py-1 text-xs text-slate-300 hover:bg-slate-700"
                                             >
-                                                {k}
+                                                {metricLabel(k)}
                                             </button>
                                         ))}
                                     </div>
@@ -622,9 +403,12 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                  {newPresetMetrics.map(m => (
                                      <div key={m.key} className="flex items-center gap-2">
                                          <button onClick={() => removeMetric(m.key)} className="text-slate-500 hover:text-rose-500"><X className="w-3 h-3"/></button>
-                                         <span className="text-xs text-slate-300 truncate flex-1" title={m.key}>{m.key}</span>
+                                         <span className="text-xs text-slate-300 truncate flex-1" title={m.key}>{metricLabel(m.key)}</span>
                                          <input 
                                             type="number" 
+                                            min={0}
+                                            max={99}
+                                            title="Percentile minimum (0-99) parmi le même rôle et le même niveau"
                                             className="w-16 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-xs text-right text-emerald-400"
                                             value={m.value}
                                             onChange={(e) => updateMetricValue(m.key, parseFloat(e.target.value))}
@@ -639,7 +423,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                             disabled={!newPresetName || newPresetPositions.length === 0 || newPresetMetrics.length === 0}
                             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg py-2 text-sm font-bold flex items-center justify-center gap-2 transition-colors"
                          >
-                             <Save className="w-4 h-4" /> Save Preset
+                             <Save className="w-4 h-4" /> Enregistrer le preset
                          </button>
                      </div>
                  )}
@@ -650,30 +434,55 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
             {/* 2. Active Metrics Display */}
             {!isCreatorMode && selectedRole && (
                 <div className="space-y-4">
+                    {presets[selectedRole].description && (
+                        <p className="text-sm text-slate-300">{presets[selectedRole].description}</p>
+                    )}
                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                        <TrendingUp className="w-3 h-3" /> Active Thresholds
+                        <TrendingUp className="w-3 h-3" /> Critères éliminatoires
                     </h3>
                     <div className="space-y-2">
                         {Object.entries(effectiveThresholds).map(([key, val]) => (
                             <div key={key} className="flex justify-between items-center text-xs bg-slate-900/50 p-2 rounded border border-slate-800/50">
-                                <span className="text-slate-400 truncate max-w-[160px]" title={key}>{key}</span>
-                                <span className="text-emerald-400 font-mono font-bold">≥ {val}</span>
+                                <span className="text-slate-400 truncate max-w-[160px]" title={key}>{metricLabel(key)}</span>
+                                <span className="text-emerald-400 font-mono font-bold">≥ P{val}</span>
                             </div>
                         ))}
                     </div>
+                    {presets[selectedRole].weights && (
+                        <>
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2 pt-2">
+                                <Scale className="w-3 h-3" /> Critères de classement
+                            </h3>
+                            <div className="space-y-1.5">
+                                {Object.entries(presets[selectedRole].weights!).map(([key, w]) => (
+                                    <div key={key} className="flex justify-between items-center text-xs px-2">
+                                        <span className="text-slate-400 truncate max-w-[180px]" title={metricLabel(key)}>{metricLabel(key)}</span>
+                                        <span className="text-slate-500 font-mono">{w < 0 ? 'moins = mieux' : `×${w}`}</span>
+                                    </div>
+                                ))}
+                                {presets[selectedRole].midfieldProfiles && (
+                                    <div className="flex justify-between items-center text-xs px-2">
+                                        <span className="text-slate-400">Profil de milieu : {presets[selectedRole].midfieldProfiles!.join(', ')}</span>
+                                        <span className="text-slate-500 font-mono">+{MIDFIELD_PROFILE_BONUS}</span>
+                                    </div>
+                                )}
+                            </div>
+                            <p className="text-[11px] text-slate-500">L'indice du rôle (0-100) est la moyenne pondérée des percentiles de tous ces critères ; il ordonne les résultats.</p>
+                        </>
+                    )}
                 </div>
             )}
 
             {/* 3. General Constraints */}
             <div className="space-y-4 pt-4 border-t border-slate-800">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                    <Filter className="w-3 h-3" /> Constraints
+                    <Filter className="w-3 h-3" /> Contraintes
                 </h3>
                 
                 {/* Age */}
                 <div>
                     <div className="flex justify-between text-sm text-slate-300 mb-2">
-                        <span>Max Age</span>
+                        <span>Âge max</span>
                         <span className="text-emerald-400 font-bold">{ageLimit}</span>
                     </div>
                     <input 
@@ -687,7 +496,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                 {/* Market Value */}
                 <div>
                     <div className="flex justify-between text-sm text-slate-300 mb-2">
-                        <span>Max Value</span>
+                        <span>Valeur max</span>
                         <span className="text-emerald-400 font-bold">{formatCurrency(marketValueLimit)}</span>
                     </div>
                     <input 
@@ -701,7 +510,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                 {/* Minutes Played */}
                 <div>
                     <div className="flex justify-between text-sm text-slate-300 mb-2">
-                        <span>Min Minutes</span>
+                        <span>Minutes min</span>
                         <span className="text-emerald-400 font-bold">{minMinutesPlayed.toLocaleString()}'</span>
                     </div>
                     <input 
@@ -712,15 +521,51 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                     />
                 </div>
 
+                {/* Contract end (Transfermarkt, current season) */}
+                <div>
+                    <label className="text-sm text-slate-300 mb-2 block">Fin de contrat sous</label>
+                    <select
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:ring-emerald-500 focus:border-emerald-500"
+                        value={contractMonths}
+                        onChange={(e) => setContractMonths(Number(e.target.value))}
+                    >
+                        <option value={0}>Indifférent</option>
+                        <option value={6}>6 mois</option>
+                        <option value={12}>12 mois</option>
+                        <option value={18}>18 mois</option>
+                        <option value={24}>24 mois</option>
+                    </select>
+                </div>
+
+                {/* Value vs performance model */}
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={undervaluedOnly}
+                        onChange={(e) => setUndervaluedOnly(e.target.checked)}
+                        className="accent-emerald-500"
+                    />
+                    Sous-coté par le modèle (≥ ×{UNDERVALUED_RATIO})
+                </label>
+
+                {/* Shortcut: young players whose contract is ending */}
+                <button
+                    onClick={() => { setAgeLimit(23); setContractMonths(12); }}
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-400 transition-colors"
+                >
+                    U23 · contrat finissant sous 12 mois
+                </button>
+                <p className="text-[11px] text-slate-500 -mt-2">Les filtres de contrat et de valeur utilisent l'instantané Transfermarkt actuel : ils ne concernent que la saison en cours.</p>
+
                 {/* League */}
                 <div>
-                    <label className="text-sm text-slate-300 mb-2 block">League</label>
+                    <label className="text-sm text-slate-300 mb-2 block">Compétition</label>
                     <select 
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:ring-emerald-500 focus:border-emerald-500"
                         value={selectedLeague}
                         onChange={(e) => setSelectedLeague(e.target.value)}
                     >
-                        <option value="">All Leagues</option>
+                        <option value="">Toutes les compétitions</option>
                         {leagues.map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
                 </div>
@@ -729,7 +574,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
         
         <div className="p-4 bg-slate-950 border-t border-slate-800">
              <div className="bg-slate-900 rounded-lg p-3 flex items-center justify-between border border-slate-800">
-                <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Total Matches</div>
+                <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Joueurs trouvés</div>
                 <div className="text-xl font-bold text-emerald-400">{filteredPlayers.length}</div>
              </div>
         </div>
@@ -740,28 +585,28 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
          
          <div className="p-6 pb-2">
             <div className="flex items-center justify-between mb-2">
-              <h1 className="text-2xl font-bold text-white">Scouting Results</h1>
+              <h1 className="text-2xl font-bold text-white">Résultats</h1>
               {filteredPlayers.length > 0 && (
                 <button
                   onClick={() => exportProspects(filteredPlayers, selectedRole, Object.keys(effectiveThresholds))}
                   className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors text-sm"
                 >
                   <Download className="w-4 h-4" />
-                  Export ({filteredPlayers.length})
+                  Exporter ({filteredPlayers.length})
                 </button>
               )}
             </div>
             <div className="flex flex-wrap gap-2 text-sm text-slate-400 items-center">
                 {selectedRole ? (
                     <>
-                        Searching for <span className="text-emerald-400 font-semibold">{selectedRole.split('(')[0]}</span>
+                        Recherche : <span className="text-emerald-400 font-semibold">{selectedRole}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        Strictness: <span className="text-white font-mono">{Math.round(strictnessMultiplier * 100)}%</span>
+                        Exigence : <span className="text-white font-mono">{Math.round(strictnessMultiplier * 100)}%</span>
                         <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        Positions: <span className="text-slate-300 font-mono">[{presets[selectedRole].positions.join(', ')}]</span>
+                        Postes : <span className="text-slate-300 font-mono">[{presets[selectedRole].positions.map(positionLabel).join(', ')}]</span>
                     </>
                 ) : (
-                    <span>Please select a tactical role from the sidebar to begin searching.</span>
+                    <span>Choisissez un rôle tactique dans le panneau de gauche pour lancer la recherche.</span>
                 )}
             </div>
          </div>
@@ -773,12 +618,12 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                         {selectedRole ? <AlertCircle className="w-10 h-10 text-red-400" /> : <Gem className="w-10 h-10 text-slate-600" />}
                      </div>
                      <h3 className="text-xl font-bold text-white mb-2">
-                         {selectedRole ? "No Players Found" : "Select a Role"}
+                         {selectedRole ? "Aucun joueur trouvé" : "Choisissez un rôle"}
                      </h3>
                      <p className="text-slate-400 max-w-md text-center">
                          {selectedRole 
-                            ? "No players match the current strict thresholds. Try clicking the [-] button to relax the criteria or increasing the age/value limits."
-                            : "Choose a role from the sidebar to automatically apply professional scouting metrics and find hidden gems."}
+                            ? "Aucun joueur ne passe les seuils actuels. Baissez l'exigence avec le bouton [-] ou élargissez l'âge et la valeur."
+                            : "Choisissez un rôle pour appliquer ses seuils et trouver des pépites."}
                      </p>
                 </div>
             ) : (
@@ -789,15 +634,16 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                             <thead className="bg-slate-900 border-b border-slate-800 text-xs uppercase font-semibold text-slate-400">
                                 <tr>
                                     <th className="p-4 w-12 sticky left-0 bg-slate-900 z-10">#</th>
-                                    <th className="p-4 sticky left-12 bg-slate-900 z-10">Player</th>
-                                    <th className="p-4">Age</th>
-                                    <th className="p-4">Pos</th>
+                                    <th className="p-4 sticky left-12 bg-slate-900 z-10">Joueur</th>
+                                    <th className="p-4 text-right" title="Indice du rôle : moyenne pondérée des percentiles des critères">Indice</th>
+                                    <th className="p-4">Âge</th>
+                                    <th className="p-4">Poste</th>
                                     <th className="p-4 text-right">Minutes</th>
-                                    <th className="p-4 text-right">Market Value</th>
+                                    <th className="p-4 text-right">Valeur</th>
                                     {/* Dynamic Metric Headers */}
                                     {Object.keys(effectiveThresholds).map(key => (
-                                        <th key={key} className="p-4 text-emerald-500/80 font-bold text-right" title={key}>
-                                            {key.replace(' per 90', '').replace(', %', ' %').substring(0, 15)}
+                                        <th key={key} className="p-4 text-emerald-500/80 font-bold text-right" title={metricLabel(key)}>
+                                            {metricLabel(key).replace(' par 90', '')}
                                         </th>
                                     ))}
                                     <th className="p-4 text-center">Action</th>
@@ -815,23 +661,27 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                         <td className="p-4 sticky left-12 bg-slate-950 group-hover:bg-slate-900 transition-colors z-10">
                                             <div className="flex items-center gap-3">
                                                 <div className="relative">
-                                                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 border border-slate-700">
+                                                  <div className="relative overflow-hidden w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 border border-slate-700">
                                                       {(player.Player || '??').substring(0, 2).toUpperCase()}
+                                                      <PhotoOverlay src={player.Image} alt={player.Player} />
                                                   </div>
                                                   <div className={`absolute -bottom-1 -right-1 px-1 py-0 rounded text-[7px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text} border ${pSeasonColors.border}`}>
-                                                    {pSeason}
+                                                    {getSeasonShortLabel(pSeason)}
                                                   </div>
                                                 </div>
                                                 <div>
-                                                    <div className="font-bold text-slate-200">{player.Player || 'Unknown'}</div>
-                                                    <div className="text-xs text-slate-500">{player.Team || 'Unknown'}</div>
+                                                    <div className="font-bold text-slate-200">{player.Player || 'Inconnu'}</div>
+                                                    <div className="text-xs text-slate-500"><TeamLine player={player} /></div>
                                                 </div>
                                             </div>
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <span className="font-mono font-bold text-white">{roleIndex(player, presets[selectedRole])}</span>
                                         </td>
                                         <td className="p-4 text-slate-300">{player.Age}</td>
                                         <td className="p-4">
                                             <span className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-xs text-slate-400 font-mono">
-                                                {player.Position}
+                                                {positionLabel(player.Position)}
                                             </span>
                                         </td>
                                         <td className="p-4 text-right font-mono text-slate-400">
@@ -839,11 +689,20 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                         </td>
                                         <td className="p-4 text-right font-mono text-slate-300">
                                             {formatCurrency(Number(player["Market value"]))}
+                                            {typeof player["Estimated value"] === 'number' && Number(player["Market value"]) > 0 && (
+                                              <div className="text-[10px] text-slate-500 font-normal">
+                                                modèle {formatCurrency(player["Estimated value"])} (×{(player["Estimated value"] / Number(player["Market value"])).toFixed(1)})
+                                              </div>
+                                            )}
+                                            {player["Contract expires"] && (
+                                              <div className="text-[10px] text-slate-500 font-normal">jusqu'à {String(player["Contract expires"]).slice(0, 7)}</div>
+                                            )}
                                         </td>
                                         {/* Dynamic Metric Cells */}
                                         {Object.keys(effectiveThresholds).map(key => (
                                             <td key={key} className="p-4 text-right font-mono text-emerald-400 font-medium bg-emerald-500/5">
-                                                {Number(player[key]).toFixed(1)}
+                                                {Number(player[key]).toFixed(2)}
+                                                <span className="ml-1 text-[10px] text-slate-500">P{player[`${key} pct`] ?? '–'}</span>
                                             </td>
                                         ))}
                                         <td className="p-4 text-center">
@@ -855,14 +714,14 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                                                       ? 'bg-yellow-500/20 text-yellow-400'
                                                       : 'hover:bg-yellow-500/10 text-slate-500 hover:text-yellow-400'
                                                   }`}
-                                                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                                                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
                                               >
                                                   <Star className={`w-4 h-4 ${watchlistIds.has(getPlayerSeasonId(player)) ? 'fill-yellow-400' : ''}`} />
                                               </button>
                                               <button 
                                                   onClick={() => onSelectPlayer(player)}
                                                   className="p-2 hover:bg-emerald-500/20 rounded-lg text-slate-400 hover:text-emerald-400 transition-all"
-                                                  title="View Profile"
+                                                  title="Voir la fiche"
                                               >
                                                   <Eye className="w-4 h-4" />
                                               </button>

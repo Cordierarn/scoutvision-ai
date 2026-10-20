@@ -1,21 +1,33 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PlayerData, ShotEvent, extractSeason, getSeasonColor } from '../types';
-import { ArrowLeft, Sparkles, Trophy, Target, Activity, MapPin, Footprints, Ruler, FileText, Download, Share2, Settings2, X, Check, Search, Plus, Award, ChevronRight, Layout, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
+import { PlayerData, extractSeason, getSeasonColor, getPlayerSeason, getSeasonShortLabel } from '../types';
+import { useShots } from '../hooks/useShots';
+import PlayerHeatmap from './PlayerHeatmap';
+import { metricLabel, positionName, roleLabel, styleLabel, footLabel, shotResultLabel, shotTypeLabel } from '../utils/labels';
+import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsights';
+import { dataLoader } from '../services/dataLoader';
+import { ArrowLeft, Sparkles, Trophy, Target, Activity, MapPin, Footprints, Ruler, FileText, Download, Share2, Settings2, X, Check, Search, Plus, Award, ChevronRight, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, Legend } from 'recharts';
 import { generateScoutReport } from '../services/geminiService';
 import { getBestRoles } from '../utils/scoringUtils';
-import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel } from '../utils/positionMetrics';
+import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { getFlagUrl } from '../utils/flags';
+import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
 
 interface PlayerCardProps {
   player: PlayerData;
   onBack: () => void;
   allPlayers: PlayerData[];
-  shotEvents: ShotEvent[];
 }
+
+/**
+ * Même joueur (identifiant PitchAPI, repli sur le nom)
+ */
+const isSamePlayer = (a: PlayerData, b: PlayerData): boolean =>
+  a['Player ID'] && b['Player ID'] ? a['Player ID'] === b['Player ID'] : a.Player === b.Player;
 
 type ComparisonMode = 'all' | 'position' | 'league' | 'position_league';
 
@@ -23,56 +35,20 @@ type ComparisonMode = 'all' | 'position' | 'league' | 'position_league';
 
 // Labels for comparison modes
 const COMPARISON_LABELS: Record<ComparisonMode, string> = {
-  all: 'vs All Players',
-  position: 'vs Same Position',
-  league: 'vs Same League',
-  position_league: 'vs Position in League'
+  all: 'vs tous les joueurs',
+  position: 'vs même poste',
+  league: 'vs même compétition',
+  position_league: 'vs même poste et compétition'
 };
 
 const COMPARISON_SHORT_LABELS: Record<ComparisonMode, string> = {
-  all: 'All',
-  position: 'Position',
-  league: 'League',
-  position_league: 'Pos+League'
+  all: 'Tous',
+  position: 'Poste',
+  league: 'Compét.',
+  position_league: 'Poste+compét.'
 };
 
-// Coordinate mapping for the positional pitch view
-// All values are percentages { top, left }
-const POS_COORDS: Record<string, { top: string, left: string }> = {
-    // Goalkeeper
-    'GK': { top: '90%', left: '50%' },
-    
-    // Defenders
-    'CB': { top: '80%', left: '50%' },
-    'LCB': { top: '80%', left: '35%' },
-    'RCB': { top: '80%', left: '65%' },
-    'LB': { top: '75%', left: '15%' },
-    'RB': { top: '75%', left: '85%' },
-    'LWB': { top: '65%', left: '10%' },
-    'RWB': { top: '65%', left: '90%' },
-    
-    // Midfielders
-    'DMF': { top: '65%', left: '50%' },
-    'LDMF': { top: '65%', left: '40%' },
-    'RDMF': { top: '65%', left: '60%' },
-    'CMF': { top: '50%', left: '50%' },
-    'LCMF': { top: '50%', left: '35%' },
-    'RCMF': { top: '50%', left: '65%' },
-    'AMF': { top: '35%', left: '50%' },
-    'LAMF': { top: '35%', left: '35%' },
-    'RAMF': { top: '35%', left: '65%' },
-    
-    // Forwards
-    'LW': { top: '25%', left: '15%' },
-    'LWF': { top: '25%', left: '15%' },
-    'RW': { top: '25%', left: '85%' },
-    'RWF': { top: '25%', left: '85%' },
-    'SS': { top: '25%', left: '50%' },
-    'CF': { top: '15%', left: '50%' },
-    'ST': { top: '15%', left: '50%' }
-};
-
-const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, shotEvents }) => {
+const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) => {
   const [report, setReport] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('position');
@@ -105,22 +81,42 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
   }, [player]);
 
   // US-05: Find same player in other seasons for evolution tracking
+  // La saison précédente est chargée à la demande (une seule saison est en mémoire)
+  const [previousSeasonRows, setPreviousSeasonRows] = useState<PlayerData[]>([]);
+  useEffect(() => {
+    const seasons = dataLoader.getCachedIndex()?.seasons.map(s => s.id) ?? [];
+    const previous = seasons[seasons.indexOf(getPlayerSeason(player)) - 1];
+    setPreviousSeasonRows([]);
+    if (!previous) return;
+
+    let cancelled = false;
+    dataLoader.loadSeason(previous)
+      .then(data => {
+        if (!cancelled) setPreviousSeasonRows(data.players.filter(p => isSamePlayer(p, player)));
+      })
+      .catch(err => console.warn('Saison précédente indisponible :', err));
+    return () => { cancelled = true; };
+  }, [player]);
+
   const playerSeasons = useMemo(() => {
-    const currentSeason = extractSeason(player.League);
+    const currentSeason = getPlayerSeason(player);
     
-    // Find all versions of this player (same name, same team or different team)
-    const samePlayer = allPlayers.filter(p => 
-      p.Player === player.Player && 
-      extractSeason(p.League) !== currentSeason
-    );
+    // Other seasons of the same player, one row per season (the one with most minutes)
+    const bySeason = new Map<string, PlayerData>();
+    [...allPlayers.filter(p => isSamePlayer(p, player)), ...previousSeasonRows].forEach(p => {
+      const season = getPlayerSeason(p);
+      if (season === currentSeason) return;
+      const kept = bySeason.get(season);
+      if (!kept || (Number(p["Minutes played"]) || 0) > (Number(kept["Minutes played"]) || 0)) {
+        bySeason.set(season, p);
+      }
+    });
     
     // Return sorted by season (most recent first)
-    return [player, ...samePlayer].sort((a, b) => {
-      const seasonA = extractSeason(a.League);
-      const seasonB = extractSeason(b.League);
-      return seasonB.localeCompare(seasonA);
-    });
-  }, [player, allPlayers]);
+    return [player, ...bySeason.values()].sort((a, b) =>
+      getPlayerSeason(b).localeCompare(getPlayerSeason(a))
+    );
+  }, [player, allPlayers, previousSeasonRows]);
 
   // Calculate evolution data if we have multiple seasons
   const evolutionData = useMemo(() => {
@@ -139,7 +135,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
       
       return {
         metric: key,
-        shortMetric: key.length > 20 ? key.substring(0, 17) + '...' : key,
+        shortMetric: metricLabel(key),
         current: currentVal,
         previous: previousVal,
         diff,
@@ -152,32 +148,25 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
   // Available Numeric Keys
   const availableMetrics = useMemo(() => {
     if (!player) return [];
-    return Object.keys(player).filter(key => 
-      typeof player[key] === 'number' && 
-      !['Age', 'Market value', 'Height', 'Weight', 'Matches played', 'Minutes played'].includes(key)
-    ).sort();
+    return getMetricKeys([player]);
   }, [player]);
 
   // Calculate Best Roles (US-09)
+  // Métriques clés du rôle pour la projection à un an
+  const developmentMetrics = useMemo(() =>
+    [...getRadarMetricsForPosition(player.Position), 'Rating'], [player.Position]);
+
   const bestRoles = useMemo(() => {
     return getBestRoles(player, allPlayers);
   }, [player, allPlayers]);
 
-  // Parse Positions for Pitch Visualization
-  const positionAnalysis = useMemo(() => {
-     const raw = player.Position || "";
-     const parts = raw.split(',').map(s => s.trim());
-     return {
-         primary: parts[0],
-         secondary: parts.slice(1)
-     };
-  }, [player]);
-
   // Shot Map Data
+  const { shots: competitionShots } = useShots(getPlayerSeason(player), player.Competition);
   const playerShots = useMemo(() => {
-    if (!shotEvents) return [];
-    return shotEvents.filter(s => s.player === player.Player);
-  }, [shotEvents, player]);
+    return competitionShots.filter(s => player['Player ID']
+      ? s.player_id === player['Player ID']
+      : s.player === player.Player);
+  }, [competitionShots, player]);
 
   const shotStats = useMemo(() => {
     const total = playerShots.length;
@@ -211,15 +200,15 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
     const count = cohort.length;
     switch (comparisonMode) {
       case 'position':
-        return `${count} ${player.Position}s worldwide`;
+        return `${count} ${positionName(player.Position).toLowerCase()}s, toutes compétitions`;
       case 'league':
-        const leagueName = player.League?.split(' ').slice(0, -1).join(' ') || 'League';
-        return `${count} players in ${leagueName}`;
+        const leagueName = player.League?.split(' ').slice(0, -1).join(' ') || 'la compétition';
+        return `${count} joueurs en ${leagueName}`;
       case 'position_league':
-        const league = player.League?.split(' ').slice(0, -1).join(' ') || 'League';
-        return `${count} ${player.Position}s in ${league}`;
+        const league = player.League?.split(' ').slice(0, -1).join(' ') || 'la compétition';
+        return `${count} ${positionName(player.Position).toLowerCase()}s en ${league}`;
       default:
-        return `${count} players total`;
+        return `${count} joueurs au total`;
     }
   }, [cohort, comparisonMode, player]);
 
@@ -244,7 +233,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
       const rank = values.length - countBelow;
 
       // Dynamic label creation
-      const label = key.length > 15 ? key.substring(0, 12) + '..' : key;
+      const label = metricLabel(key);
 
       return {
         subject: label,
@@ -254,7 +243,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
         rawValue: val,
         cohortSize: values.length,
         rank: rank,
-        topPercent: Math.round((rank / values.length) * 100)
+        topPercent: Math.max(1, Math.round((rank / values.length) * 100))
       };
     });
   }, [player, cohort, activeMetrics]);
@@ -275,7 +264,24 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
 
   const handleGenerateReport = async () => {
     setLoadingReport(true);
-    const text = await generateScoutReport(player);
+    const curves = await dataLoader.loadAgeCurves().catch(() => null);
+    const percentiles = Object.fromEntries(
+      Object.entries(player)
+        .filter(([key, value]) => key.endsWith(' pct') && typeof value === 'number')
+        .map(([key, value]) => [key.slice(0, -4), value as number]));
+    const text = await generateScoutReport(player, {
+      language: 'fr',
+      percentileProfile: { player, percentiles, zScores: {}, averages: {} },
+      bestRoles,
+      shotStats: {
+        ...shotStats, xGDiff: shotStats.goals - shotStats.xG,
+        onTarget: playerShots.filter(s => s.result === 'Goal' || s.result === 'SavedShot').length,
+        blocked: playerShots.filter(s => s.result === 'BlockedShot').length,
+        conversion: shotStats.total > 0 ? (shotStats.goals / shotStats.total) * 100 : 0,
+        avgXG: shotStats.total > 0 ? shotStats.xG / shotStats.total : 0,
+      },
+      insights: buildReportInsights(player, curves, developmentMetrics),
+    });
     setReport(text);
     setLoadingReport(false);
   };
@@ -319,8 +325,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
 
       pdf.save(`${player.Player}_ScoutReport.pdf`);
     } catch (error) {
-      console.error('PDF Export failed:', error);
-      alert('Failed to export PDF');
+      console.error('Échec de l\'export PDF :', error);
+      alert('Échec de l\'export PDF');
     } finally {
       setIsExporting(false);
     }
@@ -346,7 +352,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
             onClick={onBack}
             className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
         >
-            <ArrowLeft className="w-4 h-4" /> Back to list
+            <ArrowLeft className="w-4 h-4" /> Retour à la liste
         </button>
 
         <button
@@ -359,7 +365,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
             ) : (
                 <Download className="w-4 h-4 text-emerald-400" />
             )}
-            <span>{isExporting ? 'Exporting...' : 'Export PDF'}</span>
+            <span>{isExporting ? 'Export en cours...' : 'Exporter en PDF'}</span>
         </button>
       </div>
 
@@ -377,11 +383,12 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
               const seasonColors = getSeasonColor(playerSeason);
               return (
                 <div className="relative">
-                  <div className="w-32 h-32 lg:w-40 lg:h-40 bg-slate-800 rounded-2xl flex items-center justify-center shadow-2xl border-2 border-emerald-500/30 text-slate-300">
+                  <div className="relative overflow-hidden w-32 h-32 lg:w-40 lg:h-40 bg-slate-800 rounded-2xl flex items-center justify-center shadow-2xl border-2 border-emerald-500/30 text-slate-300">
                      <span className="text-4xl font-bold">{(player.Player || '??').substring(0, 2).toUpperCase()}</span>
+                     <PhotoOverlay src={player.Image} alt={player.Player} />
                   </div>
                   <div className={`absolute -bottom-2 -right-2 px-3 py-1 rounded-lg text-sm font-bold ${seasonColors.bg} ${seasonColors.text} border ${seasonColors.border} shadow-lg`}>
-                    {playerSeason}
+                    {getSeasonShortLabel(playerSeason)}
                   </div>
                 </div>
               );
@@ -392,34 +399,57 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                   <div>
                     <h1 className="text-4xl lg:text-5xl font-bold text-white tracking-tight mb-2">{player.Player}</h1>
                     <div className="flex items-center gap-4 text-slate-300">
-                        <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700"><Trophy className="w-3.5 h-3.5 text-emerald-400"/> {player.Team}</span>
-                        <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700"><MapPin className="w-3.5 h-3.5 text-emerald-400"/> {player["Passport country"] || 'Unknown'}</span>
+                        <span className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700"><TeamLogo src={player['Team logo']} name={player.Team} size="xs" /> {player.Team}</span>
+                        <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700 text-sm"><CompetitionBadge competition={player.Competition} /></span>
+                        <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700">{getFlagUrl(player["Passport country"]) ? <CountryFlag code={player["Passport country"]} /> : <MapPin className="w-3.5 h-3.5 text-emerald-400"/>} {player["Passport country"] || 'Inconnue'}</span>
+                        {player["Team style"] && (
+                          <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700 text-sm" title="Style de jeu de l'équipe cette saison (ACP + k-means sur les indicateurs d'équipe)">
+                            {styleLabel(player["Team style"])}
+                          </span>
+                        )}
                     </div>
+                    {/* Profil Transfermarkt : taille, pied, fin de contrat */}
+                    {(player.Height || player.Foot || player["Contract expires"]) && (
+                      <div className="flex items-center gap-3 mt-3 text-sm text-slate-400">
+                        {typeof player.Height === 'number' && (
+                          <span className="flex items-center gap-1"><Ruler className="w-3.5 h-3.5 text-slate-500" /> {player.Height} cm</span>
+                        )}
+                        {player.Foot && (
+                          <span className="flex items-center gap-1"><Footprints className="w-3.5 h-3.5 text-slate-500" /> pied {footLabel(player.Foot)}</span>
+                        )}
+                        {player["Contract expires"] && (
+                          <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-slate-500" /> Contrat jusqu'au {player["Contract expires"]}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="text-right p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 backdrop-blur-sm">
-                     <div className="text-xs text-emerald-300 uppercase tracking-wider font-bold mb-1">Market Value</div>
+                     <div className="text-xs text-emerald-300 uppercase tracking-wider font-bold mb-1">Valeur marchande</div>
                      <div className="text-3xl font-mono text-white font-bold tracking-tighter">
                         {typeof player["Market value"] === 'number' ? formatCurrency(player["Market value"]) : 'N/A'}
+                     </div>
+                     <div className="text-[10px] text-slate-500 mt-1">
+                        {typeof player["Market value"] === 'number' ? 'Transfermarkt, actuelle' : 'Saison en cours seulement'}
                      </div>
                   </div>
                </div>
 
                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
                   <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Ruler className="w-3 h-3"/> Height</div>
-                     <div className="text-lg font-bold text-slate-200">{player.Height} <span className="text-xs text-slate-500 font-normal">cm</span></div>
+                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Ruler className="w-3 h-3"/> Minutes</div>
+                     <div className="text-lg font-bold text-slate-200">{player["Minutes played"]} <span className="text-xs text-slate-500 font-normal">{typeof player["Minutes share"] === 'number' ? `${Math.round(player["Minutes share"] * 100)}% de l'équipe` : ''}</span></div>
                   </div>
                    <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Activity className="w-3 h-3"/> Weight</div>
-                     <div className="text-lg font-bold text-slate-200">{player.Weight} <span className="text-xs text-slate-500 font-normal">kg</span></div>
+                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Activity className="w-3 h-3"/> Matchs</div>
+                     <div className="text-lg font-bold text-slate-200">{player["Matches played"]} <span className="text-xs text-slate-500 font-normal">{player.Starts ?? 0} titularisations</span></div>
                   </div>
                    <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Footprints className="w-3 h-3"/> Foot</div>
-                     <div className="text-lg font-bold text-slate-200">{player.Foot}</div>
+                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Footprints className="w-3 h-3"/> Note</div>
+                     <div className="text-lg font-bold text-slate-200">{typeof player.Rating === 'number' ? player.Rating.toFixed(2) : 'N/A'} <span className="text-xs text-slate-500 font-normal">{typeof player["Rating pct"] === 'number' ? `P${player["Rating pct"]}` : ''}</span></div>
                   </div>
                   <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Target className="w-3 h-3"/> Age</div>
-                     <div className="text-lg font-bold text-slate-200">{player.Age} <span className="text-xs text-slate-500 font-normal">yrs</span></div>
+                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Target className="w-3 h-3"/> Âge</div>
+                     <div className="text-lg font-bold text-slate-200">{player.Age ?? 'N/A'} <span className="text-xs text-slate-500 font-normal">{player.Age !== undefined ? 'ans' : ''}</span></div>
                   </div>
                </div>
             </div>
@@ -435,18 +465,18 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
             <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col relative overflow-hidden group">
                 <div className="flex items-center justify-between mb-2 relative z-10">
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Activity className="w-5 h-5 text-emerald-500" /> Performance Profile
+                        <Activity className="w-5 h-5 text-emerald-500" /> Profil de performance
                     </h3>
                     <div className="flex items-center gap-2">
                         <button 
                             onClick={() => setShowMetricConfig(!showMetricConfig)}
                             className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors border border-transparent hover:border-slate-700"
-                            title="Configure Metrics"
+                            title="Choisir les métriques"
                         >
                             <Settings2 className="w-4 h-4" />
                         </button>
                         <div className="text-xs font-medium px-2 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800">
-                            vs {comparisonMode}
+                            {COMPARISON_LABELS[comparisonMode]}
                         </div>
                     </div>
                 </div>
@@ -455,7 +485,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                 {showMetricConfig && (
                     <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-sm p-4 flex flex-col animate-fade-in">
                         <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
-                            <h4 className="text-sm font-bold text-white">Select Metrics</h4>
+                            <h4 className="text-sm font-bold text-white">Choisir les métriques</h4>
                             <button onClick={() => setShowMetricConfig(false)} className="text-slate-400 hover:text-white">
                                 <X className="w-5 h-5" />
                             </button>
@@ -465,7 +495,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                             <input 
                                 type="text" 
-                                placeholder="Search..." 
+                                placeholder="Rechercher..." 
                                 className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white"
                                 value={metricSearch}
                                 onChange={(e) => setMetricSearch(e.target.value)}
@@ -485,7 +515,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                                             : 'hover:bg-slate-900 text-slate-400'
                                         }`}
                                     >
-                                        <span className="truncate pr-2">{key}</span>
+                                        <span className="truncate pr-2">{metricLabel(key)}</span>
                                         {activeMetrics.includes(key) && <Check className="w-3 h-3 shrink-0" />}
                                     </button>
                                 ))
@@ -493,7 +523,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                         </div>
                         
                         <div className="mt-4 pt-2 border-t border-slate-800 text-center">
-                            <span className="text-[10px] text-slate-500">{activeMetrics.length} / 12 metrics selected</span>
+                            <span className="text-[10px] text-slate-500">{activeMetrics.length} / 12 métriques choisies</span>
                         </div>
                     </div>
                 )}
@@ -527,7 +557,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                     'bg-slate-500/20 text-slate-400'
                   }`}>
                     <BarChart3 className="w-3 h-3" />
-                    Top {100 - averagePercentile}%
+                    Top {Math.max(1, 100 - averagePercentile)}%
                   </div>
                 </div>
                 
@@ -591,14 +621,14 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                                 contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.5rem', color: '#f8fafc', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
                                 itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
                                 labelStyle={{ color: '#94a3b8', marginBottom: '0.25rem', fontSize: '12px', textTransform: 'uppercase' }}
-                                formatter={(value: number, name: string, props: any) => [`${value} (Raw: ${props.payload.rawValue})`, 'Percentile Rank']}
+                                formatter={(value: number, name: string, props: any) => [`${value} (valeur : ${props.payload.rawValue})`, 'Percentile']}
                             />
                         </RadarChart>
                     </ResponsiveContainer>
                 </div>
                 
                 <div className="mt-2 text-center">
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest">Cohort Size: {cohort.length} players</p>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest">Groupe de comparaison : {cohort.length} joueurs</p>
                 </div>
             </div>
 
@@ -607,7 +637,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
               <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-blue-400" /> Season Evolution
+                    <TrendingUp className="w-5 h-5 text-blue-400" /> Évolution sur la saison
                   </h3>
                   <div className="flex items-center gap-2">
                     {playerSeasons.slice(0, 2).map((ps, idx) => {
@@ -615,7 +645,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                       const colors = getSeasonColor(season);
                       return (
                         <span key={season} className={`px-2 py-1 rounded text-[10px] font-bold ${colors.bg} ${colors.text} border ${colors.border}`}>
-                          {season}
+                          {getSeasonShortLabel(season)}
                         </span>
                       );
                     })}
@@ -671,10 +701,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                 {/* Summary */}
                 <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between">
                   <div className="text-xs text-slate-500">
-                    Comparing {extractSeason(playerSeasons[1].League)} → {extractSeason(playerSeasons[0].League)}
+                    Comparaison {extractSeason(playerSeasons[1].League)} → {extractSeason(playerSeasons[0].League)}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-slate-500">Improved:</span>
+                    <span className="text-[10px] text-slate-500">En progrès :</span>
                     <span className="text-xs font-bold text-emerald-400">
                       {evolutionData.filter(e => e.trend === 'up').length}/{evolutionData.length}
                     </span>
@@ -687,70 +717,24 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
             {playerSeasons.length < 2 && (
               <div className="bg-slate-950/50 border border-slate-800/50 border-dashed rounded-3xl p-6 text-center">
                 <TrendingUp className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                <p className="text-sm text-slate-500">Season evolution unavailable</p>
-                <p className="text-xs text-slate-600">Only one season of data found for this player</p>
+                <p className="text-sm text-slate-500">Évolution indisponible</p>
+                <p className="text-xs text-slate-600">Une seule saison disponible pour ce joueur</p>
               </div>
             )}
 
-            {/* Positional Map (Mini Pitch) */}
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">
-                 <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                     <Layout className="w-5 h-5 text-emerald-400" /> Positional Versatility
-                 </h3>
-                 <div className="relative w-full aspect-[2/3] bg-emerald-900/30 rounded-xl border border-white/10 overflow-hidden">
-                     {/* Pitch Lines */}
-                     <div className="absolute inset-4 border border-white/20 rounded-lg"></div>
-                     <div className="absolute top-1/2 left-0 right-0 h-px bg-white/20"></div>
-                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full border border-white/20"></div>
-                     <div className="absolute top-4 left-1/2 -translate-x-1/2 w-20 h-10 border-b border-x border-white/20 rounded-b-sm"></div>
-                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-20 h-10 border-t border-x border-white/20 rounded-t-sm"></div>
+            {/* Heatmap of the season */}
+            <PlayerHeatmap player={player} />
 
-                     {/* Primary Position */}
-                     {POS_COORDS[positionAnalysis.primary] && (
-                        <div 
-                            className="absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20"
-                            style={{ top: POS_COORDS[positionAnalysis.primary].top, left: POS_COORDS[positionAnalysis.primary].left }}
-                        >
-                            <div className="w-6 h-6 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] border-2 border-white animate-pulse"></div>
-                            <span className="mt-1 px-2 py-0.5 bg-slate-950/80 rounded text-[10px] font-bold text-white">{positionAnalysis.primary}</span>
-                        </div>
-                     )}
-
-                     {/* Secondary Positions */}
-                     {positionAnalysis.secondary.map(pos => {
-                        const coords = POS_COORDS[pos];
-                        if (!coords) return null;
-                        return (
-                            <div 
-                                key={pos}
-                                className="absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10"
-                                style={{ top: coords.top, left: coords.left }}
-                            >
-                                <div className="w-3 h-3 rounded-full bg-yellow-400 border border-slate-900"></div>
-                                <span className="mt-1 px-1.5 py-0.5 bg-slate-950/80 rounded text-[9px] font-semibold text-slate-300">{pos}</span>
-                            </div>
-                        );
-                     })}
-                 </div>
-                 <div className="mt-4 flex justify-center gap-4 text-xs">
-                     <div className="flex items-center gap-2">
-                         <div className="w-3 h-3 rounded-full bg-emerald-500 border border-white"></div>
-                         <span className="text-slate-400">Primary</span>
-                     </div>
-                     <div className="flex items-center gap-2">
-                         <div className="w-2 h-2 rounded-full bg-yellow-400 border border-slate-900"></div>
-                         <span className="text-slate-400">Secondary</span>
-                     </div>
-                 </div>
-            </div>
+            {/* Age curve and one-year projection */}
+            <DevelopmentPanel player={player} metrics={developmentMetrics} />
 
             {/* US-09: Suggested Roles */}
             <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl break-inside-avoid">
                  <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                     <Award className="w-5 h-5 text-purple-400" /> Best Tactical Fit
+                     <Award className="w-5 h-5 text-purple-400" /> Meilleurs rôles
                  </h3>
                  <p className="text-xs text-slate-500 mb-4">
-                    Based on normalized data analysis across all leagues. Recommended for repositioning.
+                    Moyenne pondérée des percentiles du rôle, parmi les joueurs du même poste et du même niveau.
                  </p>
                  <div className="space-y-3">
                      {bestRoles.map((role, idx) => (
@@ -764,7 +748,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                              <div className="flex justify-between items-center relative z-10">
                                  <div className="flex items-center gap-3">
                                      <div className="text-xs font-bold text-slate-600 w-4">{idx + 1}</div>
-                                     <span className="font-semibold text-slate-200 text-sm">{role.role}</span>
+                                     <span className="font-semibold text-slate-200 text-sm">{roleLabel(role.role)}</span>
                                  </div>
                                  <div className="flex items-center gap-2">
                                      <div className={`text-sm font-bold px-2 py-0.5 rounded text-slate-950 ${getRoleColor(role.normalizedScore)}`}>
@@ -780,13 +764,16 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
 
         {/* Right Column: AI Scout Report & Shot Map */}
         <div className="lg:col-span-2 flex flex-col gap-6">
+
+            {/* RAPM, finishing, pass network, value vs performance */}
+            <ImpactPanel player={player} />
             
             {/* AI Scout Report */}
             <div className="bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-xl flex flex-col">
                 <div className="flex items-center justify-between mb-6 pb-6 border-b border-slate-800">
                     <h3 className="text-xl font-bold text-white flex items-center gap-3">
                         <FileText className="w-6 h-6 text-purple-400" /> 
-                        <span>AI Scout Analysis</span>
+                        <span>Rapport de scouting IA</span>
                     </h3>
                     {!report && (
                         <button 
@@ -797,12 +784,12 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                         {loadingReport ? (
                             <>
                                 <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-                                Analyzing Data...
+                                Analyse en cours...
                             </>
                         ) : (
                             <>
                                 <Sparkles className="w-4 h-4" />
-                                Generate Full Report
+                                Générer le rapport
                             </>
                         )}
                     </button>
@@ -827,7 +814,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                             </ReactMarkdown>
                             
                             <div className="mt-8 pt-6 border-t border-slate-800 flex items-center justify-between text-xs text-slate-500">
-                                <span>Generated by Gemini 2.5 Flash</span>
+                                <span>Généré par Gemini 2.5 Flash</span>
                                 <span>{new Date().toLocaleDateString()}</span>
                             </div>
                         </div>
@@ -840,10 +827,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                                 </div>
                             </div>
                             <div className="text-center max-w-sm space-y-3">
-                                <h4 className="text-white font-bold text-lg">Detailed Scouting Report</h4>
+                                <h4 className="text-white font-bold text-lg">Rapport de scouting détaillé</h4>
                                 <p className="text-sm leading-relaxed">
-                                    Uses advanced LLM analysis to interpret stats into football language.
-                                    <br/>Includes: <span className="text-emerald-400">Tactical Role</span>, <span className="text-emerald-400">Strength Profiling</span>, and <span className="text-emerald-400">Future Projection</span>.
+                                    Un modèle de langage traduit les statistiques en langage football.
+                                    <br/>Contient : <span className="text-emerald-400">rôle tactique</span>, <span className="text-emerald-400">forces et faiblesses</span> et <span className="text-emerald-400">projection</span>.
                                 </p>
                             </div>
                         </div>
@@ -856,11 +843,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                 <div className="flex items-center justify-between mb-6 pb-6 border-b border-slate-800">
                     <h3 className="text-xl font-bold text-white flex items-center gap-3">
                         <Crosshair className="w-6 h-6 text-red-400" /> 
-                        <span>Season Shot Map</span>
+                        <span>Carte des tirs de la saison</span>
                     </h3>
                     <div className="flex gap-4">
                         <div className="text-center">
-                            <div className="text-[10px] uppercase text-slate-500 font-bold">Goals</div>
+                            <div className="text-[10px] uppercase text-slate-500 font-bold">Buts</div>
                             <div className="text-lg font-bold text-emerald-400">{shotStats.goals}</div>
                         </div>
                         <div className="text-center">
@@ -868,7 +855,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                             <div className="text-lg font-bold text-blue-400">{shotStats.xG.toFixed(2)}</div>
                         </div>
                         <div className="text-center">
-                            <div className="text-[10px] uppercase text-slate-500 font-bold">Shots</div>
+                            <div className="text-[10px] uppercase text-slate-500 font-bold">Tirs</div>
                             <div className="text-lg font-bold text-white">{shotStats.total}</div>
                         </div>
                     </div>
@@ -912,16 +899,16 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                                     
                                     {/* Tooltip */}
                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 bg-slate-900/90 text-[10px] text-white p-2 rounded hidden group-hover:block z-50 pointer-events-none">
-                                        <div className="font-bold">{shot.result}</div>
+                                        <div className="font-bold">{shotResultLabel(shot.result)}</div>
                                         <div>xG: {shot.xG.toFixed(2)}</div>
-                                        <div>Min: {shot.minute}'</div>
-                                        <div>Type: {shot.shotType}</div>
+                                        <div>Minute : {shot.minute}'</div>
+                                        <div>Surface : {shotTypeLabel(shot.shotType)}</div>
                                     </div>
                                 </div>
                             );
                         }) : (
                             <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-white/30 text-sm font-medium">No shot data available for this player.</span>
+                                <span className="text-white/30 text-sm font-medium">Aucune donnée de tir pour ce joueur.</span>
                             </div>
                         )}
                     </div>
@@ -929,13 +916,13 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
                  {/* Legend */}
                  <div className="mt-4 flex justify-center gap-6">
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="w-3 h-3 rounded-full bg-emerald-500"></div> Goal
+                        <div className="w-3 h-3 rounded-full bg-emerald-500"></div> But
                     </div>
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="w-3 h-3 rounded-full bg-blue-500"></div> Saved
+                        <div className="w-3 h-3 rounded-full bg-blue-500"></div> Arrêté
                     </div>
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="w-3 h-3 rounded-full bg-red-500"></div> Missed/Blocked
+                        <div className="w-3 h-3 rounded-full bg-red-500"></div> Manqué ou contré
                     </div>
                  </div>
             </div>
@@ -946,14 +933,14 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers, sho
       {/* Detailed Stat Grid (Compact for Print) */}
       <div className="bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-xl break-inside-avoid">
           <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-             <Share2 className="w-5 h-5 text-emerald-500" /> Complete Metrics
+             <Share2 className="w-5 h-5 text-emerald-500" /> Toutes les métriques
           </h3>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {Object.entries(player).map(([key, value]) => {
-                if (['Player','Team','Position','Passport country', 'League', 'Foot', 'Height', 'Weight'].includes(key) || typeof value === 'object') return null;
+                if (!isMetricKey(key, value)) return null;
                 return (
                     <div key={key} className="bg-slate-900/50 p-3 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
-                        <div className="text-[10px] text-slate-500 uppercase font-semibold truncate mb-1" title={key}>{key}</div>
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold truncate mb-1" title={metricLabel(key)}>{metricLabel(key)}</div>
                         <div className="text-sm font-mono text-slate-200 font-bold">
                             {typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value}
                         </div>
