@@ -35,3 +35,12 @@ data/*.csv
 
 # Old project folders
 ScoutVisonV2/
+
+# Données générées par scripts/prepare_data.py (source privée PitchApi-big-5)
+.cache/
+public/data/*
+!public/data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc

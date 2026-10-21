@@ -1,8 +1,11 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId } from '../types';
+import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
 import { Search, X, Settings2, Plus, TrendingUp, Percent, Check, Users, Trash2, Calendar, ArrowRight } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, Tooltip } from 'recharts';
 import { queryService } from '../services/queryService';
+import { getMetricKeys } from '../utils/positionMetrics';
+import { metricLabel, positionLabel } from '../utils/labels';
+import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
 
 interface PlayerComparisonProps {
   data: PlayerData[];
@@ -34,10 +37,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
   // Filter numeric keys
   const numericKeys = useMemo(() => {
     if (data.length === 0) return [];
-    return Object.keys(data[0]).filter(key => 
-      typeof data[0][key] === 'number' && 
-      !['Age', 'Market value', 'Height', 'Weight', 'Matches played', 'Minutes played'].includes(key)
-    ).sort();
+    return getMetricKeys(data);
   }, [data]);
 
   const searchResults = useMemo(() => {
@@ -85,7 +85,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
 
     return selectedMetrics.map(key => {
         const item: any = {
-            subject: key.length > 15 ? key.substring(0, 12) + '..' : key,
+            subject: metricLabel(key),
             fullSubject: key,
             fullMark: 100
         };
@@ -108,8 +108,8 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
       
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-           <h1 className="text-3xl font-bold text-white mb-1">Multi-Player Comparison</h1>
-           <p className="text-slate-400">Compare up to 4 players simultaneously ({selectedPlayers.length}/4 selected).</p>
+           <h1 className="text-3xl font-bold text-white mb-1">Comparaison de joueurs</h1>
+           <p className="text-slate-400">Comparez jusqu'à 4 joueurs ({selectedPlayers.length}/4 choisis).</p>
         </div>
         
         {selectedPlayers.length > 0 && (
@@ -119,7 +119,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                   className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'raw' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   <TrendingUp className="w-4 h-4" />
-                  Raw
+                  Valeurs
                 </button>
                 <button 
                   onClick={() => setViewMode('percentile')}
@@ -153,28 +153,29 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
 
                <div className="flex items-center gap-3">
                   <div className="relative">
-                    <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-lg font-bold text-slate-400">
+                    <div className="relative overflow-hidden w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-lg font-bold text-slate-400">
                        {(player.Player || '??').substring(0, 2).toUpperCase()}
+                       <PhotoOverlay src={player.Image} alt={player.Player} />
                     </div>
                     {/* Season Badge */}
                     <div className={`absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${seasonColors.bg} ${seasonColors.text} border ${seasonColors.border}`}>
-                      {season}
+                      {getSeasonShortLabel(season)}
                     </div>
                   </div>
                   <div className="min-w-0">
-                     <h3 className="font-bold text-slate-200 truncate pr-4">{player.Player || 'Unknown'}</h3>
-                     <p className="text-xs text-slate-500 truncate">{player.Team || 'Unknown'}</p>
+                     <h3 className="font-bold text-slate-200 truncate pr-4">{player.Player || 'Inconnu'}</h3>
+                     <p className="text-xs text-slate-500 truncate"><TeamLine player={player} /></p>
                   </div>
                </div>
 
                <div className="grid grid-cols-2 gap-2 mt-auto">
                    <div className="px-2 py-1.5 bg-slate-950 rounded text-center">
-                      <div className="text-[10px] text-slate-500 uppercase font-bold">Age</div>
+                      <div className="text-[10px] text-slate-500 uppercase font-bold">Âge</div>
                       <div className="text-sm font-mono text-slate-300">{player.Age}</div>
                    </div>
                    <div className="px-2 py-1.5 bg-slate-950 rounded text-center">
-                      <div className="text-[10px] text-slate-500 uppercase font-bold">Pos</div>
-                      <div className="text-sm font-mono text-slate-300">{player.Position}</div>
+                      <div className="text-[10px] text-slate-500 uppercase font-bold">Poste</div>
+                      <div className="text-sm font-mono text-slate-300">{positionLabel(player.Position)}</div>
                    </div>
                </div>
             </div>
@@ -192,7 +193,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                      <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center group-hover:scale-110 transition-transform">
                         <Plus className="w-6 h-6" />
                      </div>
-                     <span className="font-medium">Add Player</span>
+                     <span className="font-medium">Ajouter un joueur</span>
                   </button>
                ) : (
                   <div className="w-full h-full bg-slate-900 border border-emerald-500 rounded-2xl p-4 flex flex-col shadow-xl">
@@ -201,7 +202,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                          <input 
                            autoFocus
                            type="text" 
-                           placeholder="Type name..." 
+                           placeholder="Nom du joueur..." 
                            className="bg-transparent border-none p-0 text-sm text-white w-full focus:ring-0 placeholder-slate-600"
                            value={searchTerm}
                            onChange={(e) => setSearchTerm(e.target.value)}
@@ -219,22 +220,23 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                                className="w-full text-left py-2 px-2 hover:bg-slate-800 rounded flex items-center gap-2 group"
                             >
                                 <div className="relative">
-                                  <div className="w-7 h-7 rounded bg-slate-950 flex items-center justify-center text-[10px] text-slate-400 group-hover:text-emerald-400">
+                                  <div className="relative overflow-hidden w-7 h-7 rounded bg-slate-950 flex items-center justify-center text-[10px] text-slate-400 group-hover:text-emerald-400">
                                      {(p.Player || '?').substring(0,1)}
+                                     <PhotoOverlay src={p.Image} alt={p.Player} />
                                   </div>
                                   <div className={`absolute -bottom-0.5 -right-0.5 px-1 py-0 rounded text-[7px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text}`}>
-                                    {pSeason}
+                                    {getSeasonShortLabel(pSeason)}
                                   </div>
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                   <div className="text-xs font-bold text-slate-300 truncate">{p.Player || 'Unknown'}</div>
-                                   <div className="text-[10px] text-slate-600 truncate">{p.Team || 'Unknown'}</div>
+                                   <div className="text-xs font-bold text-slate-300 truncate">{p.Player || 'Inconnu'}</div>
+                                   <div className="text-[10px] text-slate-600 truncate"><TeamLine player={p} /></div>
                                 </div>
                             </button>
                             );
                          })}
                          {searchTerm && searchResults.length === 0 && (
-                            <div className="text-center text-xs text-slate-500 py-4">No match</div>
+                            <div className="text-center text-xs text-slate-500 py-4">Aucun résultat</div>
                          )}
                       </div>
                   </div>
@@ -252,7 +254,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all text-sm ${showMetricConfig ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
                 >
                     <Settings2 className="w-4 h-4" />
-                    Configure Stats ({selectedMetrics.length})
+                    Choisir les métriques ({selectedMetrics.length})
                 </button>
             </div>
 
@@ -263,7 +265,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                     <Search className="w-5 h-5 text-slate-500" />
                     <input 
                         type="text" 
-                        placeholder="Search for any metric..." 
+                        placeholder="Rechercher une métrique..." 
                         className="bg-transparent border-none focus:ring-0 text-white placeholder-slate-600 w-full"
                         value={metricSearch}
                         onChange={(e) => setMetricSearch(e.target.value)}
@@ -282,7 +284,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                             <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${selectedMetrics.includes(key) ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-950 border-slate-700 group-hover:border-slate-500'}`}>
                                 {selectedMetrics.includes(key) && <Check className="w-3 h-3 text-slate-950" />}
                             </div>
-                            <span className={`text-sm ${selectedMetrics.includes(key) ? 'text-slate-200' : 'text-slate-500'}`}>{key}</span>
+                            <span className={`text-sm ${selectedMetrics.includes(key) ? 'text-slate-200' : 'text-slate-500'}`}>{metricLabel(key)}</span>
                         </div>
                     ))}
                 </div>
@@ -295,7 +297,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                 <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[450px]">
                     <div className="absolute top-4 left-4 z-10">
                         <h3 className="text-lg font-bold text-slate-300 flex items-center gap-2">
-                             <TrendingUp className="w-5 h-5 text-emerald-500" /> Radar Overlap
+                             <TrendingUp className="w-5 h-5 text-emerald-500" /> Radar superposé
                         </h3>
                     </div>
                     
@@ -331,15 +333,15 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                 {/* Data Table */}
                 <div className="lg:col-span-2 bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden flex flex-col">
                     <div className="flex bg-slate-900 border-b border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-400 sticky top-0 z-10">
-                        <div className="flex-1 p-4">Metric</div>
+                        <div className="flex-1 p-4">Métrique</div>
                         {selectedPlayers.map((p, idx) => (
                             <div 
                                 key={p.Player || idx} 
                                 className="w-24 md:w-32 p-4 text-right truncate" 
                                 style={{ color: PLAYER_COLORS[idx].stroke }}
-                                title={p.Player || 'Unknown'}
+                                title={p.Player || 'Inconnu'}
                             >
-                                {(p.Player || 'Unknown').split(' ').pop()}
+                                {(p.Player || 'Inconnu').split(' ').pop()}
                             </div>
                         ))}
                     </div>
@@ -356,11 +358,11 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                                         <button 
                                             onClick={() => toggleMetric(key)} 
                                             className="text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            title="Remove Metric"
+                                            title="Retirer la métrique"
                                         >
                                             <Trash2 className="w-3 h-3" />
                                         </button>
-                                        <span title={key}>{key}</span>
+                                        <span title={metricLabel(key)}>{metricLabel(key)}</span>
                                     </div>
                                     
                                     {selectedPlayers.map((p, idx) => {
@@ -384,7 +386,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                         })}
                         {selectedMetrics.length === 0 && (
                              <div className="p-8 text-center text-slate-500 text-sm">
-                                No metrics selected. Use "Configure Stats" to add metrics.
+                                Aucune métrique. Utilisez « Choisir les métriques » pour en ajouter.
                              </div>
                         )}
                     </div>
@@ -399,8 +401,8 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
               <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-slate-800">
                   <Users className="w-10 h-10 text-slate-600" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">No Players Selected</h3>
-              <p className="text-slate-400 max-w-sm">Use the "Add Player" button above to build your comparison cohort (up to 4 players).</p>
+              <h3 className="text-xl font-bold text-white mb-2">Aucun joueur choisi</h3>
+              <p className="text-slate-400 max-w-sm">Utilisez « Ajouter un joueur » pour composer votre comparaison (4 joueurs au plus).</p>
           </div>
       )}
     </div>

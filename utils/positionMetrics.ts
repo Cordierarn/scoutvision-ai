@@ -7,34 +7,23 @@ export type PositionCategory = 'GK' | 'DEF' | 'FB' | 'MID' | 'ATT_MID' | 'WING' 
 
 /**
  * Détermine la catégorie de position d'un joueur
+ * Rôles PitchAPI : GK, CB, FB, WB, DM, CM, AM, W, ST
  */
 export function getPositionCategory(position: string): PositionCategory {
   if (!position) return 'MID';
-  
-  const pos = position.toUpperCase().trim();
-  
-  // Goalkeeper
-  if (pos === 'GK') return 'GK';
-  
-  // Central Defenders
-  if (['CB', 'LCB', 'RCB'].includes(pos)) return 'DEF';
-  
-  // Full-backs / Wing-backs
-  if (['LB', 'RB', 'LWB', 'RWB'].includes(pos)) return 'FB';
-  
-  // Defensive / Central Midfielders
-  if (['DMF', 'LDMF', 'RDMF', 'CMF', 'LCMF', 'RCMF'].includes(pos)) return 'MID';
-  
-  // Attacking Midfielders
-  if (['AMF', 'LAMF', 'RAMF'].includes(pos)) return 'ATT_MID';
-  
-  // Wingers
-  if (['LW', 'RW', 'LWF', 'RWF'].includes(pos)) return 'WING';
-  
-  // Forwards
-  if (['CF', 'SS', 'ST'].includes(pos)) return 'FWD';
-  
-  return 'MID'; // Default
+
+  switch (position.toUpperCase().trim()) {
+    case 'GK': return 'GK';
+    case 'CB': return 'DEF';
+    case 'FB':
+    case 'WB': return 'FB';
+    case 'DM':
+    case 'CM': return 'MID';
+    case 'AM': return 'ATT_MID';
+    case 'W': return 'WING';
+    case 'ST': return 'FWD';
+    default: return 'MID';
+  }
 }
 
 /**
@@ -44,78 +33,78 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
   GK: [
     'Save rate, %',
     'Prevented goals per 90',
-    'xG against per 90',
+    'xGOT against per 90',
     'Exits per 90',
-    'Aerial duels won, %',
+    'High claims per 90',
+    'Claim rate, %',
     'Accurate passes, %',
-    'Accurate long passes, %',
-    'Clean sheets'
+    'Accurate long passes, %'
   ],
-  
+
   DEF: [
-    'Defensive duels won, %',
+    'Ground duels won, %',
     'Aerial duels won, %',
     'PAdj Interceptions',
+    'PAdj Tackles',
     'Shots blocked per 90',
-    'Successful defensive actions per 90',
     'Accurate passes, %',
     'Progressive passes per 90',
     'Accurate long passes, %'
   ],
-  
+
   FB: [
-    'Defensive duels won, %',
+    'Ground duels won, %',
     'Crosses per 90',
     'Accurate crosses, %',
     'Progressive runs per 90',
     'Dribbles per 90',
-    'Successful dribbles, %',
     'Key passes per 90',
-    'Interceptions per 90'
+    'xA per 90',
+    'PAdj Interceptions'
   ],
-  
+
   MID: [
     'Accurate passes, %',
     'Progressive passes per 90',
     'Key passes per 90',
     'Passes to final third per 90',
-    'Defensive duels won, %',
-    'Duels won, %',
-    'xA',
+    'Ground duels won, %',
+    'PAdj Recoveries',
+    'xG buildup per 90',
     'Successful defensive actions per 90'
   ],
-  
+
   ATT_MID: [
-    'xG',
-    'xA',
+    'xG per 90',
+    'xA per 90',
     'Key passes per 90',
-    'Smart passes per 90',
+    'Shot-creating actions per 90',
     'Through passes per 90',
     'Dribbles per 90',
     'Successful dribbles, %',
     'Goals per 90'
   ],
-  
+
   WING: [
-    'xG',
-    'xA',
+    'xG per 90',
+    'xA per 90',
     'Dribbles per 90',
     'Successful dribbles, %',
     'Crosses per 90',
-    'Accurate crosses, %',
     'Progressive runs per 90',
+    'Carries into box per 90',
     'Key passes per 90'
   ],
-  
+
   FWD: [
     'Goals per 90',
-    'xG per 90',
-    'xG',
-    'Goal conversion, %',
+    'npxG per 90',
+    'xGOT per 90',
     'Shots per 90',
     'Shots on target, %',
+    'Touches in box per 90',
     'Aerial duels won, %',
-    'Touches in box per 90'
+    'xA per 90'
   ]
 };
 
@@ -127,79 +116,81 @@ export const SIMILARITY_METRICS: Record<PositionCategory, string[]> = {
   GK: [
     'Save rate, %',
     'Prevented goals per 90',
-    'xG against per 90',
+    'xGOT against per 90',
     'Exits per 90',
-    'Aerial duels per 90',
-    'Aerial duels won, %',
+    'High claims per 90',
+    'Punches per 90',
+    'Claim rate, %',
+    'Launch rate, %',
     'Accurate passes, %',
     'Accurate long passes, %',
-    'Received passes per 90',
-    'Back passes received as GK per 90'
+    'Passes per 90',
+    'Distribution accuracy, %'
   ],
-  
+
   DEF: [
-    'Defensive duels per 90',
-    'Defensive duels won, %',
+    'Duels won per 90',
+    'Ground duels won, %',
     'Aerial duels per 90',
     'Aerial duels won, %',
     'PAdj Interceptions',
-    'Interceptions per 90',
+    'PAdj Tackles',
     'Shots blocked per 90',
-    'Successful defensive actions per 90',
+    'Clearances per 90',
     'Accurate passes, %',
     'Accurate long passes, %',
     'Progressive passes per 90',
-    'Forward passes per 90'
+    'Progressive runs per 90'
   ],
-  
+
   FB: [
-    'Defensive duels won, %',
+    'Ground duels won, %',
     'Successful defensive actions per 90',
-    'Interceptions per 90',
+    'PAdj Interceptions',
     'Crosses per 90',
     'Accurate crosses, %',
     'Progressive runs per 90',
     'Dribbles per 90',
     'Successful dribbles, %',
     'Key passes per 90',
-    'xA',
+    'xA per 90',
     'Accurate passes, %',
     'Duels won, %'
   ],
-  
+
   MID: [
     'Accurate passes, %',
+    'Passes per 90',
     'Progressive passes per 90',
-    'Forward passes per 90',
     'Key passes per 90',
     'Passes to final third per 90',
-    'Defensive duels per 90',
-    'Defensive duels won, %',
-    'Duels won, %',
-    'xA',
-    'xG',
-    'Successful defensive actions per 90',
-    'Interceptions per 90'
+    'Ground duels won, %',
+    'PAdj Recoveries',
+    'PAdj Interceptions',
+    'xA per 90',
+    'xG per 90',
+    'xG buildup per 90',
+    'Progressive runs per 90'
   ],
-  
+
   ATT_MID: [
-    'xG',
-    'xA',
+    'xG per 90',
+    'xA per 90',
     'Goals per 90',
     'Assists per 90',
     'Key passes per 90',
-    'Smart passes per 90',
+    'Shot-creating actions per 90',
     'Through passes per 90',
     'Dribbles per 90',
     'Successful dribbles, %',
     'Shots per 90',
-    'Offensive duels won, %',
+    'Passes to penalty area per 90',
     'Progressive runs per 90'
   ],
-  
+
   WING: [
-    'xG',
-    'xA',
+    'xG per 90',
+    'xA per 90',
     'Goals per 90',
     'Assists per 90',
     'Dribbles per 90',
@@ -207,24 +198,24 @@ export const SIMILARITY_METRICS: Record<PositionCategory, string[]> = {
     'Crosses per 90',
     'Accurate crosses, %',
     'Progressive runs per 90',
+    'Carries into box per 90',
     'Key passes per 90',
-    'Offensive duels per 90',
-    'Accelerations per 90'
+    'Touches in box per 90'
   ],
-  
+
   FWD: [
     'Goals per 90',
     'xG per 90',
-    'xG',
-    'Goal conversion, %',
+    'npxG per 90',
+    'xGOT per 90',
     'Shots per 90',
     'Shots on target, %',
     'Aerial duels per 90',
     'Aerial duels won, %',
     'Touches in box per 90',
-    'Offensive duels per 90',
-    'Offensive duels won, %',
-    'Head goals per 90'
+    'Big chances missed per 90',
+    'xA per 90',
+    'Dribbles per 90'
   ]
 };
 
@@ -259,13 +250,25 @@ export function getTopPerformingMetrics(
   cohort: Record<string, any>[],
   count: number = 8
 ): string[] {
-  // Get all numeric metrics
+  // Métriques qui ont un percentile précalculé par rôle ("<métrique> pct")
+  const withPercentile = Object.keys(player)
+    .filter(key => key.endsWith(' pct') && typeof player[key] === 'number')
+    .map(key => ({ key: key.slice(0, -4), percentile: player[key] as number }))
+    .filter(m => typeof player[m.key] === 'number' && player[m.key] > 0);
+
+  if (withPercentile.length > 0) {
+    return withPercentile
+      .sort((a, b) => b.percentile - a.percentile)
+      .slice(0, count)
+      .map(m => m.key);
+  }
+
+  // Repli : percentile calculé sur la cohorte
   const numericKeys = Object.keys(player).filter(key => 
     typeof player[key] === 'number' &&
-    !['Age', 'Market value', 'Height', 'Weight', 'Matches played', 'Minutes played'].includes(key)
+    !['Age', 'Market value', 'Matches played', 'Starts', 'Minutes played', 'Minutes share', 'League tier'].includes(key)
   );
   
-  // Calculate percentile for each metric
   const metricsWithPercentile = numericKeys.map(key => {
     const playerVal = Number(player[key]) || 0;
     const values = cohort.map(p => Number(p[key]) || 0).sort((a, b) => a - b);
@@ -288,13 +291,42 @@ export function getTopPerformingMetrics(
  */
 export function getPositionCategoryLabel(category: PositionCategory): string {
   const labels: Record<PositionCategory, string> = {
-    GK: 'Goalkeeper',
-    DEF: 'Central Defender',
-    FB: 'Full-Back',
-    MID: 'Midfielder',
-    ATT_MID: 'Attacking Mid',
-    WING: 'Winger',
-    FWD: 'Forward'
+    GK: 'Gardien',
+    DEF: 'Défenseur central',
+    FB: 'Latéral',
+    MID: 'Milieu',
+    ATT_MID: 'Milieu offensif',
+    WING: 'Ailier',
+    FWD: 'Attaquant'
   };
   return labels[category];
+}
+
+/**
+ * Colonnes numériques qui décrivent le contexte, pas la performance
+ */
+export const NON_METRIC_KEYS = new Set([
+  'Age', 'Market value', 'Height', 'Matches played', 'Starts', 'Minutes played', 'Minutes share',
+  'Analytics coverage', 'League tier', 'Team possession, %', 'Team PPDA', 'Team field tilt',
+  'RAPM minutes', 'Career shots', 'Career goals - xG', 'Network matches', 'Estimated value'
+]);
+
+/**
+ * Vrai si la colonne est une métrique de performance (hors percentiles "<métrique> pct")
+ */
+export function isMetricKey(key: string, value: unknown): boolean {
+  return typeof value === 'number' && !key.endsWith(' pct') && !NON_METRIC_KEYS.has(key);
+}
+
+/**
+ * Métriques présentes chez au moins un joueur (un joueur sans analytics n'a pas toutes les colonnes)
+ */
+export function getMetricKeys(players: Record<string, any>[]): string[] {
+  const keys = new Set<string>();
+  players.forEach(p => {
+    Object.keys(p).forEach(key => {
+      if (isMetricKey(key, p[key])) keys.add(key);
+    });
+  });
+  return Array.from(keys).sort();
 }

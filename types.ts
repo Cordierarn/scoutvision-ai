@@ -8,58 +8,76 @@
 // ============================================
 
 /**
- * Extrait la saison d'une chaîne League (ex: "Serie A 2024-25" -> "24-25")
+ * Extrait la saison d'application d'une chaîne League
+ * ("Serie A 2024-25" -> "2024-25" ; année civile "Brasileirão 2024" -> "2024-25")
  */
 export function extractSeason(league: string | undefined): string {
   if (!league || typeof league !== 'string') return 'Unknown';
-  
-  // Pattern pour "2024-25" ou "2025-26"
-  const match = league.match(/20(\d{2})-(\d{2})/);
+
+  const match = league.match(/\b(20\d{2})-(\d{2})\b/);
   if (match) {
     return `${match[1]}-${match[2]}`;
   }
-  
-  // Pattern alternatif "2024" seul
-  const yearMatch = league.match(/\b(2024|2025|2026)\b/);
+
+  // Saison en année civile : rangée dans la saison qui commence la même année
+  const yearMatch = league.match(/\b(20\d{2})\b/);
   if (yearMatch) {
     const year = parseInt(yearMatch[1]);
-    return `${year.toString().slice(2)}-${(year + 1).toString().slice(2)}`;
+    return `${year}-${String(year + 1).slice(2)}`;
   }
-  
+
   return 'Unknown';
 }
 
 /**
- * Retourne le label de saison formaté
+ * Saison d'application d'un joueur (champ Season, sinon déduite de League)
  */
-export function getSeasonLabel(season: string): string {
-  switch (season) {
-    case '24-25': return '2024-25';
-    case '25-26': return '2025-26';
-    default: return season;
-  }
+export function getPlayerSeason(player: PlayerData): string {
+  return extractSeason(String(player.League || player.Season || ''));
 }
 
 /**
- * Retourne la couleur associée à une saison
+ * Retourne le label de saison formaté ("2024-25" -> "2024/25")
+ */
+export function getSeasonLabel(season: string): string {
+  return season.replace('-', '/');
+}
+
+/**
+ * Libellé court pour les badges ("2024-25" -> "24-25")
+ */
+export function getSeasonShortLabel(season: string): string {
+  const match = season.match(/^20(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}-${match[2]}` : season;
+}
+
+const SEASON_COLORS = [
+  { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30' },
+  { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' },
+  { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+  { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/30' },
+  { bg: 'bg-rose-500/20', text: 'text-rose-400', border: 'border-rose-500/30' },
+  { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+];
+
+/**
+ * Retourne la couleur associée à une saison (cycle sur l'année de début)
  */
 export function getSeasonColor(season: string): { bg: string; text: string; border: string } {
-  switch (season) {
-    case '24-25':
-      return { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30' };
-    case '25-26':
-      return { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' };
-    default:
-      return { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500/30' };
+  const year = parseInt(season.slice(0, 4));
+  if (isNaN(year)) {
+    return { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500/30' };
   }
+  return SEASON_COLORS[year % SEASON_COLORS.length];
 }
 
 /**
  * Génère un ID unique pour un joueur incluant la saison
  */
 export function getPlayerSeasonId(player: PlayerData): string {
-  const season = extractSeason(player.League);
-  return `${player.Player}_${player.Team}_${season}`;
+  const season = getPlayerSeason(player);
+  // Un joueur a une ligne par compétition (championnat, coupe d'Europe...)
+  return `${player['Player ID'] || player.Player}_${player['Team ID'] || player.Team}_${player.Competition || ''}_${season}`;
 }
 
 // ============================================
@@ -73,80 +91,56 @@ export function getPlayerSeasonId(player: PlayerData): string {
 export interface PlayerData {
   [key: string]: string | number | undefined;
   
-  // Identification
+  // Identification (PitchAPI)
+  "Player ID"?: string;
   Player: string;
+  "Team ID"?: string;
   Team: string;
-  Position: string;
-  League: string;
-  
+  Competition?: string;        // clé de compétition : ENG, FRA, UCL...
+  "League tier"?: number;      // 1 = Big 5 + UCL, 2, 3
+  League: string;              // "Premier League 2024-25"
+  Season?: string;             // saison réelle : "2024-25" ou "2024"
+  Position: string;            // rôle réel : GK, CB, FB, WB, DM, CM, AM, W, ST
+  "Position group"?: string;   // GK, DEF, MID, FWD
+  "Midfield profile"?: string;
+  Image?: string;              // photo du joueur (CDN PitchAPI)
+  "Team logo"?: string;
+
   // Profil
-  Age: number;
-  Height: number;
-  Weight: number;
-  Foot: string;
-  "Market value": number;
+  Age?: number;
+  "Birth date"?: string;
   "Passport country"?: string;
-  "Birth country"?: string;
+  "Market value"?: number;     // Transfermarkt, si market-values a été branché
   "Contract expires"?: string;
-  "On loan"?: string;
-  
+  "Estimated value"?: number;  // valeur attendue d'après la performance (modèle ridge, saison en cours)
+  Height?: number;             // cm (Transfermarkt)
+  Foot?: string;               // Right, Left, Both (Transfermarkt)
+
   // Temps de jeu
   "Matches played": number;
+  Starts?: number;
   "Minutes played": number;
-  
-  // Métriques offensives
+  "Minutes share"?: number;
+
+  // Totaux
   Goals?: number;
-  xG?: number;
-  "xG per 90"?: number;
-  "Non-penalty goals"?: number;
-  "Non-penalty goals per 90"?: number;
   Assists?: number;
+  xG?: number;
   xA?: number;
-  "xA per 90"?: number;
-  "Shots per 90"?: number;
-  "Shots on target, %"?: number;
-  "Touches in box per 90"?: number;
-  
-  // Métriques de création
-  "Key passes per 90"?: number;
-  "Shot assists per 90"?: number;
-  "Deep completions per 90"?: number;
-  "Progressive passes per 90"?: number;
-  "Passes to final third per 90"?: number;
-  "Accurate crosses, %"?: number;
-  
-  // Métriques défensives
-  "Successful defensive actions per 90"?: number;
-  "Defensive duels won, %"?: number;
-  "Aerial duels won, %"?: number;
-  "PAdj Interceptions"?: number;
-  "PAdj Sliding tackles"?: number;
-  "Shots blocked per 90"?: number;
-  
-  // Métriques de dribble/possession
-  "Dribbles per 90"?: number;
-  "Successful dribbles, %"?: number;
-  "Progressive runs per 90"?: number;
-  "Offensive duels won, %"?: number;
-  
-  // Métriques de passe
-  "Passes per 90"?: number;
-  "Accurate passes, %"?: number;
-  "Accurate long passes, %"?: number;
-  "Accurate short / medium passes, %"?: number;
-  
-  // Métriques de duel
-  "Duels won, %"?: number;
-  "Duels per 90"?: number;
-  
-  // Métriques de gardien
-  "Prevented goals per 90"?: number;
-  "Save rate, %"?: number;
-  "Exits per 90"?: number;
-  "Clean sheets"?: number;
-  
-  // Métriques avancées
-  "Successful attacking actions per 90"?: number;
+
+  // Impact et contexte (analyses du pipeline et modèles de prepare_data.py)
+  "RAPM off"?: number;         // plus-minus régularisé, xG/90, fenêtre de deux saisons
+  "RAPM def"?: number;
+  "RAPM net"?: number;
+  "RAPM minutes"?: number;
+  "Finishing skill"?: number;  // buts au-dessus de l'xG pour 100 tirs (carrière, shrinké)
+  "Career shots"?: number;
+  "Pass share, %"?: number;    // part des passes de l'équipe qui passent par le joueur
+  "Network betweenness"?: number;
+  "Team style"?: string;
+
+  // Les métriques per-90 et taux sont des clés libres (ex. "xG per 90"),
+  // leur percentile par rôle est la clé "<métrique> pct" (0-100).
 }
 
 /**
@@ -155,17 +149,6 @@ export interface PlayerData {
 export interface ScoredPlayer extends PlayerData {
   roleScore: number;
   percentile?: number;
-}
-
-/**
- * Interface pour les résultats de recherche de joueurs similaires
- */
-export interface SimilarityResult {
-  player: PlayerData;
-  score: number;
-  distance: number;
-  matchedMetrics: number;
-  breakdown?: Record<string, number>;
 }
 
 /**
@@ -186,70 +169,34 @@ export interface PlayerPercentileProfile {
  * Statistiques d'équipe agrégées
  */
 export interface TeamStats {
+  team_id: string;
   team: string;
-  squad_id?: string;
-  league: string;
-  season: string;
-  
-  // Gardien
-  keeper_clean_sheet_pct?: number;
-  keeper_clean_sheets?: number;
-  keeper_goals_against?: number;
-  keeper_goals_against_p90?: number;
-  keeper_save_pct?: number;
-  keeper_saves?: number;
-  
-  // Standard
-  standard_goals?: number;
-  standard_goals_p90?: number;
-  standard_assists?: number;
-  standard_assists_p90?: number;
-  standard_xg?: number;
-  standard_xg_p90?: number;
-  standard_npxg?: number;
-  standard_npxg_p90?: number;
-  standard_xag?: number;
-  standard_xag_p90?: number;
-  
-  // Possession
-  possession_Poss?: number;
-  possession_touches?: number;
-  possession_carries?: number;
-  possession_prog_carries?: number;
-  
-  // Passes
-  passing_pass_completion_pct?: number;
-  passing_passes_attempted?: number;
-  passing_prog_pass_distance?: number;
-  
-  // Défense
-  defense_tackles?: number;
-  defense_tackles_won?: number;
-  defense_Clr?: number;
-  defense_Int?: number;
-  
-  // Tir
-  shooting_goals?: number;
-  shooting_shots?: number;
-  shooting_shots_on_target?: number;
-  shooting_xg?: number;
-  
-  [key: string]: string | number | undefined;
-}
+  competition: string;         // ENG, FRA, UCL...
+  league: string;              // "Premier League 2024-25"
+  season: string;              // saison réelle : "2024-25" ou "2024"
+  image?: string;
 
-/**
- * Profil tactique d'une équipe
- */
-export interface TeamTacticalProfile {
-  team: string;
-  league: string;
-  style: 'possession' | 'direct' | 'counter' | 'pressing' | 'balanced';
-  metrics: {
-    label: string;
-    value: number;
-    percentile: number;
-    leagueAvg: number;
-  }[];
+  // Métriques de la saison (team_season PitchAPI)
+  Matches?: number;
+  "xG per 90"?: number;
+  "xGA per 90"?: number;
+  "npxG per 90"?: number;
+  "npxGA per 90"?: number;
+  "Shots per 90"?: number;
+  "Shots against per 90"?: number;
+  "Goals per 90"?: number;
+  "Goals against per 90"?: number;
+  "Possession, %"?: number;
+  "Field tilt"?: number;
+  "Average action height"?: number;
+  "Defensive line height"?: number;
+  PPDA?: number;
+  "Ball recovery time"?: number;
+  "Passes per sequence"?: number;
+  "Direct speed"?: number;
+  "Pass accuracy, %"?: number;
+
+  [key: string]: string | number | undefined;
 }
 
 // ============================================
@@ -263,15 +210,17 @@ export interface ShotEvent {
   id: string;
   minute: number;
   result: ShotResult;
-  X: number;
-  Y: number;
+  X: number;              // 0 = propre but, 1 = but adverse
+  Y: number;              // 0-1 sur la largeur
   xG: number;
+  xGOT?: number;
   player: string;
+  player_id?: string;
   team: string;
   h_a: 'h' | 'a';
   situation: ShotSituation;
-  lastAction: string;
   shotType: ShotType;
+  isOwnGoal?: boolean;
   match_id?: string;
   season?: string;
 }
@@ -339,77 +288,9 @@ export interface RoleScoreResult {
   }[];
 }
 
-/**
- * Groupe de métriques pour l'affichage
- */
-export interface MetricGroup {
-  name: string;
-  category?: string;
-  keys: string[];
-  icon?: string;
-}
-
-/**
- * Résultat d'analyse de percentile
- */
-export interface PercentileAnalysis {
-  metric: string;
-  value: number;
-  percentile: number;
-  zScore: number;
-  cohortMean: number;
-  cohortStdDev: number;
-  cohortSize: number;
-  rank: number;
-}
-
 // ============================================
 // FILTER & SEARCH TYPES
 // ============================================
-
-/**
- * Filtres de recherche de joueurs
- */
-export interface PlayerFilters {
-  search?: string;
-  team?: string;
-  league?: string;
-  position?: string;
-  nationality?: string;
-  ageMin?: number;
-  ageMax?: number;
-  marketValueMin?: number;
-  marketValueMax?: number;
-  minutesMin?: number;
-  season?: string;
-}
-
-/**
- * Options de tri
- */
-export interface SortOptions {
-  field: string;
-  direction: 'asc' | 'desc';
-}
-
-/**
- * Options de pagination
- */
-export interface PaginationOptions {
-  page: number;
-  pageSize: number;
-}
-
-/**
- * Résultat paginé
- */
-export interface PaginatedResult<T> {
-  data: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-}
 
 // ============================================
 // VIEW STATE TYPES
@@ -427,7 +308,9 @@ export enum ViewState {
   SCOUT_REPORT = 'SCOUT_REPORT',
   TEAM_ANALYSIS = 'TEAM_ANALYSIS',
   PROSPECTS = 'PROSPECTS',
-  WATCHLIST = 'WATCHLIST'
+  WATCHLIST = 'WATCHLIST',
+  FORECAST = 'FORECAST',
+  LAB = 'LAB'
 }
 
 /**
@@ -439,60 +322,9 @@ export type ComparisonMode = 'all' | 'position' | 'team' | 'league';
 // REPORT & EXPORT TYPES
 // ============================================
 
-/**
- * Configuration du rapport de scout
- */
-export interface ScoutReportConfig {
-  includeRadar: boolean;
-  includeShotMap: boolean;
-  includeComparison: boolean;
-  includeAIAnalysis: boolean;
-  comparisonMode: ComparisonMode;
-  metrics: string[];
-}
-
-/**
- * Rapport de scout généré
- */
-export interface ScoutReport {
-  player: PlayerData;
-  generatedAt: string;
-  aiAnalysis?: string;
-  percentileProfile: PlayerPercentileProfile;
-  bestRoles: RoleScoreResult[];
-  similarPlayers: SimilarityResult[];
-  config: ScoutReportConfig;
-}
-
 // ============================================
 // DATA STORE TYPES
 // ============================================
-
-/**
- * État global des données
- */
-export interface DataStoreState {
-  players: PlayerData[];
-  teams: TeamStats[];
-  shots: ShotEvent[];
-  isLoading: boolean;
-  errors: string[];
-  lastUpdated: string | null;
-}
-
-/**
- * Statistiques de dataset
- */
-export interface DatasetStats {
-  playerCount: number;
-  teamCount: number;
-  shotCount: number;
-  leagues: string[];
-  seasons: string[];
-  positions: string[];
-  countries: string[];
-  metricCount: number;
-}
 
 // ============================================
 // UTILITY TYPES
@@ -508,32 +340,3 @@ export interface MetricBounds {
   stdDev: number;
 }
 
-/**
- * Configuration de clustering
- */
-export interface ClusterConfig {
-  k: number;
-  maxIterations: number;
-  metrics: string[];
-}
-
-/**
- * Résultat de clustering
- */
-export interface ClusterResult {
-  clusterId: number;
-  centroid: number[];
-  players: PlayerData[];
-  size: number;
-  label?: string;
-}
-
-/**
- * Cache pour les calculs coûteux
- */
-export interface ComputationCache<T> {
-  key: string;
-  value: T;
-  timestamp: number;
-  expiresAt: number;
-}

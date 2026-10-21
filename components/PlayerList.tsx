@@ -1,8 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
 import { Search, ChevronDown, ChevronUp, Eye, Filter, SlidersHorizontal, Plus, X, Calendar, Download, Star } from 'lucide-react';
 import { exportToCSV } from '../utils/exportUtils';
-import { isInWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
+import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
+import { getMetricKeys } from '../utils/positionMetrics';
+import { metricLabel, positionLabel, positionName } from '../utils/labels';
+import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
 
 interface PlayerListProps {
   data: PlayerData[];
@@ -21,7 +24,7 @@ interface FilterCondition {
 
 const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortField, setSortField] = useState<SortField>('Market value');
+  const [sortField, setSortField] = useState<SortField>('Minutes played');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [positionFilter, setPositionFilter] = useState<string>('All');
   
@@ -35,13 +38,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
   // Update watchlist IDs for UI
   useEffect(() => {
     const updateWatchlistIds = () => {
-      const ids = new Set<string>();
-      data.forEach(p => {
-        if (isInWatchlist(p)) {
-          ids.add(getPlayerSeasonId(p));
-        }
-      });
-      setWatchlistIds(ids);
+      // Une seule lecture du localStorage, au lieu d'une par joueur
+      setWatchlistIds(new Set(getWatchlist().map(w => getPlayerSeasonId(w.player))));
     };
     updateWatchlistIds();
   }, [data]);
@@ -70,10 +68,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
 
   const numericKeys = useMemo(() => {
     if (data.length === 0) return [];
-    return Object.keys(data[0]).filter(key => 
-      typeof data[0][key] === 'number' &&
-      !['Age', 'Market value', 'Height', 'Weight', 'Matches played', 'Minutes played'].includes(key)
-    ).sort();
+    return getMetricKeys(data);
   }, [data]);
 
   const handleSort = (field: SortField) => {
@@ -103,6 +98,11 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
   const removeFilter = (id: string) => {
     setActiveFilters(activeFilters.filter(f => f.id !== id));
   };
+
+  // Rendu progressif : une saison compte plus de 6 000 joueurs
+  const PAGE_SIZE = 100;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const filteredAndSortedData = useMemo(() => {
     let result = [...data];
@@ -149,7 +149,24 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
     return result;
   }, [data, searchTerm, positionFilter, sortField, sortOrder, activeFilters]);
 
+  // Revenir au début de la liste quand la recherche, les filtres ou le tri changent
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [filteredAndSortedData]);
+
+  // Afficher la page suivante quand le bas de la liste devient visible
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) setVisibleCount(count => count + PAGE_SIZE);
+    }, { rootMargin: '400px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleCount, filteredAndSortedData]);
+
   const formatValue = (val: number) => {
+    if (!val) return '–';
     if (val >= 1000000) return `€${(val / 1000000).toFixed(1)}M`;
     if (val >= 1000) return `€${(val / 1000).toFixed(0)}K`;
     return `€${val}`;
@@ -164,7 +181,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <input 
                 type="text" 
-                placeholder="Search player or team..." 
+                placeholder="Rechercher un joueur ou un club..." 
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -177,7 +194,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors border ${showAdvancedFilters ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
               >
                 <SlidersHorizontal className="w-4 h-4" />
-                Advanced Filters
+                Filtres avancés
                 {activeFilters.length > 0 && (
                    <span className="bg-emerald-500 text-slate-950 text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">
                      {activeFilters.length}
@@ -194,7 +211,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                   onChange={(e) => setPositionFilter(e.target.value)}
                   className="bg-transparent border-none focus:ring-0 text-slate-200 cursor-pointer p-0"
                 >
-                  {positions.map(p => <option key={p} value={p}>{p}</option>)}
+                  {positions.map(p => <option key={p} value={p}>{p === 'All' ? 'Tous les postes' : positionName(p)}</option>)}
                 </select>
               </div>
               
@@ -202,14 +219,14 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                 onClick={() => exportToCSV(filteredAndSortedData.slice(0, 500), 'players')}
                 disabled={filteredAndSortedData.length === 0}
                 className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors text-sm disabled:opacity-50"
-                title="Export first 500 results"
+                title="Exporter les 500 premiers résultats"
               >
                 <Download className="w-4 h-4" />
-                Export
+                Exporter
               </button>
               
               <div className="px-3 py-2 bg-slate-900 rounded-lg text-sm text-slate-400 whitespace-nowrap">
-                {filteredAndSortedData.length} Players found
+                {filteredAndSortedData.length} joueurs trouvés
               </div>
             </div>
          </div>
@@ -219,14 +236,14 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
            <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4 animate-fade-in-down">
               <div className="flex items-center justify-between mb-4">
                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                   Active Conditions
-                   <span className="text-xs font-normal text-slate-500">(Match All)</span>
+                   Conditions actives
+                   <span className="text-xs font-normal text-slate-500">(toutes requises)</span>
                  </h3>
                  <button 
                     onClick={addFilter}
                     className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-1 bg-emerald-500/10 rounded border border-emerald-500/20"
                  >
-                    <Plus className="w-3 h-3" /> Add Condition
+                    <Plus className="w-3 h-3" /> Ajouter une condition
                  </button>
               </div>
               
@@ -245,7 +262,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                            onChange={(e) => updateFilter(filter.id, 'key', e.target.value)}
                            className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-slate-200 p-1.5 focus:border-emerald-500 focus:ring-0"
                         >
-                           {numericKeys.map(k => <option key={k} value={k}>{k}</option>)}
+                           {numericKeys.map(k => <option key={k} value={k}>{metricLabel(k)}</option>)}
                         </select>
                         
                         <div className="flex items-center gap-2">
@@ -273,7 +290,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                  ))}
                  {activeFilters.length === 0 && (
                     <div className="col-span-full py-4 text-center text-sm text-slate-500 border border-dashed border-slate-800 rounded-lg">
-                       No advanced filters active. Click "Add Condition" to filter by specific stats (e.g., xG superieur 0.5).
+                       Aucun filtre avancé. Cliquez sur « Ajouter une condition » pour filtrer sur une statistique (par exemple xG supérieur à 0,5).
                     </div>
                  )}
               </div>
@@ -284,12 +301,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
       {/* Table Header */}
       <div className="grid grid-cols-12 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider sticky top-0 z-10 shadow-sm">
         <div className="col-span-3 p-4 cursor-pointer hover:text-emerald-400 flex items-center gap-2 transition-colors" onClick={() => handleSort('Player')}>
-          Player {sortField === 'Player' && (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3 text-emerald-500" /> : <ChevronDown className="w-3 h-3 text-emerald-500" />)}
+          Joueur {sortField === 'Player' && (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3 text-emerald-500" /> : <ChevronDown className="w-3 h-3 text-emerald-500" />)}
         </div>
-        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Age')}>Age</div>
-        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Position')}>Pos</div>
-        <div className="col-span-2 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Team')}>Team</div>
-        <div className="col-span-2 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('Market value')}>Value</div>
+        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Age')}>Âge</div>
+        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Position')}>Poste</div>
+        <div className="col-span-2 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Team')}>Club</div>
+        <div className="col-span-2 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('Market value')}>Valeur</div>
         <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('xG')}>xG</div>
         <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('xA')}>xA</div>
         <div className="col-span-1 p-4 text-center">Action</div>
@@ -298,7 +315,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
       {/* List Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/50">
         {filteredAndSortedData.length > 0 ? (
-          filteredAndSortedData.map((player, idx) => {
+          filteredAndSortedData.slice(0, visibleCount).map((player, idx) => {
             const season = extractSeason(player.League);
             const seasonColors = getSeasonColor(season);
             return (
@@ -308,12 +325,13 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
             >
               <div className="col-span-3 p-4 flex items-center gap-3">
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 border border-slate-700 group-hover:border-emerald-500/50 group-hover:text-emerald-400 transition-colors">
+                  <div className="relative overflow-hidden w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 border border-slate-700 group-hover:border-emerald-500/50 group-hover:text-emerald-400 transition-colors">
                     {(player.Player || '?').substring(0, 1)}
+                    <PhotoOverlay src={player.Image} alt={player.Player} />
                   </div>
                   {/* Season Badge */}
                   <div className={`absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${seasonColors.bg} ${seasonColors.text} border ${seasonColors.border}`}>
-                    {season}
+                    {getSeasonShortLabel(season)}
                   </div>
                 </div>
                 <div className="min-w-0">
@@ -324,10 +342,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
               <div className="col-span-1 p-4 text-sm text-slate-400 font-medium">{player.Age}</div>
               <div className="col-span-1 p-4">
                 <span className="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300 group-hover:border-emerald-500/30 group-hover:text-emerald-400 transition-colors">
-                  {player.Position}
+                  {positionLabel(player.Position)}
                 </span>
               </div>
-              <div className="col-span-2 p-4 text-sm text-slate-400 truncate group-hover:text-slate-300 transition-colors">{player.Team}</div>
+              <div className="col-span-2 p-4 text-sm text-slate-400 truncate group-hover:text-slate-300 transition-colors"><TeamLine player={player} /></div>
               <div className="col-span-2 p-4 text-sm font-mono text-right text-emerald-400 font-bold tracking-tight">
                 {formatValue(Number(player['Market value']) || 0)}
               </div>
@@ -345,14 +363,14 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                       ? 'bg-yellow-500/20 text-yellow-400'
                       : 'bg-slate-800 text-slate-500 hover:text-yellow-400 hover:bg-yellow-500/10'
                   }`}
-                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
                 >
                   <Star className={`w-4 h-4 ${watchlistIds.has(getPlayerSeasonId(player)) ? 'fill-yellow-400' : ''}`} />
                 </button>
                 <button 
                   onClick={() => onSelectPlayer(player)}
                   className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:bg-emerald-500 hover:text-white transition-all shadow-sm hover:shadow-emerald-500/20"
-                  title="View Profile"
+                  title="Voir la fiche"
                 >
                   <Eye className="w-4 h-4" />
                 </button>
@@ -363,7 +381,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
         ) : (
           <div className="flex flex-col items-center justify-center h-64 text-slate-500">
             <Search className="w-12 h-12 mb-4 opacity-20" />
-            <p>No players found matching your criteria.</p>
+            <p>Aucun joueur ne correspond à ces critères.</p>
+          </div>
+        )}
+        {visibleCount < filteredAndSortedData.length && (
+          <div ref={loadMoreRef} className="p-4 text-center text-xs text-slate-500">
+            Affichage de {visibleCount} sur {filteredAndSortedData.length} joueurs…
           </div>
         )}
       </div>

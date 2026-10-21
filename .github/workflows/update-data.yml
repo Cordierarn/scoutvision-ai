@@ -1,0 +1,84 @@
+name: Mise à jour des données ScoutVision
+
+# Prépare les données de l'app depuis les releases de PitchApi-big-5 et les publie
+# dans la release privée `scoutvision-data` de ce même dépôt de données.
+# Ce dépôt est public : rien n'est commité ici, aucun artefact ni cache ne contient
+# les données, et les logs n'affichent que des noms d'archives et des effectifs.
+# En local : `npm run data:pull`.
+
+on:
+  schedule:
+    # PitchApi-big-5 met à jour ses données le lundi et le vendredi à 08:00 UTC (60 min max)
+    - cron: "30 10 * * 1"
+    - cron: "30 10 * * 5"
+  workflow_dispatch:
+  # Déclenchement immédiat depuis le workflow de PitchApi-big-5 (voir README)
+  repository_dispatch:
+    types: [pitchapi-data-updated]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+env:
+  DATA_REPO: Cordierarn/PitchApi-big-5
+  DATA_RELEASE: scoutvision-data
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Fine-grained PAT limité à PitchApi-big-5, Contents : Read and write
+      GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Vérification du secret
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Le secret PITCHAPI_DATA_TOKEN n'est pas défini (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Installation
+        run: pip install -r scripts/requirements.txt
+
+      - name: Préparation des données
+        # Lit aussi market_value.parquet (Transfermarkt) dans la release scoutvision-data
+        run: python scripts/prepare_data.py
+
+      - name: Laboratoire
+        # Expériences sur les tables match par match (archives déjà en cache) : public/data/lab
+        run: python scripts/prepare_lab.py
+
+      - name: Publication dans la release privée
+        run: |
+          tar -czf "$RUNNER_TEMP/scoutvision-data.tar.gz" -C public/data .
+          if ! gh release view "$DATA_RELEASE" -R "$DATA_REPO" >/dev/null 2>&1; then
+            gh release create "$DATA_RELEASE" -R "$DATA_REPO" --latest=false \
+              --title "Données ScoutVision" \
+              --notes "Données préparées pour l'app ScoutVision par Cordierarn/scoutvision-ai (scripts/prepare_data.py). Récupération : npm run data:pull."
+          fi
+          gh release upload "$DATA_RELEASE" "$RUNNER_TEMP/scoutvision-data.tar.gz" -R "$DATA_REPO" --clobber
+
+      - name: Résumé
+        run: |
+          python3 - >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          index = json.load(open("public/data/index.json"))
+          print(f"### Données ScoutVision du {index['generatedAt']}\n")
+          print("| Saison | Joueurs | Équipes | Compétitions |\n|---|---|---|---|")
+          for s in index["seasons"]:
+              print(f"| {s['id']} | {s['players']} | {s['teams']} | {len(s['competitions'])} |")
+          PY

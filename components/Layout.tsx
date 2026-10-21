@@ -1,6 +1,7 @@
 import React, { ReactNode, useState, useEffect } from 'react';
-import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar, Star } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar, Star, CalendarDays, FlaskConical } from 'lucide-react';
 import { getWatchlist } from '../services/storageService';
+import { getSeasonLabel } from '../types';
 
 interface LayoutProps {
   children: ReactNode;
@@ -8,10 +9,25 @@ interface LayoutProps {
   currentView: string;
   globalSeason?: string;
   setGlobalSeason?: (season: string) => void;
+  seasonOptions?: string[];
   hasData?: boolean;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, globalSeason, setGlobalSeason, hasData }) => {
+// Libellés du fil d'Ariane, par vue
+const VIEW_LABELS: Record<string, string> = {
+  TEAM_ANALYSIS: 'Analyse d\'équipe',
+  PROSPECTS: 'Chasseur de pépites',
+  WATCHLIST: 'Liste de suivi',
+  DASHBOARD: 'Base joueurs',
+  SCOUT_REPORT: 'Rapports de scouting',
+  SIMILARITY: 'Joueurs similaires',
+  COMPARISON: 'Comparaison',
+  FORECAST: 'Pronostics',
+  LAB: 'Laboratoire',
+  PLAYER_DETAIL: 'Fiche joueur',
+};
+
+const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, globalSeason, setGlobalSeason, seasonOptions = [], hasData }) => {
   const [watchlistCount, setWatchlistCount] = useState(0);
 
   // Update watchlist count when view changes or periodically
@@ -51,7 +67,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
              className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'TEAM_ANALYSIS' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
           >
             <TrendingUp className="w-6 h-6" />
-            <span className="hidden lg:block">Team Analysis</span>
+            <span className="hidden lg:block">Analyse d'équipe</span>
           </button>
 
           <button 
@@ -59,7 +75,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
              className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'PROSPECTS' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
           >
             <Gem className="w-6 h-6" />
-            <span className="hidden lg:block">Gem Hunter</span>
+            <span className="hidden lg:block">Chasseur de pépites</span>
           </button>
 
           <button 
@@ -74,7 +90,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
                 </span>
               )}
             </div>
-            <span className="hidden lg:block">Watchlist</span>
+            <span className="hidden lg:block">Liste de suivi</span>
           </button>
 
           <button 
@@ -82,7 +98,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'DASHBOARD' || currentView === 'PLAYER_DETAIL' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
           >
             <Users className="w-6 h-6" />
-            <span className="hidden lg:block">Players Database</span>
+            <span className="hidden lg:block">Base joueurs</span>
           </button>
           
           <button 
@@ -90,7 +106,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
              className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'SCOUT_REPORT' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
           >
             <ClipboardList className="w-6 h-6" />
-            <span className="hidden lg:block">Scout Report</span>
+            <span className="hidden lg:block">Rapports de scouting</span>
           </button>
           
           <button 
@@ -98,7 +114,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
              className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'SIMILARITY' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
           >
             <GitCompare className="w-6 h-6" />
-            <span className="hidden lg:block">Similarity Engine</span>
+            <span className="hidden lg:block">Joueurs similaires</span>
           </button>
 
           <button 
@@ -106,14 +122,30 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
              className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'COMPARISON' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
           >
             <ArrowLeftRight className="w-6 h-6" />
-            <span className="hidden lg:block">Player Comparison</span>
+            <span className="hidden lg:block">Comparaison</span>
+          </button>
+
+          <button 
+             onClick={() => onNavigate('FORECAST')}
+             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'FORECAST' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
+          >
+            <CalendarDays className="w-6 h-6" />
+            <span className="hidden lg:block">Pronostics</span>
+          </button>
+
+          <button
+             onClick={() => onNavigate('LAB')}
+             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'LAB' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
+          >
+            <FlaskConical className="w-6 h-6" />
+            <span className="hidden lg:block">Laboratoire</span>
           </button>
         </nav>
 
         <div className="p-4 border-t border-slate-800">
           <button className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-300 transition-colors w-full">
             <Settings className="w-5 h-5" />
-            <span className="hidden lg:block text-sm">Settings</span>
+            <span className="hidden lg:block text-sm">Paramètres</span>
           </button>
         </div>
       </aside>
@@ -123,7 +155,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
          {/* Top Header */}
          <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 z-10">
             <div className="text-sm breadcrumbs text-slate-400">
-              <span className="text-slate-500">App</span> / <span className="text-slate-200 font-medium capitalize">{currentView.toLowerCase().replace('_', ' ')}</span>
+              <span className="text-slate-500">ScoutVision</span> / <span className="text-slate-200 font-medium">{VIEW_LABELS[currentView] ?? currentView}</span>
             </div>
             
             <div className="flex items-center gap-6">
@@ -139,9 +171,11 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
                         onChange={(e) => setGlobalSeason(e.target.value)}
                         className="bg-transparent border-none text-sm text-white font-medium focus:ring-0 cursor-pointer p-0"
                       >
-                         <option value="25-26">Season 25/26</option>
-                         <option value="24-25">Season 24/25</option>
-                         <option value="All">All Seasons</option>
+                         {seasonOptions.map(season => (
+                           <option key={season} value={season}>
+                             {season === 'All' ? 'Toutes les saisons' : `Saison ${getSeasonLabel(season)}`}
+                           </option>
+                         ))}
                       </select>
                    </div>
                )}

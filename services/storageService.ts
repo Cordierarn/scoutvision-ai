@@ -1,20 +1,12 @@
 import { PlayerData, getPlayerSeasonId } from '../types';
 
 const WATCHLIST_KEY = 'scoutvision_watchlist';
-const SEARCH_HISTORY_KEY = 'scoutvision_search_history';
 
 export interface WatchlistPlayer {
   player: PlayerData;
   addedAt: string;
   notes: string;
   tags: string[];
-}
-
-export interface SearchHistoryItem {
-  query: string;
-  type: 'player' | 'team' | 'filter';
-  timestamp: string;
-  context?: string; // e.g., "Gem Hunter - Box-to-Box"
 }
 
 // ============ WATCHLIST ============
@@ -62,12 +54,6 @@ export function removeFromWatchlist(player: PlayerData): boolean {
   return true;
 }
 
-export function isInWatchlist(player: PlayerData): boolean {
-  const watchlist = getWatchlist();
-  const playerId = getPlayerSeasonId(player);
-  return watchlist.some(w => getPlayerSeasonId(w.player) === playerId);
-}
-
 export function updateWatchlistNotes(player: PlayerData, notes: string): boolean {
   const watchlist = getWatchlist();
   const playerId = getPlayerSeasonId(player);
@@ -80,68 +66,6 @@ export function updateWatchlistNotes(player: PlayerData, notes: string): boolean
   return true;
 }
 
-export function updateWatchlistTags(player: PlayerData, tags: string[]): boolean {
-  const watchlist = getWatchlist();
-  const playerId = getPlayerSeasonId(player);
-  const index = watchlist.findIndex(w => getPlayerSeasonId(w.player) === playerId);
-  
-  if (index === -1) return false;
-  
-  watchlist[index].tags = tags;
-  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(watchlist));
-  return true;
-}
-
 export function clearWatchlist(): void {
   localStorage.removeItem(WATCHLIST_KEY);
-}
-
-// ============ SEARCH HISTORY ============
-
-const MAX_HISTORY_ITEMS = 15;
-
-export function getSearchHistory(): SearchHistoryItem[] {
-  try {
-    const stored = localStorage.getItem(SEARCH_HISTORY_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (e) {
-    console.error('Failed to load search history', e);
-    return [];
-  }
-}
-
-export function addToSearchHistory(
-  query: string, 
-  type: 'player' | 'team' | 'filter' = 'player',
-  context?: string
-): void {
-  if (!query.trim()) return;
-  
-  const history = getSearchHistory();
-  
-  // Remove duplicates of the same query
-  const filtered = history.filter(h => h.query.toLowerCase() !== query.toLowerCase());
-  
-  // Add new item at the beginning
-  filtered.unshift({
-    query,
-    type,
-    timestamp: new Date().toISOString(),
-    context
-  });
-  
-  // Keep only last N items
-  const trimmed = filtered.slice(0, MAX_HISTORY_ITEMS);
-  
-  localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(trimmed));
-}
-
-export function removeFromSearchHistory(query: string): void {
-  const history = getSearchHistory();
-  const filtered = history.filter(h => h.query !== query);
-  localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(filtered));
-}
-
-export function clearSearchHistory(): void {
-  localStorage.removeItem(SEARCH_HISTORY_KEY);
 }

@@ -1,42 +1,50 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
-import { PlayerData, TeamStats, ShotEvent, extractSeason, getSeasonColor, getPlayerSeasonId } from '../types';
-import { calculateRoleScore, ROLE_DEFINITIONS, ScoredPlayer, getAvailableLeagues, getAvailableTeams } from '../utils/scoringUtils';
-import { Filter, Users, Shield, Target, Activity, LayoutTemplate, MapPin, BarChart3, TrendingUp, Trophy, ChevronRight, Search, X } from 'lucide-react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { PlayerData, TeamStats, extractSeason, getSeasonColor, getPlayerSeasonId, getPlayerSeason, getSeasonShortLabel } from '../types';
+import { useShots } from '../hooks/useShots';
+import TeamStyleMap from './TeamStyleMap';
+import SquadLineup from './SquadLineup';
+import RecruitmentPanel from './RecruitmentPanel';
+import { roleLabel, positionLabel, shotResultLabel, shotTypeLabel, situationLabel } from '../utils/labels';
+import { getAvailableTeams } from '../utils/scoringUtils';
+import { Filter, Users, Shield, Target, Activity, LayoutTemplate, MapPin, BarChart3, TrendingUp, Trophy, ChevronRight, Search, X, UserSearch } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, ScatterChart, Scatter, ZAxis, Cell } from 'recharts';
 import { queryService } from '../services/queryService';
+import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
 
 interface TeamAnalysisProps {
   playerData: PlayerData[];
   teamStats: TeamStats[];
-  shotEvents: ShotEvent[];
+  onSelectPlayer?: (player: PlayerData) => void;
 }
 
-type Tab = 'DEPTH' | 'TACTICS' | 'SHOTMAP' | 'PLAYERS';
+type Tab = 'DEPTH' | 'TACTICS' | 'SHOTMAP' | 'PLAYERS' | 'RECRUIT';
 
-// --- Helper Data for Squad Depth - Updated with correct position mappings ---
-const FORMATION_4231 = [
-  { id: 'GK', name: 'GK', role: 'Shot-Stopping Goalkeeper', validPositions: ['GK'], top: '90%', left: '50%' },
-  { id: 'LB', name: 'LB', role: 'Attacking LB', validPositions: ['LB', 'LWB'], top: '75%', left: '15%' },
-  { id: 'LCB', name: 'LCB', role: 'Ball-Playing CB', validPositions: ['CB', 'LCB', 'RCB'], top: '80%', left: '35%' },
-  { id: 'RCB', name: 'RCB', role: 'Defensive CB', validPositions: ['CB', 'LCB', 'RCB'], top: '80%', left: '65%' },
-  { id: 'RB', name: 'RB', role: 'Attacking RB', validPositions: ['RB', 'RWB'], top: '75%', left: '85%' },
-  { id: 'LCM', name: 'DM', role: 'Deep-Lying Playmaker', validPositions: ['DMF', 'LDMF', 'RDMF', 'LCMF', 'RCMF'], top: '60%', left: '35%' },
-  { id: 'RCM', name: 'CM', role: 'Box-to-Box', validPositions: ['DMF', 'LDMF', 'RDMF', 'LCMF', 'RCMF', 'AMF'], top: '60%', left: '65%' },
-  { id: 'LW', name: 'LW', role: 'Inverted Winger', validPositions: ['LW', 'LWF', 'LAMF'], top: '35%', left: '15%' },
-  { id: 'CAM', name: 'CAM', role: 'Advanced Playmaker', validPositions: ['AMF', 'LAMF', 'RAMF'], top: '40%', left: '50%' },
-  { id: 'RW', name: 'RW', role: 'Inside Forward', validPositions: ['RW', 'RWF', 'RAMF'], top: '35%', left: '85%' },
-  { id: 'ST', name: 'ST', role: 'Advanced Striker', validPositions: ['CF'], top: '15%', left: '50%' },
-];
+// Équipe et onglet choisis, retrouvés au retour d'une fiche joueur
+const lastView = { team: '', search: '', tab: 'DEPTH' as Tab };
 
-const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shotEvents }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('DEPTH');
+/**
+ * Équipe dans la liste de recherche : logo, nom et compétition
+ */
+const TeamOption: React.FC<{ teamKey: string }> = ({ teamKey }) => {
+  const info = queryService.getTeamInfo(teamKey);
+  return (
+    <span className="flex items-center gap-2 min-w-0">
+      <TeamLogo src={info.logo} name={info.name} size="xs" />
+      <span className="truncate">{info.name}</span>
+      <CompetitionBadge competition={info.competition} className="text-[11px] text-slate-500" />
+    </span>
+  );
+};
+
+const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSelectPlayer }) => {
+  // Une équipe retenue n'est reprise que si elle existe dans les saisons chargées
+  const [activeTab, setActiveTab] = useState<Tab>(lastView.tab);
   const [selectedLeague, setSelectedLeague] = useState<string>('');
-  const [selectedTeam, setSelectedTeam] = useState<string>('');
-  const [teamSearchTerm, setTeamSearchTerm] = useState<string>('');
+  const [selectedTeam, setSelectedTeam] = useState<string>(() => (queryService.getTeamPlayers(lastView.team).length ? lastView.team : ''));
+  const [teamSearchTerm, setTeamSearchTerm] = useState<string>(() => (queryService.getTeamPlayers(lastView.team).length ? lastView.search : ''));
   const [showTeamDropdown, setShowTeamDropdown] = useState<boolean>(false);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedFormation, setSelectedFormation] = useState<string>('4-2-3-1');
 
   // Derived Lists - Utilisation du queryService pour des listes pré-indexées
   const availableTeams = useMemo(() => {
@@ -48,100 +56,18 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
     return queryService.searchTeams(teamSearchTerm, 15);
   }, [teamSearchTerm]);
 
+  useEffect(() => {
+    lastView.team = selectedTeam;
+    lastView.search = teamSearchTerm;
+    lastView.tab = activeTab;
+  }, [selectedTeam, teamSearchTerm, activeTab]);
+
   const handleTeamSelect = (team: string) => {
     setSelectedTeam(team);
     setTeamSearchTerm(team);
     setShowTeamDropdown(false);
   };
 
-  // --- TAB 1: SQUAD DEPTH LOGIC ---
-  const depthChart = useMemo(() => {
-    if (!selectedTeam) return {};
-    
-    // Utilisation du queryService pour récupérer les joueurs de l'équipe (O(1))
-    const filtered = queryService.getTeamPlayers(selectedTeam);
-    
-    if (filtered.length === 0) return {};
-
-    // ÉTAPE 1: Calculer tous les scores pour chaque joueur à chaque position
-    type PlayerScoreEntry = { player: PlayerData; positionId: string; score: number };
-    const allScores: PlayerScoreEntry[] = [];
-    
-    filtered.forEach(player => {
-      if (!player.Position) return;
-      
-      const playerPositions = player.Position.split(',').map(s => s.trim());
-      const mainPos = player['Main Position'] as string;
-      if (mainPos) playerPositions.push(mainPos.trim());
-      
-      FORMATION_4231.forEach(pos => {
-        const isValidPosition = playerPositions.some(pp => pos.validPositions.includes(pp));
-        if (!isValidPosition) return;
-        
-        // Calculer le score pour ce joueur à cette position
-        let score = 0;
-        const roleKey = Object.keys(ROLE_DEFINITIONS).find(r => r === pos.role) || Object.keys(ROLE_DEFINITIONS)[0];
-        const roleDef = ROLE_DEFINITIONS[roleKey];
-        
-        if (roleDef && roleDef.metrics) {
-          Object.entries(roleDef.metrics).forEach(([metric, weight]) => {
-            const val = Number(player[metric]) || 0;
-            score += val * (weight as number) * 10;
-          });
-        }
-        
-        allScores.push({
-          player,
-          positionId: pos.id,
-          score: Math.round(Math.min(100, Math.max(0, score)))
-        });
-      });
-    });
-    
-    // ÉTAPE 2: Trier par score décroissant
-    allScores.sort((a, b) => b.score - a.score);
-    
-    // ÉTAPE 3: Assigner les joueurs - chaque joueur ne peut être qu'à UNE position
-    const assignedPlayers = new Set<string>(); // Joueurs déjà assignés à une position
-    const chart: Record<string, ScoredPlayer[]> = {};
-    
-    // Initialiser les positions
-    FORMATION_4231.forEach(pos => { chart[pos.id] = []; });
-    
-    // Premier passage: assigner le meilleur joueur unique à chaque position
-    for (const entry of allScores) {
-      const { player, positionId, score } = entry;
-      const playerName = player.Player;
-      
-      // Si le joueur est déjà assigné, skip
-      if (assignedPlayers.has(playerName)) continue;
-      
-      // Si cette position a déjà son titulaire (1er), skip
-      if (chart[positionId].length >= 1) continue;
-      
-      // Assigner ce joueur comme titulaire
-      chart[positionId].push({ ...player, roleScore: score } as ScoredPlayer);
-      assignedPlayers.add(playerName);
-    }
-    
-    // Deuxième passage: ajouter des remplaçants (max 2 par position)
-    // Les remplaçants peuvent être des joueurs déjà assignés ailleurs (backup)
-    for (const entry of allScores) {
-      const { player, positionId, score } = entry;
-      
-      // Si cette position a déjà 3 joueurs, skip
-      if (chart[positionId].length >= 3) continue;
-      
-      // Vérifier si ce joueur est déjà dans cette position
-      const alreadyInPosition = chart[positionId].some(p => p.Player === player.Player);
-      if (alreadyInPosition) continue;
-      
-      // Ajouter comme remplaçant
-      chart[positionId].push({ ...player, roleScore: score } as ScoredPlayer);
-    }
-    
-    return chart;
-  }, [selectedTeam]);
 
   // --- TAB 2: TEAM TACTICS LOGIC (US-10) ---
   const tacticalProfile = useMemo(() => {
@@ -152,25 +78,24 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
     
     // Si on a des stats d'équipe, les utiliser
     if (teamData) {
-      const cohort = selectedLeague 
-        ? teamStats.filter(t => t.league === selectedLeague) 
-        : teamStats;
+      // Cohorte : les équipes de la même compétition et de la même saison
+      const cohort = teamStats.filter(t => t.league === teamData.league);
       
-      // Métriques adaptées aux colonnes réelles de ALL_LEAGUES_merged.csv
+      // Métriques team_season PitchAPI (higher: false = moins c'est mieux)
       const metrics = [
-        { key: 'shooting_goals', label: 'Goals Scored', higher: true },
-        { key: 'standard_possession', label: 'Possession %', higher: true },
-        { key: 'passing_pass_completion_pct', label: 'Pass Accuracy', higher: true },
-        { key: 'defense_tackles_won', label: 'Tackles Won', higher: true },
-        { key: 'shooting_xg', label: 'Expected Goals', higher: true },
-        { key: 'keeper_clean_sheet_pct', label: 'Clean Sheets %', higher: true },
+        { key: 'xG per 90', label: 'xG créés', higher: true },
+        { key: 'xGA per 90', label: 'xG concédés', higher: false },
+        { key: 'Possession, %', label: 'Possession', higher: true },
+        { key: 'Pass accuracy, %', label: 'Passes réussies', higher: true },
+        { key: 'PPDA', label: 'Pressing (PPDA)', higher: false },
+        { key: 'Field tilt', label: 'Domination territoriale', higher: true },
       ];
 
       return metrics.map(m => {
-        const val = Number(teamData[m.key as keyof TeamStats]) || 0;
-        const values = cohort.map(c => Number(c[m.key as keyof TeamStats]) || 0).filter(v => v > 0).sort((a, b) => a - b);
-        const rank = values.filter(v => v < val).length;
-        const percentile = values.length > 0 ? Math.round((rank / values.length) * 100) : 50;
+        const val = Number(teamData[m.key]) || 0;
+        const values = cohort.map(c => Number(c[m.key]) || 0).filter(v => v > 0).sort((a, b) => a - b);
+        const below = values.filter(v => (m.higher ? v < val : v > val)).length;
+        const percentile = values.length > 0 ? Math.round((below / values.length) * 100) : 50;
         return { 
           subject: m.label, 
           A: percentile, 
@@ -186,12 +111,12 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
     
     // Calculer des métriques agrégées depuis les joueurs
     const avgMetrics = {
-      'Attack': teamPlayers.reduce((sum, p) => sum + (Number(p['xG per 90']) || 0), 0) / teamPlayers.length,
-      'Creation': teamPlayers.reduce((sum, p) => sum + (Number(p['xA per 90']) || 0), 0) / teamPlayers.length,
-      'Passing': teamPlayers.reduce((sum, p) => sum + (Number(p['Accurate passes, %']) || 0), 0) / teamPlayers.length,
-      'Defense': teamPlayers.reduce((sum, p) => sum + (Number(p['Successful defensive actions per 90']) || 0), 0) / teamPlayers.length,
-      'Dribbling': teamPlayers.reduce((sum, p) => sum + (Number(p['Successful dribbles, %']) || 0), 0) / teamPlayers.length,
-      'Aerial': teamPlayers.reduce((sum, p) => sum + (Number(p['Aerial duels won, %']) || 0), 0) / teamPlayers.length,
+      'Attaque': teamPlayers.reduce((sum, p) => sum + (Number(p['xG per 90']) || 0), 0) / teamPlayers.length,
+      'Création': teamPlayers.reduce((sum, p) => sum + (Number(p['xA per 90']) || 0), 0) / teamPlayers.length,
+      'Passe': teamPlayers.reduce((sum, p) => sum + (Number(p['Accurate passes, %']) || 0), 0) / teamPlayers.length,
+      'Défense': teamPlayers.reduce((sum, p) => sum + (Number(p['Successful defensive actions per 90']) || 0), 0) / teamPlayers.length,
+      'Dribble': teamPlayers.reduce((sum, p) => sum + (Number(p['Successful dribbles, %']) || 0), 0) / teamPlayers.length,
+      'Jeu aérien': teamPlayers.reduce((sum, p) => sum + (Number(p['Aerial duels won, %']) || 0), 0) / teamPlayers.length,
     };
 
     // Calculer les percentiles par rapport à toutes les équipes
@@ -202,12 +127,12 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
       const allValues = allTeams.map(team => {
         const stats = queryService.getTeamAggregatedStats(team);
         switch(label) {
-          case 'Attack': return stats.avgXGPer90;
-          case 'Creation': return stats.avgXAPer90;
-          case 'Passing': return stats.avgPassAccuracy;
-          case 'Defense': return stats.avgDefensiveActions;
-          case 'Dribbling': return stats.avgDribbleSuccess;
-          case 'Aerial': return stats.avgAerialWon;
+          case 'Attaque': return stats.avgXGPer90;
+          case 'Création': return stats.avgXAPer90;
+          case 'Passe': return stats.avgPassAccuracy;
+          case 'Défense': return stats.avgDefensiveActions;
+          case 'Dribble': return stats.avgDribbleSuccess;
+          case 'Jeu aérien': return stats.avgAerialWon;
           default: return 0;
         }
       }).sort((a, b) => a - b);
@@ -224,12 +149,24 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
     });
   }, [teamStats, selectedTeam, selectedLeague]);
 
+  // Stats de saison de l'équipe sélectionnée (style de jeu, carte des styles)
+  const selectedTeamStats = useMemo(
+    () => (selectedTeam ? queryService.getTeamStats(selectedTeam) : null), [selectedTeam]);
+
   // --- TAB 3: SHOT MAP LOGIC (US-11) ---
-  const shotMapData = useMemo(() => {
-      if (!selectedTeam) return [];
-      // Utilisation du queryService pour récupérer les tirs de l'équipe (O(1))
-      return queryService.getTeamShots(selectedTeam);
+  // L'équipe sélectionnée donne sa compétition et sa saison : tirs chargés à la demande
+  const selectedTeamInfo = useMemo(() => {
+      const first = selectedTeam ? queryService.getTeamPlayers(selectedTeam)[0] : undefined;
+      return first
+        ? { name: first.Team, teamId: first['Team ID'], season: getPlayerSeason(first), competition: first.Competition }
+        : null;
   }, [selectedTeam]);
+  const { shots: competitionShots } = useShots(selectedTeamInfo?.season, selectedTeamInfo?.competition);
+
+  const shotMapData = useMemo(() => {
+      if (!selectedTeamInfo) return [];
+      return competitionShots.filter(s => s.team === selectedTeamInfo.name);
+  }, [competitionShots, selectedTeamInfo]);
 
   // Stats for shot map
   const shotStats = useMemo(() => {
@@ -252,26 +189,28 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
         if (s.result === 'Goal') stats.goals++;
       });
       
+      // Photo des buteurs depuis l'effectif (absente pour les joueurs sous le seuil de minutes)
+      const photos = new Map(queryService.getTeamPlayers(selectedTeam).map(p => [p.Player, p.Image]));
       const topScorers = Array.from(scorerMap.entries())
-        .map(([name, stats]) => ({ name, ...stats }))
+        .map(([name, stats]) => ({ name, image: photos.get(name), ...stats }))
         .sort((a, b) => b.goals - a.goals || b.xG - a.xG)
         .slice(0, 5);
       
       return { total, goals, xG, onTarget, blocked, topScorers };
-  }, [shotMapData]);
+  }, [shotMapData, selectedTeam]);
 
   // --- TAB 4: TEAM PLAYERS LIST ---
   const teamPlayerStats = useMemo(() => {
     if (!selectedTeam) return [];
-    return playerData
-      .filter(p => p.Team === selectedTeam)
+    // selectedTeam est une clé « équipe · compétition saison » (queryService.getTeamKey)
+    return queryService.getTeamPlayers(selectedTeam)
       .map(p => ({
         ...p,
         goalsContribution: (Number(p.Goals) || 0) + (Number(p.Assists) || 0),
         minutesPlayed: Number(p['Minutes played']) || 0,
       }))
       .sort((a, b) => b.minutesPlayed - a.minutesPlayed);
-  }, [playerData, selectedTeam]);
+  }, [selectedTeam]);
 
 
   return (
@@ -281,19 +220,19 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
       <div className={`bg-slate-950 border-r border-slate-800 flex flex-col transition-all duration-300 z-20 absolute lg:relative h-full ${isSidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full lg:w-0 lg:translate-x-0 overflow-hidden'}`}>
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
             <h2 className="font-bold text-white flex items-center gap-2">
-                <Filter className="w-5 h-5 text-emerald-400" /> Analysis Filters
+                <Filter className="w-5 h-5 text-emerald-400" /> Filtres
             </h2>
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400"><LayoutTemplate /></button>
         </div>
 
         <div className="p-5 space-y-6">
             <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Search Team</label>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rechercher une équipe</label>
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <input
                         type="text"
-                        placeholder="Type to search..."
+                        placeholder="Nom du club..."
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2.5 text-slate-200 text-sm focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none"
                         value={teamSearchTerm}
                         onChange={(e) => {
@@ -324,75 +263,82 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                                     selectedTeam === team ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-300'
                                 }`}
                             >
-                                <span className="truncate">{team}</span>
+                                <TeamOption teamKey={team} />
                                 {selectedTeam === team && <ChevronRight className="w-4 h-4 text-emerald-400" />}
                             </button>
                         ))}
                         {teamSearchTerm && filteredTeams.length === 0 && (
-                            <div className="px-4 py-3 text-sm text-slate-500 text-center">No teams found</div>
+                            <div className="px-4 py-3 text-sm text-slate-500 text-center">Aucune équipe trouvée</div>
                         )}
                     </div>
                 )}
                 
                 <div className="text-xs text-slate-600 mt-1">
-                    {availableTeams.length} teams available
+                    {availableTeams.length} équipes disponibles
                 </div>
             </div>
 
             {/* View Selection Tabs */}
             <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Analysis Mode</label>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Analyse</label>
                 <button 
                     onClick={() => setActiveTab('DEPTH')}
                     className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === 'DEPTH' ? 'bg-emerald-500 text-slate-900 font-bold' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
                 >
-                    <Users className="w-4 h-4" /> Squad Depth
+                    <Users className="w-4 h-4" /> Composition type
                 </button>
                 <button 
                     onClick={() => setActiveTab('TACTICS')}
                     className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === 'TACTICS' ? 'bg-emerald-500 text-slate-900 font-bold' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
                 >
-                    <Shield className="w-4 h-4" /> Tactical Profile
+                    <Shield className="w-4 h-4" /> Profil tactique
                 </button>
                 <button 
                     onClick={() => setActiveTab('SHOTMAP')}
-                    disabled={shotEvents.length === 0}
+                    disabled={!selectedTeam}
                     className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === 'SHOTMAP' ? 'bg-emerald-500 text-slate-900 font-bold' : 'bg-slate-900 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
                 >
-                    <Target className="w-4 h-4" /> Shot Map
-                    {shotEvents.length === 0 && <span className="ml-auto text-[10px] opacity-70">No Data</span>}
+                    <Target className="w-4 h-4" /> Carte des tirs
+                    {!selectedTeam && <span className="ml-auto text-[10px] opacity-70">Aucune donnée</span>}
+                </button>
+                <button
+                    onClick={() => setActiveTab('RECRUIT')}
+                    disabled={!selectedTeam}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === 'RECRUIT' ? 'bg-emerald-500 text-slate-900 font-bold' : 'bg-slate-900 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                >
+                    <UserSearch className="w-4 h-4" /> Recrutement
                 </button>
                 <button 
                     onClick={() => setActiveTab('PLAYERS')}
                     className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === 'PLAYERS' ? 'bg-emerald-500 text-slate-900 font-bold' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
                 >
-                    <BarChart3 className="w-4 h-4" /> Team Players
+                    <BarChart3 className="w-4 h-4" /> Effectif
                 </button>
             </div>
             
             {/* Team Quick Stats */}
             {selectedTeam && teamPlayerStats.length > 0 && (
               <div className="bg-slate-900 rounded-xl p-4 border border-slate-800">
-                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Team Summary</h4>
+                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Résumé</h4>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Players</span>
+                    <span className="text-slate-400">Joueurs</span>
                     <span className="text-white font-bold">{teamPlayerStats.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Total Goals</span>
+                    <span className="text-slate-400">Buts</span>
                     <span className="text-emerald-400 font-bold">
                       {teamPlayerStats.reduce((s, p) => s + (Number(p.Goals) || 0), 0)}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Total Assists</span>
+                    <span className="text-slate-400">Passes décisives</span>
                     <span className="text-blue-400 font-bold">
                       {teamPlayerStats.reduce((s, p) => s + (Number(p.Assists) || 0), 0)}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Avg Age</span>
+                    <span className="text-slate-400">Âge moyen</span>
                     <span className="text-white font-bold">
                       {(teamPlayerStats.reduce((s, p) => s + (Number(p.Age) || 0), 0) / teamPlayerStats.length).toFixed(1)}
                     </span>
@@ -415,74 +361,19 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
           {!selectedTeam ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
                   <Activity className="w-16 h-16 mb-4 opacity-20" />
-                  <p>Select a team from the sidebar to begin analysis.</p>
+                  <p>Choisissez une équipe dans le panneau de gauche.</p>
               </div>
           ) : (
             <div className="flex-1 overflow-auto custom-scrollbar">
                 
-                {/* --- VIEW: SQUAD DEPTH --- */}
+                {/* --- VIEW: SQUAD DEPTH (compositions réelles) --- */}
                 {activeTab === 'DEPTH' && (
-                    <div className="relative min-w-[800px] min-h-[700px] h-full w-full bg-[#1a2c2c] overflow-hidden">
-                        {/* Pitch Pattern */}
-                        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:4rem_4rem] z-0"></div>
-                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.15)_0%,transparent_70%)] z-0"></div>
-                        
-                        {/* Pitch Markings */}
-                        <div className="absolute inset-12 border-2 border-white/10 rounded-sm z-0"></div>
-                        <div className="absolute top-1/2 left-0 right-0 h-px bg-white/10 z-0"></div>
-                        <div className="absolute top-1/2 left-1/2 w-40 h-40 border-2 border-white/10 rounded-full -translate-x-1/2 -translate-y-1/2 z-0"></div>
-                        <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-white/30 rounded-full -translate-x-1/2 -translate-y-1/2 z-0"></div>
-                        
-                        {/* Penalty Areas */}
-                        <div className="absolute top-12 left-1/2 w-[40%] h-40 border-2 border-t-0 border-white/10 -translate-x-1/2 z-0"></div>
-                        <div className="absolute bottom-12 left-1/2 w-[40%] h-40 border-2 border-b-0 border-white/10 -translate-x-1/2 z-0"></div>
-
-                        {FORMATION_4231.map((pos) => {
-                            const topPlayer = depthChart[pos.id]?.[0];
-                            return (
-                                <div key={pos.id} className="absolute w-52 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10" style={{ top: pos.top, left: pos.left }}>
-                                    <div className="mb-2 px-3 py-1 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-[10px] font-bold text-emerald-400 uppercase tracking-wide shadow-lg">
-                                        {pos.role}
-                                    </div>
-                                    {topPlayer ? (
-                                        <div className="w-full bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-xl p-3 shadow-2xl hover:scale-105 hover:border-emerald-500/50 transition-all group relative cursor-pointer">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white border-2 shadow-inner ${
-                                                    topPlayer.roleScore >= 90 ? 'bg-emerald-600 border-emerald-400' :
-                                                    topPlayer.roleScore >= 80 ? 'bg-blue-600 border-blue-400' :
-                                                    'bg-slate-700 border-slate-500'
-                                                }`}>
-                                                    {(topPlayer.Player || '?').substring(0, 1)}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="text-white font-bold truncate text-sm">{topPlayer.Player || 'Unknown'}</div>
-                                                    <div className="flex items-center justify-between mt-1">
-                                                        <div className={`text-xs font-bold ${topPlayer.roleScore > 80 ? 'text-emerald-400' : 'text-yellow-400'}`}>
-                                                            {topPlayer.roleScore} <span className="text-[10px] text-slate-500 font-normal">RATING</span>
-                                                        </div>
-                                                        <div className="text-[10px] text-slate-400">
-                                                            {Number(topPlayer.Age)} yo
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            {/* Tooltip List */}
-                                            <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg overflow-hidden hidden group-hover:block z-50">
-                                                {depthChart[pos.id]?.slice(1).map((p, idx) => (
-                                                    <div key={idx} className="p-2 border-b border-slate-800 flex justify-between text-[10px] hover:bg-slate-800">
-                                                        <span className="text-slate-300 truncate">{p.Player || 'Unknown'}</span>
-                                                        <span className="text-emerald-500">{p.roleScore}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="w-10 h-10 rounded-full border-2 border-dashed border-white/20"></div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
+                    <SquadLineup
+                        teamId={selectedTeamInfo?.teamId}
+                        season={selectedTeamInfo?.season}
+                        competition={selectedTeamInfo?.competition}
+                        players={selectedTeam ? queryService.getTeamPlayers(selectedTeam) : []}
+                    />
                 )}
 
                 {/* --- VIEW: TACTICAL PROFILE (US-10) --- */}
@@ -492,7 +383,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
                              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">
                                 <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                                    <Shield className="w-5 h-5 text-emerald-500" /> Relative Strength Profile
+                                    <Shield className="w-5 h-5 text-emerald-500" /> Forces relatives
                                 </h3>
                                 <div className="h-[300px] w-full">
                                     <ResponsiveContainer width="100%" height="100%">
@@ -505,19 +396,19 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                                         </RadarChart>
                                     </ResponsiveContainer>
                                 </div>
-                                <p className="text-center text-xs text-slate-500 mt-4">Percentile Rank vs All Teams</p>
+                                <p className="text-center text-xs text-slate-500 mt-4">Percentile parmi les équipes de la compétition</p>
                              </div>
 
                              <div className="space-y-4">
                                 <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6">
-                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Tactical DNA</h4>
+                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">ADN tactique</h4>
                                     <div className="space-y-4">
                                         {tacticalProfile.map(stat => (
                                             <div key={stat.subject}>
                                                 <div className="flex justify-between text-sm mb-1">
                                                     <span className="text-slate-300">{stat.subject}</span>
                                                     <span className={`font-mono font-bold ${stat.A > 75 ? 'text-emerald-400' : stat.A < 25 ? 'text-rose-400' : 'text-slate-400'}`}>
-                                                        {stat.A}th Percentile
+                                                        {stat.A}e percentile
                                                     </span>
                                                 </div>
                                                 <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
@@ -535,10 +426,11 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                         ) : (
                           <div className="flex flex-col items-center justify-center h-64 text-slate-500">
                             <Shield className="w-16 h-16 mb-4 opacity-20" />
-                            <p>No tactical data available for this team.</p>
-                            <p className="text-sm mt-2">Make sure player data is loaded.</p>
+                            <p>Aucune donnée tactique pour cette équipe.</p>
+                            <p className="text-sm mt-2">Les statistiques d'équipe manquent pour cette compétition.</p>
                           </div>
                         )}
+                        {selectedTeamStats && <TeamStyleMap team={selectedTeamStats} teams={teamStats} />}
                     </div>
                 )}
 
@@ -548,11 +440,11 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                         {/* Stats Header */}
                         <div className="bg-slate-950 border-b border-slate-800 p-4 grid grid-cols-5 gap-4">
                             <div className="text-center">
-                                <div className="text-xs text-slate-500 uppercase">Shots</div>
+                                <div className="text-xs text-slate-500 uppercase">Tirs</div>
                                 <div className="text-2xl font-bold text-white">{shotStats.total}</div>
                             </div>
                             <div className="text-center">
-                                <div className="text-xs text-slate-500 uppercase">Goals</div>
+                                <div className="text-xs text-slate-500 uppercase">Buts</div>
                                 <div className="text-2xl font-bold text-emerald-400">{shotStats.goals}</div>
                             </div>
                             <div className="text-center">
@@ -560,7 +452,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                                 <div className="text-2xl font-bold text-blue-400">{shotStats.xG.toFixed(2)}</div>
                             </div>
                             <div className="text-center">
-                                <div className="text-xs text-slate-500 uppercase">On Target</div>
+                                <div className="text-xs text-slate-500 uppercase">Cadrés</div>
                                 <div className="text-2xl font-bold text-yellow-400">{shotStats.onTarget}</div>
                             </div>
                             <div className="text-center">
@@ -623,9 +515,9 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                                                 <div className="font-bold text-white">{shot.player}</div>
                                                 <div className="text-slate-400">xG: {(shot.xG || 0).toFixed(3)}</div>
                                                 <div className={`font-medium ${isGoal ? 'text-emerald-400' : isSaved ? 'text-blue-400' : 'text-red-400'}`}>
-                                                  {shot.result}
+                                                  {shotResultLabel(shot.result)}
                                                 </div>
-                                                <div className="text-slate-500">{shot.shotType} • {shot.situation}</div>
+                                                <div className="text-slate-500">{shotTypeLabel(shot.shotType)} • {situationLabel(shot.situation)}</div>
                                               </div>
                                             </div>
                                         </div>
@@ -635,17 +527,17 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
 
                               {/* Legend */}
                               <div className="absolute bottom-4 left-4 bg-slate-950/90 p-3 rounded-xl border border-slate-700 text-xs text-white space-y-1.5">
-                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-emerald-500"></div> Goal</div>
-                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500"></div> Saved</div>
-                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500"></div> Missed/Blocked</div>
-                                <div className="mt-2 pt-2 border-t border-slate-700 text-[10px] text-slate-400">Circle size = xG value</div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-emerald-500"></div> But</div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500"></div> Arrêté</div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500"></div> Manqué ou contré</div>
+                                <div className="mt-2 pt-2 border-t border-slate-700 text-[10px] text-slate-400">Taille du cercle = xG</div>
                               </div>
                             </div>
 
                             {/* Top Scorers Panel */}
                             <div className="w-72 bg-slate-950 border-l border-slate-800 p-4 overflow-auto">
                               <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                                <Trophy className="w-4 h-4 text-yellow-500" /> Top Scorers
+                                <Trophy className="w-4 h-4 text-yellow-500" /> Meilleurs buteurs
                               </h3>
                               <div className="space-y-3">
                                 {shotStats.topScorers.map((scorer, idx) => (
@@ -654,19 +546,23 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                                       <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-yellow-500 text-black' : idx === 1 ? 'bg-slate-400 text-black' : idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-700 text-white'}`}>
                                         {idx + 1}
                                       </div>
+                                      <div className="relative overflow-hidden w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
+                                        {scorer.name.substring(0, 2).toUpperCase()}
+                                        <PhotoOverlay src={scorer.image} alt={scorer.name} />
+                                      </div>
                                       <div className="flex-1 min-w-0">
                                         <div className="text-white font-medium text-sm truncate">{scorer.name}</div>
                                         <div className="flex gap-3 text-xs mt-1">
-                                          <span className="text-emerald-400">{scorer.goals} goals</span>
+                                          <span className="text-emerald-400">{scorer.goals} buts</span>
                                           <span className="text-blue-400">{scorer.xG.toFixed(2)} xG</span>
-                                          <span className="text-slate-500">{scorer.shots} shots</span>
+                                          <span className="text-slate-500">{scorer.shots} tirs</span>
                                         </div>
                                       </div>
                                     </div>
                                   </div>
                                 ))}
                                 {shotStats.topScorers.length === 0 && (
-                                  <p className="text-slate-500 text-sm">No scorers data</p>
+                                  <p className="text-slate-500 text-sm">Aucun buteur</p>
                                 )}
                               </div>
                             </div>
@@ -674,11 +570,22 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                         ) : (
                           <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
                             <Target className="w-16 h-16 mb-4 opacity-20" />
-                            <p>No shot data available for {selectedTeam}.</p>
-                            <p className="text-sm mt-2">Make sure the shot events CSV is loaded.</p>
+                            <p>Aucune donnée de tir pour {selectedTeam}.</p>
+                            <p className="text-sm mt-2">Cette compétition n'a pas de données de tirs pour cette saison.</p>
                           </div>
                         )}
                     </div>
+                )}
+
+                {/* --- VIEW: RECRUTEMENT --- */}
+                {activeTab === 'RECRUIT' && (
+                    <RecruitmentPanel
+                        key={selectedTeam}
+                        teamKey={selectedTeam}
+                        playerData={playerData}
+                        teamStats={teamStats}
+                        onSelectPlayer={onSelectPlayer}
+                    />
                 )}
 
                 {/* --- VIEW: TEAM PLAYERS --- */}
@@ -686,21 +593,24 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                   <div className="p-6">
                     <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden">
                       <div className="p-4 border-b border-slate-800">
-                        <h3 className="text-lg font-bold text-white">Squad Overview - {selectedTeam}</h3>
-                        <p className="text-sm text-slate-500">{teamPlayerStats.length} players</p>
+                        <h3 className="text-lg font-bold text-white flex items-center gap-3">
+                          <TeamLogo src={queryService.getTeamInfo(selectedTeam).logo} name={selectedTeam} size="md" />
+                          Effectif - {selectedTeam}
+                        </h3>
+                        <p className="text-sm text-slate-500">{teamPlayerStats.length} joueurs</p>
                       </div>
                       
                       {/* Table Header */}
                       <div className="grid grid-cols-12 bg-slate-900 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                        <div className="col-span-3 p-3">Player</div>
-                        <div className="col-span-1 p-3 text-center">Age</div>
-                        <div className="col-span-1 p-3 text-center">Pos</div>
-                        <div className="col-span-1 p-3 text-center">Mins</div>
-                        <div className="col-span-1 p-3 text-center">Goals</div>
-                        <div className="col-span-1 p-3 text-center">Assists</div>
+                        <div className="col-span-3 p-3">Joueur</div>
+                        <div className="col-span-1 p-3 text-center">Âge</div>
+                        <div className="col-span-1 p-3 text-center">Poste</div>
+                        <div className="col-span-1 p-3 text-center">Min</div>
+                        <div className="col-span-1 p-3 text-center">Buts</div>
+                        <div className="col-span-1 p-3 text-center">PD</div>
                         <div className="col-span-1 p-3 text-center">xG</div>
                         <div className="col-span-1 p-3 text-center">xA</div>
-                        <div className="col-span-2 p-3 text-right">Value</div>
+                        <div className="col-span-2 p-3 text-right">Valeur</div>
                       </div>
                       
                       {/* Table Body */}
@@ -712,18 +622,19 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, shot
                           <div key={getPlayerSeasonId(player)} className="grid grid-cols-12 border-b border-slate-800/50 hover:bg-slate-900/50 transition-colors text-sm items-center">
                             <div className="col-span-3 p-3 flex items-center gap-2">
                               <div className="relative">
-                                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-emerald-400">
+                                <div className="relative overflow-hidden w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-emerald-400">
                                   {(player.Player || '?').substring(0, 2).toUpperCase()}
+                                  <PhotoOverlay src={player.Image} alt={player.Player} />
                                 </div>
                                 <div className={`absolute -bottom-1 -right-1 px-1 py-0 rounded text-[7px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text} border ${pSeasonColors.border}`}>
-                                  {pSeason}
+                                  {getSeasonShortLabel(pSeason)}
                                 </div>
                               </div>
                               <span className="text-white font-medium truncate">{player.Player || 'Unknown'}</span>
                             </div>
                             <div className="col-span-1 p-3 text-center text-slate-400">{player.Age}</div>
                             <div className="col-span-1 p-3 text-center">
-                              <span className="px-2 py-0.5 rounded bg-slate-800 text-xs text-slate-300">{player.Position}</span>
+                              <span className="px-2 py-0.5 rounded bg-slate-800 text-xs text-slate-300">{positionLabel(player.Position)}</span>
                             </div>
                             <div className="col-span-1 p-3 text-center text-slate-400">{player.minutesPlayed}</div>
                             <div className="col-span-1 p-3 text-center font-bold text-emerald-400">{player.Goals || 0}</div>

@@ -9,7 +9,7 @@ export function exportToCSV(
   columns?: string[]
 ): void {
   if (players.length === 0) {
-    alert('No players to export');
+    alert('Aucun joueur à exporter');
     return;
   }
 
@@ -60,16 +60,4 @@ export function exportProspects(
   
   const sanitizedRole = roleName.replace(/[^a-zA-Z0-9]/g, '_');
   exportToCSV(players, `prospects_${sanitizedRole}`, columns);
-}
-
-/**
- * Export comparison data
- */
-export function exportComparison(
-  players: PlayerData[],
-  metrics: string[]
-): void {
-  const baseColumns = ['Player', 'Team', 'Position', 'Age', 'Market value', 'League'];
-  const columns = [...baseColumns, ...metrics];
-  exportToCSV(players, 'player_comparison', columns);
 }
