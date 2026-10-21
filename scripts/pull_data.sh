@@ -10,6 +10,12 @@ ASSET="scoutvision-data.tar.gz"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Dans un Codespace, le GITHUB_TOKEN injecté ne voit que ce dépôt : utiliser `gh auth login`
+# Un GH_TOKEN qui n'a pas la forme d'un jeton GitHub (secret mal collé) est ignoré
+if [ -n "${GH_TOKEN:-}" ] && ! printf '%s' "$GH_TOKEN" | grep -Eq '^(github_pat_|gh[pousr]_)[A-Za-z0-9_]+$'; then
+  echo "Avertissement : GH_TOKEN n'est pas un jeton GitHub valide, il est ignoré." >&2
+  unset GH_TOKEN
+fi
+
 gh_() {
   if [ -n "${CODESPACES:-}" ] && [ -z "${GH_TOKEN:-}" ]; then
     env -u GITHUB_TOKEN gh "$@"

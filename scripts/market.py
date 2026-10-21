@@ -102,9 +102,21 @@ def _odds(df: pd.DataFrame, *prefixes: str) -> np.ndarray:
     return out
 
 
+def _odds_ou(df: pd.DataFrame, *prefixes: str) -> np.ndarray:
+    """Première paire de cotes plus / moins de 2,5 buts complète parmi les préfixes."""
+    out = np.full((len(df), 2), np.nan)
+    for prefix in prefixes:
+        cand = np.column_stack([_num(df, f"{prefix}>2.5"), _num(df, f"{prefix}<2.5")])
+        fill = np.isnan(out).any(axis=1) & ~np.isnan(cand).any(axis=1)
+        out[fill] = cand[fill]
+    return out
+
+
 def _normalize(df: pd.DataFrame, comp: str, home: str, away: str, hg: str, ag: str) -> pd.DataFrame:
     closing = _odds(df, "BFEC", "PSC", "AvgC")        # échange Betfair d'abord : le plus affûté
     pre = _odds(df, "Avg")                             # moyenne des bookmakers avant match
+    ou_close = _odds_ou(df, "BFEC", "PC", "AvgC")      # plus / moins de 2,5 buts (championnats principaux)
+    ou_pre = _odds_ou(df, "Avg")
     return pd.DataFrame({
         "competition": comp,
         "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
@@ -112,6 +124,8 @@ def _normalize(df: pd.DataFrame, comp: str, home: str, away: str, hg: str, ag: s
         "goals_home": _num(df, hg), "goals_away": _num(df, ag),
         "close_h": closing[:, 0], "close_d": closing[:, 1], "close_a": closing[:, 2],
         "pre_h": pre[:, 0], "pre_d": pre[:, 1], "pre_a": pre[:, 2],
+        "close_over": ou_close[:, 0], "close_under": ou_close[:, 1],
+        "pre_over": ou_pre[:, 0], "pre_under": ou_pre[:, 1],
     }).dropna(subset=["date", "goals_home", "goals_away"])
 
 
@@ -305,3 +319,85 @@ def attach_odds(matches: list[dict], fixtures: pd.DataFrame, mapping: dict[tuple
         }
         covered += 1
     return covered
+
+
+# ============================================
+# PLUS / MOINS DE 2,5 BUTS
+# ============================================
+
+def _bet_stats(pm: np.ndarray, pk: np.ndarray, out: np.ndarray, pre: np.ndarray) -> dict:
+    """Paris de valeur simulés : avantage du modèle > EDGE_THRESHOLD sur la cote avant match,
+    jugés au gain contre la clôture sans marge (CLV) et au rendement, avec erreurs-types."""
+    ok = ~np.isnan(pre).any(axis=1)
+    if ok.sum() == 0:
+        return {}
+    edge = pm[ok] * pre[ok] - 1
+    rows, cols = np.nonzero(edge > EDGE_THRESHOLD)
+    if len(rows) == 0:
+        return {"bets": 0}
+    price = pre[ok][rows, cols]
+    clv = price * pk[ok][rows, cols] - 1
+    profit = np.where(out[ok][rows] == cols, price - 1, -1.0)
+    se = lambda v: round(float(v.std(ddof=1) / np.sqrt(len(v))), 4) if len(v) > 1 else 0.0
+    return {"bets": int(len(rows)), "clv": round(float(clv.mean()), 4), "clvSe": se(clv),
+            "roi": round(float(profit.mean()), 4), "roiSe": se(profit)}
+
+
+def evaluate_over_under(results: pd.DataFrame, history: pd.DataFrame, mapping: dict[tuple[str, str], str],
+                        team_league: dict[str, str], fit, start: pd.Timestamp, window_days: int = 730) -> dict:
+    """Plus / moins de 2,5 buts : chaque semaine depuis `start`, le modèle joint (`fit`, ex.
+    models.fit_joint) est ajusté sur les seuls matchs antérieurs et prédit les matchs de la
+    semaine ; comparaison aux cotes de clôture football-data sans marge.
+
+    Issue 0 = plus de 2,5 buts, 1 = moins. Brier et log-loss, poids du modèle dans un
+    mélange logarithmique avec le marché, paris de valeur simulés.
+    """
+    h = history.copy()
+    h["home"] = [mapping.get((c, n)) for c, n in zip(h["competition"], h["home_name"])]
+    h["away"] = [mapping.get((c, n)) for c, n in zip(h["competition"], h["away_name"])]
+    h = h.dropna(subset=["home", "away", "close_over", "close_under"])
+    h = h[h["date"] >= start]
+    if h.empty:
+        return {}
+
+    rows = []
+    for week_start, g in h.groupby(h["date"].dt.to_period("W").dt.start_time):
+        train = results[(results["date"] < week_start)
+                        & (results["date"] >= week_start - pd.Timedelta(days=window_days))]
+        if len(train) < 500:
+            continue
+        model = fit(train, team_league, week_start)
+        for r in g.itertuples():
+            p = model.prob_over(r.home, r.away)
+            if p is not None:
+                rows.append((r.competition, p, r.goals_home + r.goals_away > 2.5,
+                             r.close_over, r.close_under, r.pre_over, r.pre_under, r.date))
+    if not rows:
+        return {}
+    df = pd.DataFrame(rows, columns=["comp", "p_over", "over", "c_over", "c_under", "p_o", "p_u", "date"])
+
+    p_over = df["p_over"].clip(1e-6, 1 - 1e-6).to_numpy()
+    pm = np.column_stack([p_over, 1 - p_over])
+    pk = devig(df[["c_over", "c_under"]].to_numpy(float))
+    out = np.where(df["over"].to_numpy(), 0, 1)
+    pre = df[["p_o", "p_u"]].to_numpy(float)
+
+    def summary(mask: np.ndarray) -> dict:
+        if mask.sum() == 0:
+            return {}
+        n = int(mask.sum()); y = (out[mask] == 0).astype(float); idx = np.arange(n)
+        return {
+            "matches": n,
+            "brierModel": round(float(((pm[mask][:, 0] - y) ** 2).mean()), 4),
+            "brierMarket": round(float(((pk[mask][:, 0] - y) ** 2).mean()), 4),
+            "llModel": round(float(-np.log(pm[mask][idx, out[mask]]).mean()), 4),
+            "llMarket": round(float(-np.log(pk[mask][idx, out[mask]]).mean()), 4),
+            "poolWeight": pool_weight(pm[mask], pk[mask], out[mask]),
+            "overRate": round(float(y.mean()), 3),
+            **_bet_stats(pm[mask], pk[mask], out[mask], pre[mask]),
+        }
+
+    comps = df["comp"].to_numpy()
+    return {"overall": summary(np.ones(len(df), dtype=bool)),
+            "competitions": {c: summary(comps == c) for c in sorted(set(comps))},
+            "period": [str(df["date"].min().date()), str(df["date"].max().date())]}

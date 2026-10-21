@@ -268,7 +268,8 @@ class JointRatings:
         la = np.exp(p["mu"] + att[j] - dfn[i])
         return float(lh), float(la)
 
-    def probabilities(self, home: str, away: str, max_goals: int = 10) -> tuple[float, float, float] | None:
+    def score_matrix(self, home: str, away: str, max_goals: int = 10) -> np.ndarray | None:
+        """Probabilités des scores (domicile en lignes, extérieur en colonnes), Dixon-Coles."""
         r = self.rates(home, away)
         if r is None:
             return None
@@ -277,8 +278,22 @@ class JointRatings:
         x, y = np.meshgrid(g, g, indexing="ij")
         m = _poisson_pmf(x, np.full(x.shape, lh)) * _poisson_pmf(y, np.full(y.shape, la))
         m = m * _dc_tau(x, y, np.full(x.shape, lh), np.full(x.shape, la), self.p["rho"])
-        m = m / m.sum()
+        return m / m.sum()
+
+    def probabilities(self, home: str, away: str, max_goals: int = 10) -> tuple[float, float, float] | None:
+        m = self.score_matrix(home, away, max_goals)
+        if m is None:
+            return None
         return float(np.tril(m, -1).sum()), float(np.trace(m)), float(np.triu(m, 1).sum())
+
+    def prob_over(self, home: str, away: str, line: float = 2.5) -> float | None:
+        """Probabilité que le total de buts dépasse `line`."""
+        m = self.score_matrix(home, away)
+        if m is None:
+            return None
+        g = np.arange(m.shape[0])
+        total = g[:, None] + g[None, :]
+        return float(m[total > line].sum())
 
 
 def fit_joint(matches: pd.DataFrame, team_league: dict[str, str], at: pd.Timestamp,

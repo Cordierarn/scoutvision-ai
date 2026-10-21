@@ -89,6 +89,21 @@ export interface MarketSummary {
   roiSe?: number;
 }
 
+export interface OverUnderSummary {
+  matches: number;
+  brierModel: number;         // plus bas = meilleur
+  brierMarket: number;
+  llModel: number;
+  llMarket: number;
+  poolWeight: number;
+  overRate: number;           // part des matchs à plus de 2,5 buts
+  bets?: number;
+  clv?: number;
+  clvSe?: number;
+  roi?: number;
+  roiSe?: number;
+}
+
 export interface MarketEvaluation {
   overall?: MarketSummary;
   competitions?: Record<string, MarketSummary>;
@@ -96,6 +111,8 @@ export interface MarketEvaluation {
   period?: [string, string];
   upcomingWithOdds?: number;
   source?: string;
+  // Plus / moins de 2,5 buts (modèle joint, prédictions hors échantillon)
+  overUnder?: { overall?: OverUnderSummary; competitions?: Record<string, OverUnderSummary>; period?: [string, string] };
 }
 
 export interface ForecastFile {

@@ -259,10 +259,24 @@ def display_season(raw: str) -> str:
 # ============================================
 
 
+_GH_TOKEN_FORMAT = re.compile(r"(github_pat_|gh[pousr]_)[A-Za-z0-9_]+")
+_warned_token = False
+
+
 def gh_env() -> dict[str, str]:
-    """Environnement de `gh`. Dans un Codespace, le GITHUB_TOKEN injecté ne voit que ce
-    dépôt : on l'écarte pour utiliser la connexion `gh auth login` (sauf si GH_TOKEN est fourni)."""
+    """Environnement de `gh`. Un GH_TOKEN qui n'a pas la forme d'un jeton GitHub (secret mal
+    collé) est écarté avec un avertissement. Dans un Codespace, le GITHUB_TOKEN injecté ne voit
+    que ce dépôt : on l'écarte pour utiliser la connexion `gh auth login`."""
+    global _warned_token
     env = os.environ.copy()
+    token = env.get("GH_TOKEN", "").strip()
+    if token and not _GH_TOKEN_FORMAT.fullmatch(token):
+        if not _warned_token:
+            print("Avertissement : GH_TOKEN n'est pas un jeton GitHub valide, il est ignoré.", file=sys.stderr)
+            _warned_token = True
+        env.pop("GH_TOKEN")
+    elif token:
+        env["GH_TOKEN"] = token
     if env.get("CODESPACES") and not env.get("GH_TOKEN"):
         env.pop("GITHUB_TOKEN", None)
     return env
@@ -624,6 +638,17 @@ def read_fixtures(comp: str, raw_season: str) -> list[dict]:
         return json.loads(gzip.decompress(tar.extractfile(member).read())).get("matches") or []
 
 
+def domestic_leagues(results: pd.DataFrame, competitions: dict) -> dict[str, str]:
+    """Championnat national de chaque équipe : celui où elle a le plus joué sur la dernière année
+    (les coupes d'Europe sont écartées)."""
+    cups = {k for k, c in competitions.items() if c.get("type", "league") != "league"}
+    games = results[~results["competition"].isin(cups)]
+    long = pd.concat([games[["home", "competition", "date"]].rename(columns={"home": "team"}),
+                      games[["away", "competition", "date"]].rename(columns={"away": "team"})])
+    recent = long[long["date"] >= long["date"].max() - pd.Timedelta(days=365)]
+    return recent.groupby("team")["competition"].agg(lambda s: s.value_counts().index[0]).to_dict()
+
+
 def forecast_cups(results: pd.DataFrame, competitions: dict, leagues: dict, covered: set[str],
                   days: int = 14) -> tuple[list[dict], dict]:
     """Pronostics des coupes d'Europe par le modèle joint toutes compétitions (models.fit_joint),
@@ -635,13 +660,7 @@ def forecast_cups(results: pd.DataFrame, competitions: dict, leagues: dict, cove
     if results.empty or not cups:
         return [], {}
     window = results[results["date"] >= results["date"].max() - pd.Timedelta(days=730)]
-
-    # Championnat national de chaque équipe : celui où elle a le plus joué récemment
-    league_games = window[~window["competition"].isin(cups)]
-    long = pd.concat([league_games[["home", "competition", "date"]].rename(columns={"home": "team"}),
-                      league_games[["away", "competition", "date"]].rename(columns={"away": "team"})])
-    recent = long[long["date"] >= long["date"].max() - pd.Timedelta(days=365)]
-    team_league = recent.groupby("team")["competition"].agg(lambda s: s.value_counts().index[0]).to_dict()
+    team_league = domestic_leagues(window, competitions)
 
     check = models.backtest_joint(window, team_league, set(cups))
     if check:
@@ -732,7 +751,7 @@ def add_season_simulation(forecast: dict, table: pd.DataFrame, upcoming: pd.Data
             m["leverage"] = leverage[m["match_id"]]
 
 
-def compare_with_market(forecast: dict, reports: dict, results: pd.DataFrame) -> dict:
+def compare_with_market(forecast: dict, reports: dict, results: pd.DataFrame, competitions: dict) -> dict:
     """Cotes football-data : évaluation du modèle contre la clôture (backtest du pipeline) et
     cotes des matchs à venir ajoutées aux pronostics. Vide si les cotes sont indisponibles."""
     cache = CACHE_DIR / "football-data"
@@ -751,12 +770,21 @@ def compare_with_market(forecast: dict, reports: dict, results: pd.DataFrame) ->
     team_ids = dict(zip(upcoming["match_id"], zip(upcoming["home_id"], upcoming["away_id"]))) \
         if not upcoming.empty else {}
     covered = market.attach_odds(forecast["matches"], market.load_fixtures(cache), mapping, team_ids)
+
+    # Plus / moins de 2,5 buts : prédictions hors échantillon du modèle joint, sur la même période
+    start = pd.Timestamp(evaluation["period"][0]) if evaluation.get("period") else today - pd.Timedelta(days=250)
+    over_under = market.evaluate_over_under(results, history, mapping, domestic_leagues(results, competitions),
+                                            models.fit_joint, start)
+    ou = over_under.get("overall", {})
+    if ou:
+        print(f"Plus/moins de 2,5 : Brier {ou['brierModel']} contre {ou['brierMarket']}, poids du modèle "
+              f"{ou['poolWeight']}, {ou.get('bets', 0)} paris, CLV {ou.get('clv')} ({ou['matches']} matchs)")
     overall = evaluation.get("overall", {})
     if overall:
         print(f"Modèle contre marché : RPS {overall['rpsModel']} contre {overall['rpsMarket']} "
               f"(clôture sans marge), poids du modèle {overall['poolWeight']}, {overall['matches']} matchs ; "
               f"{covered} matchs à venir avec cotes")
-    return {**evaluation, "upcomingWithOdds": covered, "source": "football-data.co.uk",
+    return {**evaluation, "overUnder": over_under, "upcomingWithOdds": covered, "source": "football-data.co.uk",
             "teamsMapped": len(mapping)}
 
 
@@ -940,7 +968,7 @@ def main(argv: list[str] | None = None) -> int:
     forecast["tables"] = build_tables(reports["forecast_table"], teams_ref)
     add_season_simulation(forecast, reports["forecast_table"], reports["forecast"])
     all_results = pd.concat(results, ignore_index=True)
-    forecast["market"] = compare_with_market(forecast, reports, all_results)
+    forecast["market"] = compare_with_market(forecast, reports, all_results, competitions)
     write_json(args.out / "forecast.json", forecast)
 
     for season in sorted(by_season):

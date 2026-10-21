@@ -174,13 +174,70 @@ const MIN_POOL_WEIGHT = 0.3;
  * Verdict prudent : un avantage n'est retenu que si le gain contre la clôture est positif
  * à deux erreurs-types près ET que le modèle garde un poids net dans le mélange avec le marché
  */
-function verdict(s?: MarketSummary): { label: string; tone: string } {
+function verdict(s?: Pick<MarketSummary, 'matches' | 'poolWeight' | 'bets' | 'clv' | 'clvSe'>): { label: string; tone: string } {
   if (!s || !s.matches) return { label: 'Pas de données', tone: 'text-slate-500' };
   const clvSignificant = s.clv !== undefined && s.clvSe !== undefined && s.bets !== undefined && s.bets >= 30 && s.clv - 2 * s.clvSe > 0;
   if (clvSignificant && s.poolWeight >= MIN_POOL_WEIGHT) return { label: 'Avantage possible', tone: 'text-emerald-300' };
   if (s.poolWeight >= MIN_POOL_WEIGHT) return { label: 'Information complémentaire', tone: 'text-sky-300' };
   return { label: 'Le marché absorbe le modèle', tone: 'text-slate-400' };
 }
+
+/**
+ * Plus / moins de 2,5 buts : modèle joint (prédictions hors échantillon) contre clôture
+ */
+const OverUnderSection: React.FC<{ data?: MarketEvaluation['overUnder'] }> = ({ data }) => {
+  const o = data?.overall;
+  if (!o) return null;
+  const v = verdict(o);
+  const comps = Object.entries(data?.competitions ?? {})
+    .filter(([, s]) => s.matches)
+    .sort((a, b) => (dataLoader.getCompetition(a[0])?.tier ?? 9) - (dataLoader.getCompetition(b[0])?.tier ?? 9) || b[1].matches - a[1].matches);
+  return (
+    <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
+      <div className="p-5">
+        <div className="flex items-baseline justify-between mb-3">
+          <h3 className="text-white font-bold">Plus / moins de 2,5 buts</h3>
+          <span className={`text-sm font-semibold ${v.tone}`}>{v.label}</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div><div className="text-[11px] text-slate-500 uppercase">Brier modèle / marché</div><div className="text-white font-mono">{o.brierModel.toFixed(4)} / {o.brierMarket.toFixed(4)}</div></div>
+          <div><div className="text-[11px] text-slate-500 uppercase">Poids du modèle</div><div className="text-white font-mono">{o.poolWeight.toFixed(2)}</div></div>
+          <div><div className="text-[11px] text-slate-500 uppercase">Gain contre la clôture</div><div className="text-white font-mono">{signedPct(o.clv)} <span className="text-slate-500 text-xs">± {((o.clvSe ?? 0) * 200).toFixed(1)}</span></div></div>
+          <div><div className="text-[11px] text-slate-500 uppercase">Rendement simulé</div><div className="text-white font-mono">{signedPct(o.roi)} <span className="text-slate-500 text-xs">± {((o.roiSe ?? 0) * 200).toFixed(1)}</span></div></div>
+        </div>
+        <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+          {o.matches.toLocaleString('fr-FR')} matchs des 16 championnats européens qui ont ces cotes, du {data?.period?.[0]} au {data?.period?.[1]}.
+          Chaque semaine, le modèle joint est réajusté sur les seuls matchs déjà joués, puis il prédit la probabilité de plus de 2,5 buts
+          (Poisson avec correction Dixon-Coles). Brier : plus bas = meilleur. {o.bets ?? 0} paris simulés quand l'avantage dépasse 5 % sur la cote moyenne avant match.
+          {' '}{Math.round(o.overRate * 100)} % des matchs ont dépassé 2,5 buts.
+        </p>
+      </div>
+      <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-slate-500 border-y border-slate-800">
+        <div className="col-span-3">Compétition</div>
+        <div className="col-span-1 text-right">Matchs</div>
+        <div className="col-span-2 text-right">Brier mod. / marché</div>
+        <div className="col-span-1 text-right">Poids</div>
+        <div className="col-span-1 text-right">Paris</div>
+        <div className="col-span-2 text-right">CLV</div>
+        <div className="col-span-2 text-right">Verdict</div>
+      </div>
+      {comps.map(([c, s]) => {
+        const vc = verdict(s);
+        return (
+          <div key={c} className="grid grid-cols-12 items-center px-4 py-2 border-b border-slate-800/60 text-sm">
+            <div className="col-span-3 text-slate-200"><CompetitionBadge competition={c} /></div>
+            <div className="col-span-1 text-right text-slate-400 font-mono">{s.matches}</div>
+            <div className="col-span-2 text-right font-mono text-slate-300">{s.brierModel.toFixed(3)} / {s.brierMarket.toFixed(3)}</div>
+            <div className="col-span-1 text-right font-mono text-slate-300">{s.poolWeight.toFixed(2)}</div>
+            <div className="col-span-1 text-right font-mono text-slate-400">{s.bets ?? '–'}</div>
+            <div className="col-span-2 text-right font-mono text-slate-300">{signedPct(s.clv)}</div>
+            <div className={`col-span-2 text-right text-xs ${vc.tone}`}>{vc.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }) => {
   if (!evaluation?.overall) {
@@ -238,6 +295,8 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
           );
         })}
       </div>
+
+      <OverUnderSection data={evaluation.overUnder} />
 
       <p className="text-xs text-slate-500 leading-relaxed">
         Les cotes viennent de football-data.co.uk (27 compétitions ; pas de coupes d'Europe, Croatie, Tchéquie, Serbie, Corée ni Arabie saoudite).
