@@ -10,6 +10,7 @@ import TeamAnalysis from './components/TeamAnalysis';
 import Prospects from './components/Prospects';
 import Watchlist from './components/Watchlist';
 import Forecast from './components/Forecast';
+import LabPage from './components/lab/LabPage';
 import { PlayerData, TeamStats, ViewState } from './types';
 import { dataLoader, DataIndex, LoadingState } from './services/dataLoader';
 import { queryService } from './services/queryService';
@@ -31,6 +32,7 @@ const App: React.FC = () => {
   // App state
   const [view, setView] = useState<string>(ViewState.TEAM_ANALYSIS);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerData | null>(null);
+  const [returnView, setReturnView] = useState<string>(ViewState.DASHBOARD);
   const [globalSeason, setGlobalSeason] = useState<string>('');
 
   // Charger l'index puis la saison la plus récente
@@ -92,6 +94,7 @@ const App: React.FC = () => {
 
   const handleSelectPlayer = (player: PlayerData) => {
     setSelectedPlayer(player);
+    if (view !== ViewState.PLAYER_DETAIL) setReturnView(view);
     setView(ViewState.PLAYER_DETAIL);
   };
 
@@ -139,6 +142,7 @@ const App: React.FC = () => {
         <TeamAnalysis
           playerData={players}
           teamStats={teamStats}
+          onSelectPlayer={handleSelectPlayer}
         />
       )}
 
@@ -147,6 +151,8 @@ const App: React.FC = () => {
       )}
 
       {view === ViewState.FORECAST && <Forecast />}
+
+      {view === ViewState.LAB && <LabPage playerData={players} />}
 
       {view === ViewState.WATCHLIST && (
         <Watchlist onSelectPlayer={handleSelectPlayer} />
@@ -171,7 +177,7 @@ const App: React.FC = () => {
       {view === ViewState.PLAYER_DETAIL && selectedPlayer && (
         <PlayerCard
           player={selectedPlayer}
-          onBack={() => setView(ViewState.DASHBOARD)}
+          onBack={() => setView(returnView)}
           allPlayers={players}
         />
       )}

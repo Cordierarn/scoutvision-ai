@@ -1,5 +1,5 @@
 import React, { ReactNode, useState, useEffect } from 'react';
-import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar, Star, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar, Star, CalendarDays, FlaskConical } from 'lucide-react';
 import { getWatchlist } from '../services/storageService';
 import { getSeasonLabel } from '../types';
 
@@ -23,6 +23,7 @@ const VIEW_LABELS: Record<string, string> = {
   SIMILARITY: 'Joueurs similaires',
   COMPARISON: 'Comparaison',
   FORECAST: 'Pronostics',
+  LAB: 'Laboratoire',
   PLAYER_DETAIL: 'Fiche joueur',
 };
 
@@ -130,6 +131,14 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
           >
             <CalendarDays className="w-6 h-6" />
             <span className="hidden lg:block">Pronostics</span>
+          </button>
+
+          <button
+             onClick={() => onNavigate('LAB')}
+             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'LAB' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
+          >
+            <FlaskConical className="w-6 h-6" />
+            <span className="hidden lg:block">Laboratoire</span>
           </button>
         </nav>
 

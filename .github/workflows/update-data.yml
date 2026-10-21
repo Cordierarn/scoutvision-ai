@@ -31,7 +31,7 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # Fine-grained PAT limité à PitchApi-big-5, Contents : Read and write
       GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
@@ -57,6 +57,10 @@ jobs:
       - name: Préparation des données
         # Lit aussi market_value.parquet (Transfermarkt) dans la release scoutvision-data
         run: python scripts/prepare_data.py
+
+      - name: Laboratoire
+        # Expériences sur les tables match par match (archives déjà en cache) : public/data/lab
+        run: python scripts/prepare_lab.py
 
       - name: Publication dans la release privée
         run: |

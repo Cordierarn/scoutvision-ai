@@ -7,9 +7,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Users } from 'lucide-react';
 import { PlayerData } from '../types';
-import { dataLoader, LineupSlot, TeamLineups } from '../services/dataLoader';
-import { ROLE_DEFINITIONS, calculateRoleScore } from '../utils/scoringUtils';
-import { roleLabel, positionLabel } from '../utils/labels';
+import { dataLoader, TeamLineups } from '../services/dataLoader';
+import { placeEleven } from '../utils/lineup';
+import { bestPreset } from '../utils/rolePresets';
+import { positionLabel } from '../utils/labels';
 import { PhotoOverlay } from './Media';
 
 interface SquadLineupProps {
@@ -17,64 +18,6 @@ interface SquadLineupProps {
   season?: string;
   competition?: string;
   players: PlayerData[];          // effectif de l'équipe dans la compétition (player_season)
-}
-
-interface Placed {
-  slot: LineupSlot;
-  starter: { id: string; name: string; starts: number } | null;
-  backups: { id: string; name: string; starts: number }[];
-}
-
-/**
- * Onze distinct, par appariement à augmentation de chemin (algorithme de Kuhn) :
- * le plus grand nombre de cases possible reçoit un titulaire différent. Les cases au
- * titulaire le plus installé passent en premier, et chaque case essaie ses candidats
- * du plus titularisé au moins titularisé ; un joueur déjà placé peut céder sa case
- * s'il a une autre case libre, pour qu'aucune case ne reste vide sans raison.
- */
-function placeEleven(slots: LineupSlot[]): Placed[] {
-  const order = [...slots].sort((a, b) => (b.players[0]?.[2] ?? 0) - (a.players[0]?.[2] ?? 0));
-  const slotOf = new Map<string, number>();     // joueur -> case
-  const playerOf = new Map<number, string>();   // case -> joueur
-
-  const tryAssign = (slot: LineupSlot, visited: Set<string>): boolean => {
-    for (const [id] of slot.players) {
-      if (visited.has(id)) continue;
-      visited.add(id);
-      const other = slotOf.get(id);
-      const otherSlot = other !== undefined ? slots.find(s => s.slot === other)! : null;
-      if (!otherSlot || tryAssign(otherSlot, visited)) {
-        slotOf.set(id, slot.slot);
-        playerOf.set(slot.slot, id);
-        return true;
-      }
-    }
-    return false;
-  };
-  order.forEach(slot => tryAssign(slot, new Set()));
-
-  return slots.map(slot => {
-    const candidates = slot.players.map(([id, name, starts]) => ({ id, name, starts }));
-    const starterId = playerOf.get(slot.slot);
-    return {
-      slot,
-      starter: candidates.find(c => c.id === starterId) ?? null,
-      backups: candidates.filter(c => c.id !== starterId),
-    };
-  });
-}
-
-/**
- * Meilleur rôle tactique d'un joueur parmi ceux de son poste (score 0-100)
- */
-function bestRole(player: PlayerData): { role: string; score: number } | null {
-  let best: { role: string; score: number } | null = null;
-  Object.entries(ROLE_DEFINITIONS).forEach(([role, def]) => {
-    if (!def.positions.includes(player.Position)) return;
-    const score = calculateRoleScore(player, role);
-    if (!best || score > best.score) best = { role, score };
-  });
-  return best;
 }
 
 const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, players }) => {
@@ -141,14 +84,14 @@ const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, 
 
         {eleven.map(({ slot, starter, backups }) => {
           const data = starter ? byId.get(starter.id) : undefined;
-          const role = data ? bestRole(data) : null;
+          const role = data ? bestPreset(data) : null;
           // pitch_x : 0,1 (gardien) à 0,87 (attaque) ; pitch_y : 0 = gauche
           const top = `${92 - ((slot.x - 0.08) / 0.82) * 80}%`;
           const left = `${8 + slot.y * 84}%`;
           return (
             <div key={slot.slot} className="absolute w-48 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10 hover:z-30" style={{ top, left }}>
               <div className="mb-1.5 px-2.5 py-0.5 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-[10px] font-bold text-emerald-400 uppercase tracking-wide">
-                {role ? roleLabel(role.role) : data ? positionLabel(data.Position) : 'Titulaire'}
+                {role ? role.name : data ? positionLabel(data.Position) : 'Titulaire'}
               </div>
               {starter ? (
                 <div className="w-full bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-xl p-2.5 shadow-2xl hover:border-emerald-500/50 transition-colors group relative">
@@ -161,7 +104,7 @@ const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, 
                       <div className="text-white font-bold truncate text-sm">{starter.name}</div>
                       <div className="flex items-center justify-between mt-0.5 text-[10px]">
                         <span className="text-slate-400">{starter.starts} tit.</span>
-                        {role && <span className={role.score >= 70 ? 'text-emerald-400 font-bold' : 'text-yellow-400 font-bold'}>{role.score}</span>}
+                        {role && <span className={role.index >= 70 ? 'text-emerald-400 font-bold' : 'text-yellow-400 font-bold'}>{role.index}</span>}
                         <span className="text-slate-400">{data?.Age !== undefined ? `${data.Age} ans` : ''}</span>
                       </div>
                     </div>
@@ -186,7 +129,7 @@ const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, 
         })}
 
         <div className="absolute bottom-3 right-4 text-[10px] text-slate-500">
-          Note = score du meilleur rôle (percentiles) · tit. = titularisations à ce poste
+          Note = indice du meilleur rôle (percentiles, rôles du Chasseur de pépites) · tit. = titularisations à ce poste
         </div>
       </div>
     </div>

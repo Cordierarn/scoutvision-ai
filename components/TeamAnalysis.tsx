@@ -1,12 +1,13 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { PlayerData, TeamStats, extractSeason, getSeasonColor, getPlayerSeasonId, getPlayerSeason, getSeasonShortLabel } from '../types';
 import { useShots } from '../hooks/useShots';
 import TeamStyleMap from './TeamStyleMap';
 import SquadLineup from './SquadLineup';
+import RecruitmentPanel from './RecruitmentPanel';
 import { roleLabel, positionLabel, shotResultLabel, shotTypeLabel, situationLabel } from '../utils/labels';
 import { getAvailableTeams } from '../utils/scoringUtils';
-import { Filter, Users, Shield, Target, Activity, LayoutTemplate, MapPin, BarChart3, TrendingUp, Trophy, ChevronRight, Search, X } from 'lucide-react';
+import { Filter, Users, Shield, Target, Activity, LayoutTemplate, MapPin, BarChart3, TrendingUp, Trophy, ChevronRight, Search, X, UserSearch } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, ScatterChart, Scatter, ZAxis, Cell } from 'recharts';
 import { queryService } from '../services/queryService';
 import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
@@ -14,9 +15,13 @@ import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from 
 interface TeamAnalysisProps {
   playerData: PlayerData[];
   teamStats: TeamStats[];
+  onSelectPlayer?: (player: PlayerData) => void;
 }
 
-type Tab = 'DEPTH' | 'TACTICS' | 'SHOTMAP' | 'PLAYERS';
+type Tab = 'DEPTH' | 'TACTICS' | 'SHOTMAP' | 'PLAYERS' | 'RECRUIT';
+
+// Équipe et onglet choisis, retrouvés au retour d'une fiche joueur
+const lastView = { team: '', search: '', tab: 'DEPTH' as Tab };
 
 /**
  * Équipe dans la liste de recherche : logo, nom et compétition
@@ -32,11 +37,12 @@ const TeamOption: React.FC<{ teamKey: string }> = ({ teamKey }) => {
   );
 };
 
-const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('DEPTH');
+const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSelectPlayer }) => {
+  // Une équipe retenue n'est reprise que si elle existe dans les saisons chargées
+  const [activeTab, setActiveTab] = useState<Tab>(lastView.tab);
   const [selectedLeague, setSelectedLeague] = useState<string>('');
-  const [selectedTeam, setSelectedTeam] = useState<string>('');
-  const [teamSearchTerm, setTeamSearchTerm] = useState<string>('');
+  const [selectedTeam, setSelectedTeam] = useState<string>(() => (queryService.getTeamPlayers(lastView.team).length ? lastView.team : ''));
+  const [teamSearchTerm, setTeamSearchTerm] = useState<string>(() => (queryService.getTeamPlayers(lastView.team).length ? lastView.search : ''));
   const [showTeamDropdown, setShowTeamDropdown] = useState<boolean>(false);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
 
@@ -49,6 +55,12 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats }) =>
   const filteredTeams = useMemo(() => {
     return queryService.searchTeams(teamSearchTerm, 15);
   }, [teamSearchTerm]);
+
+  useEffect(() => {
+    lastView.team = selectedTeam;
+    lastView.search = teamSearchTerm;
+    lastView.tab = activeTab;
+  }, [selectedTeam, teamSearchTerm, activeTab]);
 
   const handleTeamSelect = (team: string) => {
     setSelectedTeam(team);
@@ -288,6 +300,13 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats }) =>
                 >
                     <Target className="w-4 h-4" /> Carte des tirs
                     {!selectedTeam && <span className="ml-auto text-[10px] opacity-70">Aucune donnée</span>}
+                </button>
+                <button
+                    onClick={() => setActiveTab('RECRUIT')}
+                    disabled={!selectedTeam}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === 'RECRUIT' ? 'bg-emerald-500 text-slate-900 font-bold' : 'bg-slate-900 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                >
+                    <UserSearch className="w-4 h-4" /> Recrutement
                 </button>
                 <button 
                     onClick={() => setActiveTab('PLAYERS')}
@@ -556,6 +575,17 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats }) =>
                           </div>
                         )}
                     </div>
+                )}
+
+                {/* --- VIEW: RECRUTEMENT --- */}
+                {activeTab === 'RECRUIT' && (
+                    <RecruitmentPanel
+                        key={selectedTeam}
+                        teamKey={selectedTeam}
+                        playerData={playerData}
+                        teamStats={teamStats}
+                        onSelectPlayer={onSelectPlayer}
+                    />
                 )}
 
                 {/* --- VIEW: TEAM PLAYERS --- */}

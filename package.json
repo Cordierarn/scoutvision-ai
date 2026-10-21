@@ -8,7 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "data:pull": "bash scripts/pull_data.sh",
-    "data:prepare": "python3 scripts/prepare_data.py"
+    "data:prepare": "python3 scripts/prepare_data.py",
+    "data:lab": "python3 scripts/prepare_lab.py",
+    "test": "vitest run",
+    "test:data": "python3 -m unittest discover -s scripts -p \"test_*.py\""
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
@@ -24,6 +27,7 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^3.2.4"
   }
 }

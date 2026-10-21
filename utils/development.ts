@@ -16,16 +16,24 @@ export interface MetricProjection {
 /**
  * Effet de l'âge d'une courbe (0 si l'âge n'est pas couvert)
  */
-function ageEffect(curve: AgeCurve, age: number): number {
+export function ageEffect(curve: AgeCurve, age: number): number {
   return curve.ages[String(Math.round(age))]?.[0] ?? 0;
 }
 
 /**
- * Percentile attendu la saison suivante : pct + beta * (pct - 50) + effet de l'âge
+ * Percentile attendu la saison suivante, non arrondi, borné à 0-100 :
+ * pct + beta * (pct - 50) + effet de l'âge (calcul de scripts/models.py)
+ */
+export function expectedPercentile(pct: number, curve: AgeCurve, age: number): number {
+  const next = pct + curve.beta * (pct - 50) + ageEffect(curve, age);
+  return Math.max(0, Math.min(100, next));
+}
+
+/**
+ * Percentile attendu la saison suivante, arrondi
  */
 export function projectPercentile(pct: number, curve: AgeCurve, age: number): number {
-  const next = pct + curve.beta * (pct - 50) + ageEffect(curve, age);
-  return Math.max(0, Math.min(100, Math.round(next)));
+  return Math.round(expectedPercentile(pct, curve, age));
 }
 
 /**

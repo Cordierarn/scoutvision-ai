@@ -7,6 +7,8 @@
  *   /data/teams/<saison>.json          équipes d'une saison
  *   /data/shots/<saison>/<COMP>.json   tirs d'une compétition (chargés à la demande)
  *   /data/heatmaps/<saison>/<COMP>.json cartes de chaleur des joueurs (chargées à la demande)
+ *   /data/models/transfer.json         modèle de transfert (recrutement)
+ *   /data/market.json                  valeur Transfermarkt et contrat actuels (recrutement)
  */
 
 import { PlayerData, TeamStats, ShotEvent } from '../types';
@@ -56,6 +58,67 @@ export interface AgeCurve {
 export interface AgeCurves {
   pairs: number;
   curves: Record<string, Record<string, AgeCurve>>;   // rôle -> métrique -> courbe
+}
+
+/**
+ * Modèle de transfert (scripts/models.py) : percentile attendu dans un autre club =
+ * projection des courbes d'âge + league * (L[championnat quitté] - L[championnat rejoint])
+ * + context · (contexte de la nouvelle équipe - de l'ancienne) + coût d'adaptation
+ */
+export interface TransferMetric {
+  league: number;          // points de percentile par point d'écart de niveau
+  context: number[];       // un coefficient par variable de TransferModel.context
+  leagueChange: number;    // changement de championnat (points de percentile)
+  clubChange: number;      // changement de club dans le même championnat
+}
+
+/** Erreurs des trois prévisions : percentile inchangé, courbes d'âge, modèle complet */
+export interface TransferErrors {
+  persistence: number;
+  development: number;
+  model: number;
+}
+
+export interface TransferErrorTable {
+  movers: TransferErrors;        // changements de championnat : erreur absolue moyenne
+  clubChanges: TransferErrors;   // changements de club dans le même championnat
+  all: TransferErrors;
+  biasUp: TransferErrors;        // biais (prévu - observé) des montées de niveau
+  biasDown: TransferErrors;      // biais des descentes de niveau
+}
+
+export interface TransferValidation {
+  season: string;                // saison de test, absente de l'ajustement
+  pairs: number;
+  movers: number;
+  clubChanges: number;
+  up: number;
+  down: number;
+  metric: TransferErrorTable;
+  index?: TransferErrorTable & { rankMovers: TransferErrors };   // corrélation de rang
+}
+
+export interface TransferModel {
+  pairs: number;
+  movers: number;
+  clubChanges: number;
+  context: string[];                                     // colonnes de contexte d'équipe
+  leagues: Record<string, { level: number; moves: number }>;
+  tierLevels: Record<string, number>;                    // repli d'un championnat inconnu
+  metrics: Record<string, TransferMetric>;
+  validation: TransferValidation | null;
+}
+
+/** Valeur et contrat actuels (Transfermarkt), valables quelle que soit la saison analysée */
+export interface MarketEntry {
+  value?: number;
+  contract?: string;     // "2027-06-30"
+  estimated?: number;    // valeur estimée par la performance (saison actuelle)
+}
+
+export interface MarketValues {
+  scrapedAt: string | null;
+  players: Map<string, MarketEntry>;
 }
 
 export interface ProjectedRow {
@@ -202,6 +265,17 @@ async function fetchJSON<T>(path: string): Promise<T> {
 }
 
 /**
+ * Fichier facultatif : null s'il est absent (404, ou page HTML de repli selon le serveur)
+ */
+async function fetchOptionalJSON<T>(path: string): Promise<T | null> {
+  const response = await fetch(path);
+  const isJson = (response.headers.get('content-type') || '').includes('json');
+  if (response.status === 404 || (response.ok && !isJson)) return null;
+  if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
+  return response.json();
+}
+
+/**
  * Convertit le format colonnes/lignes en objets, sans les valeurs nulles
  */
 function expand<T>(data: Columnar): T[] {
@@ -226,6 +300,8 @@ class DataLoader {
   private heatmaps = new Map<string, Promise<HeatmapFile | null>>();
   private lineups = new Map<string, Promise<Record<string, TeamLineups> | null>>();
   private ageCurves: Promise<AgeCurves> | null = null;
+  private transfer: Promise<TransferModel | null> | null = null;
+  private market: Promise<MarketValues | null> | null = null;
   private forecast: Promise<ForecastFile> | null = null;
 
   /**
@@ -312,13 +388,7 @@ class DataLoader {
     const key = `${season}/${competition}`;
     let pending = this.heatmaps.get(key);
     if (!pending) {
-      pending = fetch(`/data/heatmaps/${key}.json`).then(response => {
-        // Fichier absent : 404, ou page HTML de repli selon le serveur
-        const isJson = (response.headers.get('content-type') || '').includes('json');
-        if (response.status === 404 || (response.ok && !isJson)) return null;
-        if (!response.ok) throw new Error(`Failed to load heatmaps ${key}: ${response.status}`);
-        return response.json();
-      });
+      pending = fetchOptionalJSON<HeatmapFile>(`/data/heatmaps/${key}.json`);
       pending.catch(() => this.heatmaps.delete(key));
       this.heatmaps.set(key, pending);
     }
@@ -333,12 +403,7 @@ class DataLoader {
     const key = `${season}/${competition}`;
     let pending = this.lineups.get(key);
     if (!pending) {
-      pending = fetch(`/data/lineups/${key}.json`).then(response => {
-        const isJson = (response.headers.get('content-type') || '').includes('json');
-        if (response.status === 404 || (response.ok && !isJson)) return null;
-        if (!response.ok) throw new Error(`Failed to load lineups ${key}: ${response.status}`);
-        return response.json();
-      });
+      pending = fetchOptionalJSON<Record<string, TeamLineups>>(`/data/lineups/${key}.json`);
       pending.catch(() => this.lineups.delete(key));
       this.lineups.set(key, pending);
     }
@@ -354,6 +419,39 @@ class DataLoader {
       this.ageCurves.catch(() => { this.ageCurves = null; });
     }
     return this.ageCurves;
+  }
+
+  /**
+   * Modèle de transfert (mis en cache) ; null si le pipeline ne l'a pas produit
+   */
+  loadTransferModel(): Promise<TransferModel | null> {
+    if (!this.transfer) {
+      this.transfer = fetchOptionalJSON<TransferModel>('/data/models/transfer.json');
+      this.transfer.catch(() => { this.transfer = null; });
+    }
+    return this.transfer;
+  }
+
+  /**
+   * Valeurs Transfermarkt actuelles par joueur (mises en cache) ; null sans données de marché
+   */
+  loadMarketValues(): Promise<MarketValues | null> {
+    if (!this.market) {
+      this.market = fetchOptionalJSON<Columnar & { scrapedAt?: string | null }>('/data/market.json').then(data => {
+        if (!data) return null;
+        const players = new Map<string, MarketEntry>();
+        expand<Record<string, string | number>>(data).forEach(row => {
+          players.set(String(row['Player ID']), {
+            value: typeof row['Market value'] === 'number' ? row['Market value'] : undefined,
+            contract: typeof row['Contract expires'] === 'string' ? row['Contract expires'] : undefined,
+            estimated: typeof row['Estimated value'] === 'number' ? row['Estimated value'] : undefined,
+          });
+        });
+        return { scrapedAt: data.scrapedAt ?? null, players };
+      });
+      this.market.catch(() => { this.market = null; });
+    }
+    return this.market;
   }
 
   /**

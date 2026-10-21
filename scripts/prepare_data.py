@@ -12,6 +12,8 @@ public/data/, chargés à la demande par l'application :
   public/data/heatmaps/<saison>/<COMP>.json cartes de chaleur des joueurs d'une compétition
   public/data/lineups/<saison>/<COMP>.json  compositions réelles : formations et titulaires par case
   public/data/models/age_curves.json        courbes d'âge (évolution des percentiles par rôle)
+  public/data/models/transfer.json          modèle de transfert : niveaux de championnat, contexte, validation
+  public/data/market.json                   valeur Transfermarkt et contrat actuels de chaque joueur
   public/data/forecast.json                 pronostics des prochains matchs (pipeline PitchAPI)
 
 Une saison d'application vaut une saison européenne ("2024-25") ; une saison
@@ -56,6 +58,7 @@ MARKET_RELEASE = "scoutvision-data"
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "public" / "data"
 CACHE_DIR = ROOT / ".cache" / "pitchapi"
+ROLE_PRESETS = ROOT / "utils" / "rolePresets.json"       # rôles de l'app (validation du modèle de transfert)
 
 TABLES_ASSET = re.compile(r"^tables-(?P<comp>[A-Z0-9]+)-(?P<season>\d{4}(?:-\d{2})?)\.tar$")
 
@@ -582,6 +585,9 @@ def build_lineups(lineup: pd.DataFrame, max_formations: int = 4, per_slot: int =
     (largeur, 0 = côté gauche). Pour chaque case, les joueurs qui y ont le plus débuté.
     """
     st = lineup[(lineup["role"] == "starter") & lineup["formation"].notna() & lineup["position_id"].notna()]
+    # Un joueur peut avoir plusieurs graphies (« Inigo Cordoba », « Iñigo Córdoba ») : on
+    # compte par identifiant et on garde sa graphie la plus fréquente
+    names = st.groupby("player_id")["player_name"].agg(lambda s: s.value_counts().index[0])
     teams: dict[str, dict] = {}
     for team_id, g in st.groupby("team_id"):
         matches = g.groupby("formation")["match_id"].nunique().sort_values(ascending=False)
@@ -590,12 +596,12 @@ def build_lineups(lineup: pd.DataFrame, max_formations: int = 4, per_slot: int =
             f = g[g["formation"] == formation]
             slots = []
             for slot, sg in f.groupby("position_id"):
-                starts = sg.groupby(["player_id", "player_name"])["match_id"].nunique().sort_values(ascending=False)
+                starts = sg.groupby("player_id")["match_id"].nunique().sort_values(ascending=False, kind="stable")
                 slots.append({
                     "slot": int(slot),
                     "x": round(float(sg["pitch_x"].mean()), 3),
                     "y": round(float(sg["pitch_y"].mean()), 3),
-                    "players": [[pid, name, int(c)] for (pid, name), c in starts.head(per_slot).items()],
+                    "players": [[pid, names[pid], int(c)] for pid, c in starts.head(per_slot).items()],
                 })
             formations.append({"formation": formation, "matches": int(n),
                                "slots": sorted(slots, key=lambda z: (z["x"], z["y"]))})
@@ -822,6 +828,25 @@ def read_market(path: Path | None) -> pd.DataFrame | None:
     return market
 
 
+def build_market_values(snapshot: pd.DataFrame, players: pd.DataFrame) -> dict:
+    """Valeur Transfermarkt et contrat actuels de chaque joueur, quelle que soit la saison
+    analysée (recrutement) ; valeur estimée de sa ligne la plus jouée de la saison actuelle."""
+    snap = snapshot.drop_duplicates("player_id")
+    snap = snap[snap["market_value_eur"].notna() | snap["contract_until"].notna()]
+    estimated = pd.Series(dtype=float)
+    if "Estimated value" in players:
+        estimated = (players.dropna(subset=["Estimated value"]).sort_values("Minutes played", ascending=False)
+                     .drop_duplicates("Player ID").set_index("Player ID")["Estimated value"])
+    df = pd.DataFrame({
+        "Player ID": snap["player_id"],
+        "Market value": snap["market_value_eur"],
+        "Contract expires": snap["contract_until"],
+        "Estimated value": snap["player_id"].map(estimated),
+    })
+    return {"scrapedAt": str(snapshot["scraped_at"].max())[:10] if "scraped_at" in snapshot else None,
+            **columnar(df.reset_index(drop=True))}
+
+
 def write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # allow_nan=False : un NaN échoue ici au lieu de produire un JSON illisible par le navigateur
@@ -957,9 +982,26 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Valeur estimée : R² hors échantillon {valuation_meta['r2_cv']}, "
                   f"erreur médiane x{valuation_meta['median_error_factor']} ({valuation_meta['players']} joueurs)")
 
-    # Courbes d'âge et pronostics
-    curves = models.age_curves(all_players, metric_labels + ["Rating", "Duels won, %", "Save rate, %"])
+    # Courbes d'âge, modèle de transfert (recrutement) et pronostics
+    curve_metrics = list(dict.fromkeys(metric_labels + ["Rating"] + COMPUTED_RATES))
+    curves = models.age_curves(all_players, curve_metrics)
     write_json(args.out / "models" / "age_curves.json", curves)
+    cups = {k for k, c in competitions.items() if c.get("type", "league") != "league"}
+    presets = json.loads(ROLE_PRESETS.read_text(encoding="utf-8")) if ROLE_PRESETS.exists() else None
+    transfer = models.transfer_model(all_players, curve_metrics, curves["curves"], cups,
+                                     {k: c["tier"] for k, c in competitions.items()}, presets)
+    if transfer:
+        write_json(args.out / "models" / "transfer.json", transfer)
+        v = transfer["validation"]
+        if v:
+            what, mae = ("de l'indice", v["index"]["movers"]) if "index" in v else ("par métrique", v["metric"]["movers"])
+            print(f"Modèle de transfert : {transfer['movers']} changements de championnat ; validation "
+                  f"{v['season']} ({v['movers']} transferts) : erreur {what} {mae['model']} "
+                  f"(inchangé {mae['persistence']}, âge seul {mae['development']})")
+    else:
+        print("Modèle de transfert : trop peu de transferts dans les saisons préparées, non mis à jour")
+    if market is not None:
+        write_json(args.out / "market.json", build_market_values(market, all_players))
     forecast = build_forecast(reports["forecast"], teams_ref)
     covered = set(reports["forecast"]["league_key"]) if not reports["forecast"].empty else set()
     cup_forecast, cup_meta = forecast_cups(pd.concat(results, ignore_index=True), competitions, leagues, covered)
