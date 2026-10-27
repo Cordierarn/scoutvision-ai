@@ -1,6 +1,8 @@
 <div align="center">
 
-# ⚽ ScoutVision AI
+<p align="center">
+  <img src="logo.svg" width="160" alt="scoutvision-ai"/>
+</p>
 
 **Professional Football Scouting Platform**
 
