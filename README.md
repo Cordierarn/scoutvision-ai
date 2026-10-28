@@ -90,7 +90,7 @@ breakdown (“why this player?”)
    read access to that repo (`gh auth login`).
 
    ```bash
-   npm run data:pull        # download the data prepared by CI (~35 MB), no Python needed
+   npm run data:pull        # download the data prepared by CI (~60 MB), no Python needed
    ```
 
    Or build it yourself from the PitchAPI releases:
@@ -177,12 +177,12 @@ from the PitchApi-big-5 analyses in `global.tar/reports/`:
 | **Model vs market** | Forecasts page | odds from football-data.co.uk (27 competitions): pipeline backtest vs margin-free closing odds (power de-vig) — RPS, log-loss, model weight in a logarithmic pool, simulated value bets judged by closing line value. Oct. 2026: RPS 0.2102 vs 0.2034, weight 0.00, CLV −10.5 % on 1,702 bets: no edge |
 
 **Recruitment validation** (Oct. 2026, test season 2025-26, absent from the fit, 405 league
-changes, role presets of the Oct. 2026 calibration): mean absolute error of the role index 12.2
-points with the transfer model, 13.9 with the age curves alone, 16.8 when the current index is
+changes, role presets of the Oct. 2026 calibration): mean absolute error of the role index 12.18
+points with the transfer model, 13.88 with the age curves alone, 16.79 when the current index is
 kept; rank correlation with the index actually reached 0.525 vs 0.347; bias of players moving up a
-level +1.3 points vs +9.8 (moving down: −0.2 vs −7.0). Per metric (does not depend on the
+level +1.33 points vs +9.81 (moving down: −0.18 vs −6.99). Per metric (does not depend on the
 presets): 21.7 vs 26.1 percentile points, bias moving up +0.0 vs +6.7. With the previous presets:
-12.3 / 14.0 / 16.9, rank 0.529, bias +1.4 / −0.3. Per role the error is uneven (about 8 to 16
+12.25 / 13.96 / 16.88, rank 0.529, bias +1.38 / −0.27. Per role the error is uneven (about 8 to 16
 points on 37 to 111 movers per role, so differences under about 1 point are noise); it rose for
 *Créateur excentré* (15.2 → 16.2) and *Faux neuf* (12.9 → 13.5), now evaluated on wingers and
 strikers only (52 and 54 movers instead of 82 and 84), and for *Gardien libéro* (11.7 → 12.3,
@@ -233,7 +233,7 @@ go to `public/data/lab/` and to the *Laboratoire* page; every number is recomput
 
 `.github/workflows/update-data.yml` runs every Monday and Friday at 10:30 UTC
 (after the PitchApi-big-5 update at 08:00) and on demand (*Actions* > *Run workflow*).
-It runs `scripts/prepare_data.py` and uploads `scoutvision-data.tar.gz` to the
+It runs `scripts/prepare_data.py` then `scripts/prepare_lab.py` and uploads `scoutvision-data.tar.gz` to the
 **private** release `scoutvision-data` of PitchApi-big-5. Nothing is committed
 to this public repo, and no artifact or cache holds the data.
 
@@ -327,10 +327,10 @@ the same index (`roleIndex`, explained by `roleIndexBreakdown`). The former `ROL
 *Créateur excentré* (wingers only), *Faux neuf* (strikers only) and *Attaquant presseur* were
 recalibrated; *Attaquant de profondeur* and *Créateur sur coups de pied arrêtés* only changed
 description (off-ball runs and set pieces are not in the data). Revalidated with the full pipeline
-(`npm run data:prepare`, Oct. 28): the transfer model's coefficients do not depend on the presets
-and the recruitment validation above barely moves (index error 12.3 → 12.2, rank 0.529 → 0.525).
-The published `scoutvision-data` archive still holds the `transfer.json` of the previous presets
-until the data workflow is run again.
+(Oct. 28): the transfer model's coefficients do not depend on the presets and the recruitment
+validation above barely moves (index error 12.25 → 12.18, rank 0.529 → 0.525). The published
+`scoutvision-data` archive was rebuilt by the data workflow with these presets; its validation is
+identical to the local run.
 
 ## 🧪 Tests
 
