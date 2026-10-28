@@ -158,7 +158,7 @@ git clone https://github.com/Cordierarn/scoutvision-ai.git
 cd scoutvision-ai
 npm install
 npm run data:pull        # private data prepared by CI (~60 MB), no Python needed
-npm run dev
+npm run dev               # http://localhost:3000
 ```
 
 The app runs without Gemini; only the report generation then answers "unavailable". To enable
@@ -250,7 +250,7 @@ a simulated effect, or its absence.
 
 ## License
 
-MIT License.
+MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
