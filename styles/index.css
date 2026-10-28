@@ -205,6 +205,8 @@
 [data-tip-pos="left"]::after { bottom: auto; top: 50%; left: auto; right: calc(100% + 6px); transform: translateY(-50%); }
 [data-tip-pos="bottom"]::after { bottom: auto; top: calc(100% + 6px); }
 [data-tip-align="end"]::after { left: auto; right: 0; transform: none; }
+[data-tip-align="start"]::after { left: 0; right: auto; transform: none; }
+[data-tip-pos="left"][data-tip-align]::after { left: auto; right: calc(100% + 6px); transform: translateY(-50%); }
 /* Texte long : retour à la ligne, sauts de ligne du texte conservés */
 [data-tip-wide]::after { white-space: pre-line; width: max-content; max-width: 300px; text-align: left; font-weight: 400; padding: 6px 9px; }
 

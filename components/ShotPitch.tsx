@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { ShotEvent } from '../types';
 import { shotResultLabel, shotTypeLabel, situationLabel } from '../utils/labels';
 import { INK, SHOT } from '../theme/charts';
-import { LegendItem } from './ui';
+import { LegendItem, LoadError } from './ui';
 
 const W = 105;
 const H = 68;
@@ -15,11 +15,25 @@ const LINE = 'rgba(137,150,167,0.35)';
 
 export const shotColor = (s: ShotEvent) => (s.result === 'Goal' ? SHOT.goal : s.result === 'SavedShot' ? SHOT.saved : SHOT.missed);
 
-const ShotPitch: React.FC<{ shots: ShotEvent[]; showPlayer?: boolean; className?: string; emptyText?: string }> = ({
-  shots, showPlayer = false, className = 'max-w-[340px]', emptyText = 'Aucune donnée de tir.',
+const ShotPitch: React.FC<{
+  shots: ShotEvent[];
+  showPlayer?: boolean;
+  className?: string;
+  emptyText?: string;
+  loading?: boolean;                // tirs en cours de chargement : terrain en attente, jamais « aucune donnée »
+  error?: string | null;            // échec du chargement
+  onRetry?: () => void;
+}> = ({
+  shots, showPlayer = false, className = 'max-w-[340px]', emptyText = 'Aucune donnée de tir.', loading = false, error = null, onRetry,
 }) => {
   const [hover, setHover] = useState<number | null>(null);
   const shot = hover !== null ? shots[hover] : undefined;
+  if (loading) {
+    return <div role="status" aria-label="Chargement des tirs" className={`w-full aspect-[52.5/68] mx-auto rounded-md bg-raised/70 animate-pulse ${className}`} />;
+  }
+  if (error) {
+    return <LoadError message="Les tirs n'ont pas pu être chargés." onRetry={onRetry} />;
+  }
   if (shots.length === 0) {
     return <div className="rounded-md border border-dashed border-line px-4 py-6 text-center text-xs text-ink-4">{emptyText}</div>;
   }

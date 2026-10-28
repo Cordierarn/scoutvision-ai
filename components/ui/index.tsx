@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { AlertCircle, Info, RotateCw } from 'lucide-react';
 import { PERCENTILE_TIERS, percentileTier } from '../../theme/percentile';
 
 // ============================================
@@ -78,14 +79,15 @@ export const Stat: React.FC<{
   label: React.ReactNode;
   value: React.ReactNode;
   sub?: React.ReactNode;
-  tone?: 'default' | 'accent' | 'pos' | 'neg';
+  tone?: 'default' | 'accent' | 'pos' | 'warn' | 'neg';
   title?: string;
+  help?: string;             // aide détaillée : icône (i) à côté du libellé
   className?: string;
-}> = ({ label, value, sub, tone = 'default', title, className = '' }) => {
-  const color = tone === 'accent' ? 'text-accent' : tone === 'pos' ? 'text-pos' : tone === 'neg' ? 'text-neg' : 'text-ink';
+}> = ({ label, value, sub, tone = 'default', title, help, className = '' }) => {
+  const color = tone === 'accent' ? 'text-accent' : tone === 'pos' ? 'text-pos' : tone === 'warn' ? 'text-warn' : tone === 'neg' ? 'text-neg' : 'text-ink';
   return (
     <div className={`min-w-0 ${className}`} title={title}>
-      <div className="sv-label truncate">{label}</div>
+      <div className="sv-label flex items-center gap-1 min-w-0"><span className="truncate">{label}</span>{help && <InfoTip text={help} />}</div>
       <div className={`mt-0.5 text-base font-semibold leading-tight num ${color}`}>{value}</div>
       {sub && <div className="text-2xs text-ink-3 mt-0.5 truncate">{sub}</div>}
     </div>
@@ -117,6 +119,51 @@ export const EmptyState: React.FC<{
 
 export const Skeleton: React.FC<{ className?: string }> = ({ className = 'h-64' }) => (
   <div className={`rounded-lg bg-surface border border-line animate-pulse ${className}`} />
+);
+
+/**
+ * Bloc de chargement à l'intérieur d'un panneau : occupe la place du contenu final.
+ * Décoratif : le conteneur porte role="status" et le libellé du chargement.
+ */
+export const SkeletonBlock: React.FC<{ className?: string }> = ({ className = 'h-24' }) => (
+  <div className={`rounded-md bg-raised/70 animate-pulse ${className}`} aria-hidden />
+);
+
+/**
+ * Échec de chargement : message discret et bouton « Réessayer »
+ */
+export const LoadError: React.FC<{ message?: string; onRetry?: () => void; className?: string }> = ({
+  message = 'Chargement impossible.', onRetry, className = '',
+}) => (
+  <div role="alert" className={`flex items-center gap-2 rounded-md border border-line px-3 py-2 text-xs text-ink-3 ${className}`}>
+    <AlertCircle className="w-3.5 h-3.5 shrink-0 text-warn" aria-hidden />
+    <span className="flex-1 min-w-0">{message}</span>
+    {onRetry && (
+      <button onClick={onRetry} className="sv-btn sv-btn-ghost sv-btn-sm !h-6 !px-1.5 shrink-0">
+        <RotateCw className="w-3 h-3" /> Réessayer
+      </button>
+    )}
+  </div>
+);
+
+/**
+ * Aide discrète : icône (i) avec infobulle détaillée, accessible au clavier
+ */
+export const InfoTip: React.FC<{ text: string; align?: 'center' | 'end' | 'start'; position?: 'top' | 'bottom' | 'left'; className?: string }> = ({
+  text, align = 'center', position = 'bottom', className = '',
+}) => (
+  <span
+    tabIndex={0}
+    role="note"
+    aria-label={text}
+    data-tip={text}
+    data-tip-wide=""
+    data-tip-pos={position === 'top' ? undefined : position}
+    data-tip-align={align === 'end' ? 'end' : align === 'start' ? 'start' : undefined}
+    className={`inline-flex items-center text-ink-4 hover:text-ink-2 focus-visible:text-ink-2 cursor-help normal-case tracking-normal font-normal shrink-0 ${className}`}
+  >
+    <Info className="w-3 h-3" aria-hidden />
+  </span>
 );
 
 /**
@@ -179,9 +226,11 @@ export const PercentileRow: React.FC<{
   value?: React.ReactNode;
   percentile: number;
   title?: string;
-}> = ({ label, value, percentile, title }) => (
-  <div className="grid grid-cols-[minmax(0,1fr)_3rem_2.75rem] sm:grid-cols-[minmax(0,1fr)_3.5rem_minmax(4rem,7rem)_2.75rem] items-center gap-2 sm:gap-2.5 h-6 text-xs" title={title}>
-    <span className="text-ink-2 truncate">{label}</span>
+  active?: boolean;          // ligne mise en évidence (lien avec un graphique)
+  className?: string;
+} & Pick<React.HTMLAttributes<HTMLDivElement>, 'onMouseEnter' | 'onMouseLeave' | 'onFocus' | 'onBlur' | 'tabIndex'>> = ({ label, value, percentile, title, active = false, className = '', ...events }) => (
+  <div className={`grid grid-cols-[minmax(0,1fr)_3rem_2.75rem] sm:grid-cols-[minmax(0,1fr)_3.5rem_minmax(4rem,7rem)_2.75rem] items-center gap-2 sm:gap-2.5 h-6 text-xs rounded-sm ${active ? 'bg-raised' : ''} ${className}`} title={title} {...events}>
+    <span className={`truncate ${active ? 'text-accent' : 'text-ink-2'}`}>{label}</span>
     <span className="text-right text-ink-3 num">{value}</span>
     <PercentileBar value={percentile} className="hidden sm:block" />
     <span className="text-right"><PercentileValue value={percentile} /></span>
@@ -226,7 +275,9 @@ export const PolarTick: React.FC<{
   x?: number; y?: number; cx?: number; cy?: number;
   payload?: { value: string };
   maxChars?: number;
-}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16 }) => {
+  active?: boolean;                       // libellé mis en évidence
+  onHover?: (value: string | null) => void;
+}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover }) => {
   const words = String(payload?.value ?? '').split(' ');
   const lines: string[] = [];
   words.forEach(w => {
@@ -238,7 +289,10 @@ export const PolarTick: React.FC<{
   const anchor = Math.abs(x - cx) < 4 ? 'middle' : x > cx ? 'start' : 'end';
   const dy = y < cy - 4 ? -(shown.length - 1) * 11 : y > cy + 4 ? 4 : -((shown.length - 1) * 11) / 2;
   return (
-    <text x={x} y={y + dy} textAnchor={anchor} fill="#C4CDD8" fontSize={10} fontWeight={500}>
+    <text x={x} y={y + dy} textAnchor={anchor} fill={active ? '#00E5FF' : '#C4CDD8'} fontSize={10} fontWeight={active ? 600 : 500}
+      onMouseEnter={onHover ? () => onHover(String(payload?.value ?? '')) : undefined}
+      onMouseLeave={onHover ? () => onHover(null) : undefined}
+      style={onHover ? { cursor: 'default' } : undefined}>
       {shown.map((l, i) => <tspan key={i} x={x} dy={i === 0 ? 3 : 11}>{l}</tspan>)}
     </text>
   );

@@ -7,8 +7,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flame } from 'lucide-react';
 import { PlayerData, getPlayerSeason } from '../types';
-import { dataLoader, PlayerHeatmap as HeatmapData } from '../services/dataLoader';
-import { Panel } from './ui';
+import { dataLoader } from '../services/dataLoader';
+import { useAsyncData } from '../hooks/useAsyncData';
+import { Panel, LoadError } from './ui';
 import { SEQUENTIAL } from '../theme/charts';
 
 interface PlayerHeatmapProps {
@@ -44,35 +45,26 @@ const THIRDS = ['Tiers défensif', 'Milieu de terrain', 'Tiers offensif'];
 const CHANNELS = ['Couloir droit', 'Axe', 'Couloir gauche'];
 
 const PlayerHeatmap: React.FC<PlayerHeatmapProps> = ({ player }) => {
-  const [heatmap, setHeatmap] = useState<{ cols: number; rows: number; data: HeatmapData } | null>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [hover, setHover] = useState<{ x: number; y: number; left: number; top: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Chargement de la carte du joueur (fichier de sa compétition, mis en cache)
-  useEffect(() => {
-    let cancelled = false;
-    setStatus('loading');
-    setHeatmap(null);
-    const season = getPlayerSeason(player);
-    if (!player.Competition || !player['Player ID']) {
-      setStatus('missing');
-      return;
-    }
-    dataLoader.loadHeatmaps(season, player.Competition)
-      .then(file => {
-        if (cancelled) return;
-        const data = file?.players[`${player['Player ID']}_${player['Team ID']}`];
-        if (file && data) {
-          setHeatmap({ cols: file.cols, rows: file.rows, data });
-          setStatus('ready');
-        } else {
-          setStatus('missing');
-        }
-      })
-      .catch(() => { if (!cancelled) setStatus('missing'); });
-    return () => { cancelled = true; };
-  }, [player]);
+  // Carte du joueur (fichier de sa compétition, mis en cache) : chargement, échec ou carte absente
+  // sont trois états distincts ; « absente » seulement après un chargement réussi
+  const season = getPlayerSeason(player);
+  const competition = player.Competition;
+  const canLoad = Boolean(competition && player['Player ID']);
+  const request = useAsyncData(
+    canLoad ? () => dataLoader.loadHeatmaps(season, competition!) : null,
+    [season, competition, canLoad],
+  );
+  const heatmap = useMemo(() => {
+    const file = request.data;
+    const data = file?.players[`${player['Player ID']}_${player['Team ID']}`];
+    return file && data ? { cols: file.cols, rows: file.rows, data } : null;
+  }, [request.data, player]);
+  const status = request.status === 'loading' ? 'loading'
+    : request.status === 'error' ? 'error'
+    : heatmap ? 'ready' : 'missing';
 
   const stats = useMemo(() => {
     if (!heatmap) return null;
@@ -151,14 +143,24 @@ const PlayerHeatmap: React.FC<PlayerHeatmapProps> = ({ player }) => {
         ? `${stats.total.toLocaleString('fr-FR')} actions · ${heatmap!.data.matches} matchs · ${player.Season}`
         : 'Zones d\'action du joueur sur la saison'}>
       {status === 'loading' && (
-        <div className="w-full max-w-[260px] mx-auto aspect-[68/105] rounded-md bg-raised animate-pulse" />
+        <div role="status" aria-label="Chargement de la carte de chaleur">
+          <div className="w-full max-w-[260px] mx-auto aspect-[68/105] rounded-md bg-raised/70 animate-pulse" />
+          <div className="mt-3 h-1.5 rounded-sm bg-raised/70" />
+          <div className="mt-4 grid grid-cols-2 xl:grid-cols-1 gap-x-4 gap-y-3">
+            {[0, 1].map(i => <div key={i} className="h-[4.5rem] rounded-md bg-raised/50 animate-pulse" />)}
+          </div>
+        </div>
+      )}
+
+      {status === 'error' && (
+        <LoadError message="La carte de chaleur n'a pas pu être chargée." onRetry={request.retry} />
       )}
 
       {status === 'missing' && (
-        <div className="w-full max-w-[260px] mx-auto aspect-[68/105] rounded-md bg-raised/60 border border-dashed border-line flex flex-col items-center justify-center text-center p-6">
-          <Flame className="w-8 h-8 text-ink-4 mb-3" />
-          <p className="text-sm text-ink-3">Pas de carte de chaleur pour cette saison</p>
-          <p className="text-xs text-ink-4 mt-1">Elle n'existe que pour les matchs couverts par les statistiques avancées de PitchAPI.</p>
+        <div className="w-full max-w-[260px] mx-auto rounded-md border border-dashed border-line flex flex-col items-center justify-center text-center px-4 py-8">
+          <Flame className="w-5 h-5 text-ink-4 mb-2" aria-hidden />
+          <p className="text-xs text-ink-2">Aucune donnée disponible</p>
+          <p className="text-2xs text-ink-4 mt-1 leading-relaxed">La carte n'existe que pour les matchs couverts par les statistiques avancées de PitchAPI.</p>
         </div>
       )}
 

@@ -168,7 +168,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
             seasonLabel: /^\d{4}$/.test(String(first.Season ?? '')) ? String(first.Season) : getSeasonLabel(getPlayerSeason(first)) }
         : null;
   }, [selectedTeam]);
-  const { shots: competitionShots } = useShots(selectedTeamInfo?.season, selectedTeamInfo?.competition);
+  const { shots: competitionShots, isLoading: shotsLoading, error: shotsError, retry: retryShots } = useShots(selectedTeamInfo?.season, selectedTeamInfo?.competition);
 
   const shotMapData = useMemo(() => {
       if (!selectedTeamInfo) return [];
@@ -382,7 +382,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                         <Stat label="Conversion" value={`${shotStats.total > 0 ? ((shotStats.goals / shotStats.total) * 100).toFixed(1) : 0} %`} />
                       </div>
                     }>
-                    <ShotPitch shots={shotMapData} showPlayer className="max-w-[420px]"
+                    <ShotPitch shots={shotMapData} showPlayer className="max-w-[420px]" loading={shotsLoading} error={shotsError} onRetry={retryShots}
                       emptyText={`Aucune donnée de tir pour ${teamInfo?.name ?? selectedTeam} : cette compétition n'a pas de tirs pour cette saison.`} />
                     <div className="mt-2"><ShotLegend /></div>
                   </Panel>
