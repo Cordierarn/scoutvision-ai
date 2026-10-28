@@ -111,12 +111,12 @@ const App: React.FC = () => {
   // Afficher une erreur si le chargement a échoué
   if (loadError) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-8">
-        <div className="text-red-400 text-xl mb-4">Échec du chargement des données</div>
-        <div className="text-slate-400 mb-8">{loadError}</div>
+      <div className="h-screen bg-canvas flex flex-col items-center justify-center p-8 text-center">
+        <div className="text-ink font-semibold mb-2">Échec du chargement des données</div>
+        <div className="text-sm text-ink-3 mb-6 max-w-lg">{loadError}</div>
         <button
           onClick={() => window.location.reload()}
-          className="px-6 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600"
+          className="sv-btn sv-btn-primary"
         >
           Réessayer
         </button>
@@ -140,6 +140,18 @@ const App: React.FC = () => {
     >
       {view === ViewState.TEAM_ANALYSIS && (
         <TeamAnalysis
+          key="team"
+          playerData={players}
+          teamStats={teamStats}
+          onSelectPlayer={handleSelectPlayer}
+        />
+      )}
+
+      {/* Recrutement : l'analyse d'équipe ouverte sur son onglet de recrutement */}
+      {view === ViewState.RECRUITMENT && (
+        <TeamAnalysis
+          key="recruitment"
+          initialTab="RECRUIT"
           playerData={players}
           teamStats={teamStats}
           onSelectPlayer={handleSelectPlayer}

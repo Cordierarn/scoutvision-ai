@@ -8,6 +8,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flame } from 'lucide-react';
 import { PlayerData, getPlayerSeason } from '../types';
 import { dataLoader, PlayerHeatmap as HeatmapData } from '../services/dataLoader';
+import { Panel } from './ui';
+import { SEQUENTIAL } from '../theme/charts';
 
 interface PlayerHeatmapProps {
   player: PlayerData;
@@ -17,10 +19,9 @@ interface PlayerHeatmapProps {
 const PITCH_W = 68;
 const PITCH_H = 105;
 
-// Rampe séquentielle à une teinte (bleu), du plus faible au plus fort.
+// Rampe séquentielle à une teinte (cyan ScoutVision), du plus faible au plus fort.
 // Sur fond sombre l'intensité monte vers le clair ; une case vide reste transparente.
-const RAMP = ['#104281', '#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5',
-  '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4', '#b7d3f6', '#cde2fb'];
+const RAMP: readonly string[] = SEQUENTIAL;
 
 const hexToRgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
 
@@ -145,32 +146,26 @@ const PlayerHeatmap: React.FC<PlayerHeatmapProps> = ({ player }) => {
   }, [hover, heatmap, stats]);
 
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl break-inside-avoid">
-      <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-        <Flame className="w-5 h-5 text-blue-400" /> Carte de chaleur
-      </h3>
-      <p className="text-xs text-slate-500 mb-4">
-        {status === 'ready' && stats
-          ? `${stats.total.toLocaleString('fr-FR')} actions · ${heatmap!.data.matches} matchs · ${player.Season}`
-          : 'Zones d\'action du joueur sur la saison'}
-      </p>
-
+    <Panel title="Carte de chaleur" icon={Flame} className="h-full break-inside-avoid"
+      subtitle={status === 'ready' && stats
+        ? `${stats.total.toLocaleString('fr-FR')} actions · ${heatmap!.data.matches} matchs · ${player.Season}`
+        : 'Zones d\'action du joueur sur la saison'}>
       {status === 'loading' && (
-        <div className="w-full aspect-[68/105] rounded-xl bg-slate-900 animate-pulse" />
+        <div className="w-full max-w-[260px] mx-auto aspect-[68/105] rounded-md bg-raised animate-pulse" />
       )}
 
       {status === 'missing' && (
-        <div className="w-full aspect-[68/105] rounded-xl bg-slate-900 border border-dashed border-slate-800 flex flex-col items-center justify-center text-center p-6">
-          <Flame className="w-8 h-8 text-slate-700 mb-3" />
-          <p className="text-sm text-slate-400">Pas de carte de chaleur pour cette saison</p>
-          <p className="text-xs text-slate-600 mt-1">Elle n'existe que pour les matchs couverts par les statistiques avancées de PitchAPI.</p>
+        <div className="w-full max-w-[260px] mx-auto aspect-[68/105] rounded-md bg-raised/60 border border-dashed border-line flex flex-col items-center justify-center text-center p-6">
+          <Flame className="w-8 h-8 text-ink-4 mb-3" />
+          <p className="text-sm text-ink-3">Pas de carte de chaleur pour cette saison</p>
+          <p className="text-xs text-ink-4 mt-1">Elle n'existe que pour les matchs couverts par les statistiques avancées de PitchAPI.</p>
         </div>
       )}
 
       {status === 'ready' && stats && (
         <>
           <div
-            className="relative w-full aspect-[68/105] rounded-xl overflow-hidden bg-slate-900 cursor-crosshair"
+            className="relative w-full max-w-[260px] mx-auto aspect-[68/105] rounded-md overflow-hidden bg-raised/60 border border-line cursor-crosshair"
             onMouseMove={handleMove}
             onMouseLeave={() => setHover(null)}
             role="img"
@@ -207,47 +202,47 @@ const PlayerHeatmap: React.FC<PlayerHeatmapProps> = ({ player }) => {
             )}
             {hover && hoverInfo && (
               <div
-                className="absolute z-10 pointer-events-none bg-slate-950/95 border border-slate-700 rounded-lg px-3 py-2 text-xs shadow-xl whitespace-nowrap"
+                className="absolute z-10 pointer-events-none bg-surface/95 border border-line-strong rounded-md px-3 py-2 text-xs  whitespace-nowrap"
                 style={{
                   left: Math.min(hover.left + 12, 160),
                   top: Math.max(hover.top - 48, 4),
                 }}
               >
-                <div className="text-slate-400">{hoverInfo.label}</div>
-                <div className="text-white font-bold">
-                  {hoverInfo.value} actions <span className="text-slate-400 font-normal">({hoverInfo.share.toFixed(1)}%)</span>
+                <div className="text-ink-3">{hoverInfo.label}</div>
+                <div className="text-ink font-bold">
+                  {hoverInfo.value} actions <span className="text-ink-3 font-normal">({hoverInfo.share.toFixed(1)}%)</span>
                 </div>
               </div>
             )}
 
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 bg-slate-950/70 px-2 py-0.5 rounded">
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] font-semibold uppercase tracking-wider text-ink-2 bg-surface/70 px-2 py-0.5 rounded">
               Attaque ↑
             </div>
           </div>
 
           {/* Légende */}
-          <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500">
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-ink-3">
             <span>Moins</span>
             <div
-              className="flex-1 h-2 rounded-full"
+              className="flex-1 h-1.5 rounded-sm"
               style={{ background: `linear-gradient(to right, ${[0.05, 0.25, 0.5, 0.75, 1].map(rampColor).join(', ')})` }}
             />
             <span>Plus d'actions</span>
           </div>
 
           {/* Répartition par tiers et par couloirs */}
-          <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
+          <div className="mt-4 grid grid-cols-2 xl:grid-cols-1 gap-x-4 gap-y-3 text-xs">
             {[{ title: 'Par tiers', labels: THIRDS, values: stats.thirds, order: [2, 1, 0] },
               { title: 'Par couloir', labels: CHANNELS, values: stats.channels, order: [2, 1, 0] }].map(block => (
               <div key={block.title}>
-                <div className="text-slate-500 uppercase font-semibold text-[10px] mb-2">{block.title}</div>
+                <div className="sv-label mb-1.5">{block.title}</div>
                 {block.order.map(i => (
                   <div key={block.labels[i]} className="flex items-center gap-2 mb-1.5">
-                    <span className="text-slate-400 w-24 truncate">{block.labels[i].replace('Tiers ', '').replace('Couloir ', '')}</span>
-                    <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct(block.values[i])}%` }} />
+                    <span className="text-ink-3 flex-1 min-w-0 truncate">{block.labels[i].replace('Tiers ', '').replace('Couloir ', '')}</span>
+                    <div className="w-12 h-1.5 bg-raised rounded-sm overflow-hidden shrink-0">
+                      <div className="h-full bg-accent-deep rounded-sm" style={{ width: `${pct(block.values[i])}%` }} />
                     </div>
-                    <span className="text-slate-200 font-mono w-8 text-right">{pct(block.values[i])}%</span>
+                    <span className="text-ink font-mono w-8 text-right">{pct(block.values[i])}%</span>
                   </div>
                 ))}
               </div>
@@ -255,7 +250,7 @@ const PlayerHeatmap: React.FC<PlayerHeatmapProps> = ({ player }) => {
           </div>
         </>
       )}
-    </div>
+    </Panel>
   );
 };
 

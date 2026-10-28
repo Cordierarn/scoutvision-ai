@@ -108,22 +108,22 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
       
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-           <h1 className="text-3xl font-bold text-white mb-1">Comparaison de joueurs</h1>
-           <p className="text-slate-400">Comparez jusqu'à 4 joueurs ({selectedPlayers.length}/4 choisis).</p>
+           <h1 className="text-3xl font-bold text-ink mb-1">Comparaison de joueurs</h1>
+           <p className="text-ink-3">Comparez jusqu'à 4 joueurs ({selectedPlayers.length}/4 choisis).</p>
         </div>
         
         {selectedPlayers.length > 0 && (
-           <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+           <div className="flex bg-raised p-1 rounded-md border border-line">
                 <button 
                   onClick={() => setViewMode('raw')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'raw' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'raw' ? 'bg-overlay text-ink ' : 'text-ink-3 hover:text-ink'}`}
                 >
                   <TrendingUp className="w-4 h-4" />
                   Valeurs
                 </button>
                 <button 
                   onClick={() => setViewMode('percentile')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'percentile' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'percentile' ? 'bg-overlay text-ink ' : 'text-ink-3 hover:text-ink'}`}
                 >
                   <Percent className="w-4 h-4" />
                   Percentiles
@@ -141,19 +141,19 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
             return (
             <div 
                key={getPlayerSeasonId(player)} 
-               className="relative bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 group hover:border-slate-700 transition-all"
+               className="relative bg-raised border border-line rounded-lg p-4 flex flex-col gap-3 group hover:border-line-strong transition-all"
                style={{ borderTop: `4px solid ${PLAYER_COLORS[idx].stroke}` }}
             >
                <button 
                   onClick={() => removePlayer(idx)}
-                  className="absolute top-2 right-2 p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+                  className="absolute top-2 right-2 p-1.5 text-ink-3 hover:text-neg hover:bg-overlay rounded-md transition-colors"
                >
                   <X className="w-4 h-4" />
                </button>
 
                <div className="flex items-center gap-3">
                   <div className="relative">
-                    <div className="relative overflow-hidden w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-lg font-bold text-slate-400">
+                    <div className="relative overflow-hidden w-12 h-12 rounded-md bg-surface border border-line flex items-center justify-center text-lg font-bold text-ink-3">
                        {(player.Player || '??').substring(0, 2).toUpperCase()}
                        <PhotoOverlay src={player.Image} alt={player.Player} />
                     </div>
@@ -163,19 +163,19 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                     </div>
                   </div>
                   <div className="min-w-0">
-                     <h3 className="font-bold text-slate-200 truncate pr-4">{player.Player || 'Inconnu'}</h3>
-                     <p className="text-xs text-slate-500 truncate"><TeamLine player={player} /></p>
+                     <h3 className="font-bold text-ink truncate pr-4">{player.Player || 'Inconnu'}</h3>
+                     <p className="text-xs text-ink-3 truncate"><TeamLine player={player} /></p>
                   </div>
                </div>
 
                <div className="grid grid-cols-2 gap-2 mt-auto">
-                   <div className="px-2 py-1.5 bg-slate-950 rounded text-center">
-                      <div className="text-[10px] text-slate-500 uppercase font-bold">Âge</div>
-                      <div className="text-sm font-mono text-slate-300">{player.Age}</div>
+                   <div className="px-2 py-1.5 bg-surface rounded text-center">
+                      <div className="text-[10px] text-ink-3 uppercase font-bold">Âge</div>
+                      <div className="text-sm font-mono text-ink-2">{player.Age}</div>
                    </div>
-                   <div className="px-2 py-1.5 bg-slate-950 rounded text-center">
-                      <div className="text-[10px] text-slate-500 uppercase font-bold">Poste</div>
-                      <div className="text-sm font-mono text-slate-300">{positionLabel(player.Position)}</div>
+                   <div className="px-2 py-1.5 bg-surface rounded text-center">
+                      <div className="text-[10px] text-ink-3 uppercase font-bold">Poste</div>
+                      <div className="text-sm font-mono text-ink-2">{positionLabel(player.Position)}</div>
                    </div>
                </div>
             </div>
@@ -188,26 +188,26 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                {!isSearching ? (
                   <button 
                      onClick={() => setIsSearching(true)}
-                     className="w-full h-full border-2 border-dashed border-slate-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-500 hover:text-emerald-400 transition-all group"
+                     className="w-full h-full border-2 border-dashed border-line hover:border-accent/50 hover:bg-accent/5 rounded-lg flex flex-col items-center justify-center gap-2 text-ink-3 hover:text-accent transition-all group"
                   >
-                     <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center group-hover:scale-110 transition-transform">
+                     <div className="w-12 h-12 rounded-full bg-raised flex items-center justify-center group-hover:scale-110 transition-transform">
                         <Plus className="w-6 h-6" />
                      </div>
                      <span className="font-medium">Ajouter un joueur</span>
                   </button>
                ) : (
-                  <div className="w-full h-full bg-slate-900 border border-emerald-500 rounded-2xl p-4 flex flex-col shadow-xl">
-                      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 mb-2">
-                         <Search className="w-4 h-4 text-emerald-500" />
+                  <div className="w-full h-full bg-raised border border-accent rounded-lg p-4 flex flex-col ">
+                      <div className="flex items-center gap-2 border-b border-line pb-2 mb-2">
+                         <Search className="w-4 h-4 text-accent" />
                          <input 
                            autoFocus
                            type="text" 
                            placeholder="Nom du joueur..." 
-                           className="bg-transparent border-none p-0 text-sm text-white w-full focus:ring-0 placeholder-slate-600"
+                           className="bg-transparent border-none p-0 text-sm text-ink w-full focus:ring-0 placeholder-ink-4"
                            value={searchTerm}
                            onChange={(e) => setSearchTerm(e.target.value)}
                          />
-                         <button onClick={() => setIsSearching(false)} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
+                         <button onClick={() => setIsSearching(false)} className="text-ink-3 hover:text-ink"><X className="w-4 h-4" /></button>
                       </div>
                       <div className="flex-1 overflow-y-auto custom-scrollbar -mr-2 pr-2">
                          {searchResults.map(p => {
@@ -217,10 +217,10 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                             <button 
                                key={getPlayerSeasonId(p)}
                                onClick={() => addPlayer(p)}
-                               className="w-full text-left py-2 px-2 hover:bg-slate-800 rounded flex items-center gap-2 group"
+                               className="w-full text-left py-2 px-2 hover:bg-overlay rounded flex items-center gap-2 group"
                             >
                                 <div className="relative">
-                                  <div className="relative overflow-hidden w-7 h-7 rounded bg-slate-950 flex items-center justify-center text-[10px] text-slate-400 group-hover:text-emerald-400">
+                                  <div className="relative overflow-hidden w-7 h-7 rounded bg-surface flex items-center justify-center text-[10px] text-ink-3 group-hover:text-accent">
                                      {(p.Player || '?').substring(0,1)}
                                      <PhotoOverlay src={p.Image} alt={p.Player} />
                                   </div>
@@ -229,14 +229,14 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                                   </div>
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                   <div className="text-xs font-bold text-slate-300 truncate">{p.Player || 'Inconnu'}</div>
-                                   <div className="text-[10px] text-slate-600 truncate"><TeamLine player={p} /></div>
+                                   <div className="text-xs font-bold text-ink-2 truncate">{p.Player || 'Inconnu'}</div>
+                                   <div className="text-[10px] text-ink-4 truncate"><TeamLine player={p} /></div>
                                 </div>
                             </button>
                             );
                          })}
                          {searchTerm && searchResults.length === 0 && (
-                            <div className="text-center text-xs text-slate-500 py-4">Aucun résultat</div>
+                            <div className="text-center text-xs text-ink-3 py-4">Aucun résultat</div>
                          )}
                       </div>
                   </div>
@@ -251,7 +251,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
             <div className="flex justify-end">
                 <button 
                 onClick={() => setShowMetricConfig(!showMetricConfig)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all text-sm ${showMetricConfig ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md border transition-all text-sm ${showMetricConfig ? 'bg-accent/10 border-accent text-accent' : 'bg-raised border-line-strong text-ink-2 hover:bg-overlay'}`}
                 >
                     <Settings2 className="w-4 h-4" />
                     Choisir les métriques ({selectedMetrics.length})
@@ -260,18 +260,18 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
 
             {/* Metric Configuration Panel */}
             {showMetricConfig && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 animate-fade-in-down">
+            <div className="bg-raised border border-line rounded-lg p-6 animate-fade-in-down">
                 <div className="flex items-center gap-4 mb-4">
-                    <Search className="w-5 h-5 text-slate-500" />
+                    <Search className="w-5 h-5 text-ink-3" />
                     <input 
                         type="text" 
                         placeholder="Rechercher une métrique..." 
-                        className="bg-transparent border-none focus:ring-0 text-white placeholder-slate-600 w-full"
+                        className="bg-transparent border-none focus:ring-0 text-ink placeholder-ink-4 w-full"
                         value={metricSearch}
                         onChange={(e) => setMetricSearch(e.target.value)}
                     />
                 </div>
-                <div className="h-px bg-slate-800 mb-4"></div>
+                <div className="h-px bg-overlay mb-4"></div>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-60 overflow-y-auto custom-scrollbar">
                     {numericKeys
                         .filter(k => k.toLowerCase().includes(metricSearch.toLowerCase()))
@@ -279,12 +279,12 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                         <div 
                             key={key} 
                             onClick={() => toggleMetric(key)}
-                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800 cursor-pointer group transition-colors select-none"
+                            className="flex items-center gap-3 p-2 rounded-md hover:bg-overlay cursor-pointer group transition-colors select-none"
                         >
-                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${selectedMetrics.includes(key) ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-950 border-slate-700 group-hover:border-slate-500'}`}>
-                                {selectedMetrics.includes(key) && <Check className="w-3 h-3 text-slate-950" />}
+                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${selectedMetrics.includes(key) ? 'bg-accent border-accent' : 'bg-surface border-line-strong group-hover:border-ink-4'}`}>
+                                {selectedMetrics.includes(key) && <Check className="w-3 h-3 text-accent-ink" />}
                             </div>
-                            <span className={`text-sm ${selectedMetrics.includes(key) ? 'text-slate-200' : 'text-slate-500'}`}>{metricLabel(key)}</span>
+                            <span className={`text-sm ${selectedMetrics.includes(key) ? 'text-ink' : 'text-ink-3'}`}>{metricLabel(key)}</span>
                         </div>
                     ))}
                 </div>
@@ -294,10 +294,10 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
                 {/* Radar Chart */}
-                <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[450px]">
+                <div className="bg-surface border border-line rounded-lg p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[450px]">
                     <div className="absolute top-4 left-4 z-10">
-                        <h3 className="text-lg font-bold text-slate-300 flex items-center gap-2">
-                             <TrendingUp className="w-5 h-5 text-emerald-500" /> Radar superposé
+                        <h3 className="text-lg font-bold text-ink-2 flex items-center gap-2">
+                             <TrendingUp className="w-5 h-5 text-accent" /> Radar superposé
                         </h3>
                     </div>
                     
@@ -331,8 +331,8 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                 </div>
 
                 {/* Data Table */}
-                <div className="lg:col-span-2 bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden flex flex-col">
-                    <div className="flex bg-slate-900 border-b border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-400 sticky top-0 z-10">
+                <div className="lg:col-span-2 bg-surface border border-line rounded-lg overflow-hidden flex flex-col">
+                    <div className="flex bg-raised border-b border-line text-xs font-bold uppercase tracking-wider text-ink-3 sticky top-0 z-10">
                         <div className="flex-1 p-4">Métrique</div>
                         {selectedPlayers.map((p, idx) => (
                             <div 
@@ -353,11 +353,11 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                             const maxVal = Math.max(...rowValues);
 
                             return (
-                                <div key={key} className={`flex items-center hover:bg-slate-900/40 transition-colors border-b border-slate-800/50 py-3 ${rowIdx % 2 === 0 ? 'bg-slate-900/10' : ''}`}>
-                                    <div className="flex-1 px-4 text-sm text-slate-300 font-medium truncate flex items-center gap-2">
+                                <div key={key} className={`flex items-center hover:bg-raised/40 transition-colors border-b border-line/50 py-3 ${rowIdx % 2 === 0 ? 'bg-raised/10' : ''}`}>
+                                    <div className="flex-1 px-4 text-sm text-ink-2 font-medium truncate flex items-center gap-2">
                                         <button 
                                             onClick={() => toggleMetric(key)} 
-                                            className="text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            className="text-ink-4 hover:text-neg opacity-0 group-hover:opacity-100 transition-opacity"
                                             title="Retirer la métrique"
                                         >
                                             <Trash2 className="w-3 h-3" />
@@ -372,7 +372,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
 
                                         return (
                                             <div key={`${p.Player}-${key}`} className="w-24 md:w-32 px-4 text-right">
-                                                <div className={`font-mono text-sm ${isBest ? 'font-bold scale-110' : 'text-slate-400'}`} style={{ color: isBest ? PLAYER_COLORS[idx].stroke : undefined }}>
+                                                <div className={`font-mono text-sm ${isBest ? 'font-bold scale-110' : 'text-ink-3'}`} style={{ color: isBest ? PLAYER_COLORS[idx].stroke : undefined }}>
                                                     {viewMode === 'raw' 
                                                         ? (val % 1 !== 0 ? val.toFixed(2) : val) 
                                                         : `${perc}%`
@@ -385,7 +385,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                             );
                         })}
                         {selectedMetrics.length === 0 && (
-                             <div className="p-8 text-center text-slate-500 text-sm">
+                             <div className="p-8 text-center text-ink-3 text-sm">
                                 Aucune métrique. Utilisez « Choisir les métriques » pour en ajouter.
                              </div>
                         )}
@@ -398,11 +398,11 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
 
       {selectedPlayers.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center text-center opacity-50 p-10">
-              <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-slate-800">
-                  <Users className="w-10 h-10 text-slate-600" />
+              <div className="w-24 h-24 bg-raised rounded-full flex items-center justify-center mb-6 border border-line">
+                  <Users className="w-10 h-10 text-ink-4" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Aucun joueur choisi</h3>
-              <p className="text-slate-400 max-w-sm">Utilisez « Ajouter un joueur » pour composer votre comparaison (4 joueurs au plus).</p>
+              <h3 className="text-xl font-bold text-ink mb-2">Aucun joueur choisi</h3>
+              <p className="text-ink-3 max-w-sm">Utilisez « Ajouter un joueur » pour composer votre comparaison (4 joueurs au plus).</p>
           </div>
       )}
     </div>

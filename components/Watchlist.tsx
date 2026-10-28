@@ -84,15 +84,15 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
   return (
     <div className="flex flex-col h-full animate-fade-in">
       {/* Header */}
-      <div className="p-6 border-b border-slate-800 bg-slate-950/50">
+      <div className="p-6 border-b border-line bg-surface/50">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-yellow-500/10 rounded-xl flex items-center justify-center">
-              <Star className="w-6 h-6 text-yellow-400" />
+            <div className="w-12 h-12 bg-warn/10 rounded-md flex items-center justify-center">
+              <Star className="w-6 h-6 text-warn" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">Ma liste de suivi</h1>
-              <p className="text-sm text-slate-400">{watchlist.length} joueurs suivis</p>
+              <h1 className="text-2xl font-bold text-ink">Ma liste de suivi</h1>
+              <p className="text-sm text-ink-3">{watchlist.length} joueurs suivis</p>
             </div>
           </div>
           
@@ -100,7 +100,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
             <button
               onClick={handleExport}
               disabled={watchlist.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-4 py-2 bg-accent/10 hover:bg-accent/20 text-accent rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Exporter</span>
@@ -108,7 +108,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
             <button
               onClick={handleClearAll}
               disabled={watchlist.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-4 py-2 bg-neg/10 hover:bg-neg/20 text-neg rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Trash2 className="w-4 h-4" />
               <span className="hidden sm:inline">Tout vider</span>
@@ -119,11 +119,11 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
         {/* Search & Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3" />
             <input
               type="text"
               placeholder="Rechercher dans la liste..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-raised border border-line-strong rounded-md pl-10 pr-4 py-2 text-sm text-ink placeholder-ink-4 focus:outline-none focus:border-accent"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -131,7 +131,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
           
           {allTags.length > 0 && (
             <select
-              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+              className="bg-raised border border-line-strong rounded-md px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent"
               value={filterTag}
               onChange={(e) => setFilterTag(e.target.value)}
             >
@@ -148,19 +148,19 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
       <div className="flex-1 overflow-y-auto p-6">
         {watchlist.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mb-4">
-              <Star className="w-10 h-10 text-slate-600" />
+            <div className="w-20 h-20 bg-overlay/50 rounded-full flex items-center justify-center mb-4">
+              <Star className="w-10 h-10 text-ink-4" />
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Aucun joueur suivi</h3>
-            <p className="text-slate-400 max-w-md">
+            <h3 className="text-xl font-bold text-ink mb-2">Aucun joueur suivi</h3>
+            <p className="text-ink-3 max-w-md">
               Cliquez sur l'étoile d'un joueur pour l'ajouter à votre liste de suivi.
             </p>
           </div>
         ) : filteredWatchlist.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
-            <Filter className="w-10 h-10 text-slate-600 mb-4" />
-            <h3 className="text-lg font-bold text-white mb-2">Aucun résultat</h3>
-            <p className="text-slate-400">Modifiez la recherche ou les filtres.</p>
+            <Filter className="w-10 h-10 text-ink-4 mb-4" />
+            <h3 className="text-lg font-bold text-ink mb-2">Aucun résultat</h3>
+            <p className="text-ink-3">Modifiez la recherche ou les filtres.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -173,14 +173,14 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
               return (
                 <div 
                   key={getPlayerSeasonId(player)} 
-                  className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all group"
+                  className="bg-surface border border-line rounded-lg overflow-hidden hover:border-line-strong transition-all group"
                 >
                   {/* Card Header */}
-                  <div className="p-4 border-b border-slate-800/50 bg-slate-900/30">
+                  <div className="p-4 border-b border-line/50 bg-raised/30">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div className="relative">
-                          <div className="relative overflow-hidden w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-300 border border-slate-700">
+                          <div className="relative overflow-hidden w-12 h-12 rounded-full bg-overlay flex items-center justify-center text-sm font-bold text-ink-2 border border-line-strong">
                             {(player.Player || '??').substring(0, 2).toUpperCase()}
                             <PhotoOverlay src={player.Image} alt={player.Player} />
                           </div>
@@ -189,13 +189,13 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
                           </div>
                         </div>
                         <div>
-                          <h3 className="font-bold text-white">{player.Player}</h3>
-                          <p className="text-xs text-slate-400"><TeamLine player={player} /></p>
+                          <h3 className="font-bold text-ink">{player.Player}</h3>
+                          <p className="text-xs text-ink-3"><TeamLine player={player} /></p>
                         </div>
                       </div>
                       <button
                         onClick={() => handleRemove(player)}
-                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                        className="p-1.5 text-ink-3 hover:text-neg hover:bg-neg/10 rounded-md transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -206,23 +206,23 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
                   <div className="p-4 space-y-3">
                     {/* Stats Row */}
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="px-2 py-1 bg-slate-800 rounded text-slate-300">{positionLabel(player.Position)}</span>
-                      <span className="px-2 py-1 bg-slate-800 rounded text-slate-300">{player.Age ?? '–'} ans</span>
-                      <span className="px-2 py-1 bg-emerald-500/10 rounded text-emerald-400 font-mono">
+                      <span className="px-2 py-1 bg-overlay rounded text-ink-2">{positionLabel(player.Position)}</span>
+                      <span className="px-2 py-1 bg-overlay rounded text-ink-2">{player.Age ?? '–'} ans</span>
+                      <span className="px-2 py-1 bg-accent/10 rounded text-accent font-mono">
                         €{typeof player["Market value"] === 'number' ? (player["Market value"]/1000000).toFixed(1) + 'M' : '-'}
                       </span>
                     </div>
 
                     {/* Notes */}
-                    <div className="bg-slate-900/50 rounded-lg p-3">
-                      <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
+                    <div className="bg-raised/50 rounded-md p-3">
+                      <div className="flex items-center gap-2 text-xs text-ink-3 mb-2">
                         <MessageSquare className="w-3 h-3" />
                         Notes
                       </div>
                       {isEditing ? (
                         <div className="space-y-2">
                           <textarea
-                            className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white resize-none focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-overlay border border-line-strong rounded p-2 text-sm text-ink resize-none focus:outline-none focus:border-accent"
                             rows={3}
                             value={tempNotes}
                             onChange={(e) => setTempNotes(e.target.value)}
@@ -232,13 +232,13 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleSaveNotes(player)}
-                              className="flex-1 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold rounded transition-colors"
+                              className="flex-1 py-1.5 bg-accent hover:bg-accent text-accent-ink text-xs font-bold rounded transition-colors"
                             >
                               Enregistrer
                             </button>
                             <button
                               onClick={() => setEditingNotes(null)}
-                              className="flex-1 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded transition-colors"
+                              className="flex-1 py-1.5 bg-line-strong hover:bg-ink-4 text-ink text-xs rounded transition-colors"
                             >
                               Annuler
                             </button>
@@ -246,29 +246,29 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
                         </div>
                       ) : (
                         <p 
-                          className="text-sm text-slate-300 cursor-pointer hover:text-white transition-colors min-h-[40px]"
+                          className="text-sm text-ink-2 cursor-pointer hover:text-ink transition-colors min-h-[40px]"
                           onClick={() => {
                             setEditingNotes(getPlayerSeasonId(player));
                             setTempNotes(item.notes || '');
                           }}
                         >
-                          {item.notes || <span className="text-slate-600 italic">Cliquez pour ajouter des notes...</span>}
+                          {item.notes || <span className="text-ink-4 italic">Cliquez pour ajouter des notes...</span>}
                         </p>
                       )}
                     </div>
 
                     {/* Added Date */}
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <div className="flex items-center gap-2 text-xs text-ink-3">
                       <Clock className="w-3 h-3" />
                       Ajouté le {formatDate(item.addedAt)}
                     </div>
                   </div>
 
                   {/* Card Footer */}
-                  <div className="p-3 border-t border-slate-800 bg-slate-900/30">
+                  <div className="p-3 border-t border-line bg-raised/30">
                     <button
                       onClick={() => onSelectPlayer(player)}
-                      className="w-full flex items-center justify-center gap-2 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded-lg transition-colors"
+                      className="w-full flex items-center justify-center gap-2 py-2 bg-overlay hover:bg-line-strong text-ink text-sm rounded-md transition-colors"
                     >
                       <Eye className="w-4 h-4" />
                       Voir la fiche

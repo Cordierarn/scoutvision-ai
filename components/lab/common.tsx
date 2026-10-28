@@ -22,7 +22,7 @@ export const VerdictBadge: React.FC<{ verdict: Verdict }> = ({ verdict }) => {
   const v = VERDICTS[verdict];
   const Icon = v.icon;
   return (
-    <span title={v.help} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-[11px] font-semibold text-slate-200 whitespace-nowrap">
+    <span title={v.help} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-line-strong bg-raised text-[11px] font-semibold text-ink whitespace-nowrap">
       <Icon className="w-3.5 h-3.5" style={{ color: v.color }} aria-hidden />
       {v.label}
     </span>
@@ -30,11 +30,11 @@ export const VerdictBadge: React.FC<{ verdict: Verdict }> = ({ verdict }) => {
 };
 
 export const Panel: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNode; right?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, subtitle, right, className = '', children }) => (
-  <section className={`bg-slate-950 border border-slate-800 rounded-2xl p-5 ${className}`}>
+  <section className={`bg-surface border border-line rounded-lg p-5 ${className}`}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{title}</h3>
-        {subtitle && <p className="text-xs text-slate-500 mt-1 leading-relaxed">{subtitle}</p>}
+        <h3 className="text-sm font-bold text-ink uppercase tracking-wider">{title}</h3>
+        {subtitle && <p className="text-xs text-ink-3 mt-1 leading-relaxed">{subtitle}</p>}
       </div>
       {right}
     </div>
@@ -42,10 +42,10 @@ export const Panel: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNod
   </section>
 );
 
-export const Loading: React.FC = () => <div className="h-64 rounded-2xl bg-slate-900 animate-pulse" />;
+export const Loading: React.FC = () => <div className="h-64 rounded-lg bg-raised animate-pulse" />;
 
 export const Missing: React.FC<{ what: string }> = ({ what }) => (
-  <p className="text-sm text-slate-500">Données {what} absentes : lancez scripts/prepare_lab.py après scripts/prepare_data.py.</p>
+  <p className="text-sm text-ink-3">Données {what} absentes : lancez scripts/prepare_lab.py après scripts/prepare_data.py.</p>
 );
 
 /**

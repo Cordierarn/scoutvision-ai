@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
-import { Search, ChevronDown, ChevronUp, Eye, Filter, SlidersHorizontal, Plus, X, Calendar, Download, Star } from 'lucide-react';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { Search, ChevronDown, ChevronUp, Eye, SlidersHorizontal, Plus, X, Download, Star } from 'lucide-react';
 import { exportToCSV } from '../utils/exportUtils';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 import { getMetricKeys } from '../utils/positionMetrics';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
-import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
+import { TeamLine, CountryFlag, PlayerAvatar } from './Media';
+import { EmptyState, PercentileValue } from './ui';
 
 interface PlayerListProps {
   data: PlayerData[];
@@ -65,6 +66,9 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
     const posSet = new Set(data.map(p => p.Position).filter(Boolean));
     return ['All', ...Array.from(posSet)];
   }, [data]);
+
+  // Badge de saison seulement quand plusieurs saisons sont chargées
+  const multiSeason = useMemo(() => new Set(data.map(p => extractSeason(p.League))).size > 1, [data]);
 
   const numericKeys = useMemo(() => {
     if (data.length === 0) return [];
@@ -172,221 +176,223 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
     return `€${val}`;
   };
 
+  // En-tête de colonne triable (aria-sort pour les lecteurs d'écran)
+  const SortHeader: React.FC<{ field: SortField; label: string; align?: 'left' | 'right'; title?: string; className?: string }> = ({ field, label, align = 'left', title, className = '' }) => {
+    const active = sortField === field;
+    return (
+      <th
+        aria-sort={active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className={`${align === 'right' ? 'text-right' : ''} ${className}`}
+        title={title}
+      >
+        <button
+          onClick={() => handleSort(field)}
+          className={`inline-flex items-center gap-1 uppercase tracking-[0.08em] hover:text-ink transition-colors ${active ? 'text-ink' : ''} ${align === 'right' ? 'flex-row-reverse' : ''}`}
+        >
+          {label}
+          {active ? (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3 text-accent" /> : <ChevronDown className="w-3 h-3 text-accent" />) : <span className="w-3" />}
+        </button>
+      </th>
+    );
+  };
+
+  const num = (v: unknown, digits = 0) => (typeof v === 'number' ? v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '–');
+
   return (
-    <div className="bg-slate-950 rounded-2xl border border-slate-800 flex flex-col h-full overflow-hidden shadow-xl">
-      {/* Toolbar */}
-      <div className="p-4 border-b border-slate-800 flex flex-col gap-4">
-         <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full md:w-96">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-              <input 
-                type="text" 
-                placeholder="Rechercher un joueur ou un club..." 
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            
-            <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto">
-              <button 
-                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors border ${showAdvancedFilters ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
-              >
-                <SlidersHorizontal className="w-4 h-4" />
-                Filtres avancés
-                {activeFilters.length > 0 && (
-                   <span className="bg-emerald-500 text-slate-950 text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">
-                     {activeFilters.length}
-                   </span>
-                )}
-              </button>
+    <div className="flex flex-col h-full min-h-0">
+      {/* Barre d'outils : recherche, poste, filtres, export */}
+      <div className="px-5 pt-4 pb-3 border-b border-line space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-80">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
+            <input
+              type="text"
+              placeholder="Rechercher un joueur ou un club"
+              className="sv-input pl-8"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Rechercher un joueur ou un club"
+            />
+          </div>
 
-              <div className="h-6 w-px bg-slate-800 mx-2"></div>
+          <select
+            value={positionFilter}
+            onChange={(e) => setPositionFilter(e.target.value)}
+            className="sv-select"
+            aria-label="Poste"
+          >
+            {positions.map(p => <option key={p} value={p}>{p === 'All' ? 'Tous les postes' : positionName(p)}</option>)}
+          </select>
 
-              <div className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-400 whitespace-nowrap">
-                <Filter className="w-4 h-4" />
-                <select 
-                  value={positionFilter} 
-                  onChange={(e) => setPositionFilter(e.target.value)}
-                  className="bg-transparent border-none focus:ring-0 text-slate-200 cursor-pointer p-0"
-                >
-                  {positions.map(p => <option key={p} value={p}>{p === 'All' ? 'Tous les postes' : positionName(p)}</option>)}
-                </select>
-              </div>
-              
-              <button
-                onClick={() => exportToCSV(filteredAndSortedData.slice(0, 500), 'players')}
-                disabled={filteredAndSortedData.length === 0}
-                className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors text-sm disabled:opacity-50"
-                title="Exporter les 500 premiers résultats"
-              >
-                <Download className="w-4 h-4" />
-                Exporter
-              </button>
-              
-              <div className="px-3 py-2 bg-slate-900 rounded-lg text-sm text-slate-400 whitespace-nowrap">
-                {filteredAndSortedData.length} joueurs trouvés
-              </div>
-            </div>
-         </div>
-         
-         {/* Advanced Filters Panel */}
-         {showAdvancedFilters && (
-           <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-4 animate-fade-in-down">
-              <div className="flex items-center justify-between mb-4">
-                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                   Conditions actives
-                   <span className="text-xs font-normal text-slate-500">(toutes requises)</span>
-                 </h3>
-                 <button 
-                    onClick={addFilter}
-                    className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-1 bg-emerald-500/10 rounded border border-emerald-500/20"
-                 >
-                    <Plus className="w-3 h-3" /> Ajouter une condition
-                 </button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                 {activeFilters.map((filter) => (
-                    <div key={filter.id} className="flex flex-col gap-2 p-3 bg-slate-950 rounded-lg border border-slate-700 relative group">
-                        <button 
-                          onClick={() => removeFilter(filter.id)}
-                          className="absolute top-2 right-2 text-slate-600 hover:text-rose-500 transition-colors"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                        
-                        <select 
-                           value={filter.key}
-                           onChange={(e) => updateFilter(filter.id, 'key', e.target.value)}
-                           className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-slate-200 p-1.5 focus:border-emerald-500 focus:ring-0"
-                        >
-                           {numericKeys.map(k => <option key={k} value={k}>{metricLabel(k)}</option>)}
-                        </select>
-                        
-                        <div className="flex items-center gap-2">
-                           <div className="flex-1">
-                              <input 
-                                type="number" 
-                                placeholder="Min" 
-                                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white placeholder-slate-600"
-                                value={filter.min}
-                                onChange={(e) => updateFilter(filter.id, 'min', e.target.value)}
-                              />
-                           </div>
-                           <span className="text-slate-600 text-xs">-</span>
-                           <div className="flex-1">
-                              <input 
-                                type="number" 
-                                placeholder="Max" 
-                                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white placeholder-slate-600"
-                                value={filter.max}
-                                onChange={(e) => updateFilter(filter.id, 'max', e.target.value)}
-                              />
-                           </div>
-                        </div>
-                    </div>
-                 ))}
-                 {activeFilters.length === 0 && (
-                    <div className="col-span-full py-4 text-center text-sm text-slate-500 border border-dashed border-slate-800 rounded-lg">
-                       Aucun filtre avancé. Cliquez sur « Ajouter une condition » pour filtrer sur une statistique (par exemple xG supérieur à 0,5).
-                    </div>
-                 )}
-              </div>
-           </div>
-         )}
-      </div>
+          <button
+            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+            aria-expanded={showAdvancedFilters}
+            className={`sv-btn sv-btn-secondary ${showAdvancedFilters ? '!border-accent/60 !text-accent' : ''}`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Filtres statistiques
+            {activeFilters.length > 0 && (
+              <span className="min-w-[18px] h-[18px] px-1 rounded-sm bg-accent text-accent-ink text-2xs font-bold flex items-center justify-center">
+                {activeFilters.length}
+              </span>
+            )}
+          </button>
 
-      {/* Table Header */}
-      <div className="grid grid-cols-12 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-        <div className="col-span-3 p-4 cursor-pointer hover:text-emerald-400 flex items-center gap-2 transition-colors" onClick={() => handleSort('Player')}>
-          Joueur {sortField === 'Player' && (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3 text-emerald-500" /> : <ChevronDown className="w-3 h-3 text-emerald-500" />)}
-        </div>
-        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Age')}>Âge</div>
-        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Position')}>Poste</div>
-        <div className="col-span-2 p-4 cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => handleSort('Team')}>Club</div>
-        <div className="col-span-2 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('Market value')}>Valeur</div>
-        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('xG')}>xG</div>
-        <div className="col-span-1 p-4 cursor-pointer hover:text-emerald-400 text-right transition-colors" onClick={() => handleSort('xA')}>xA</div>
-        <div className="col-span-1 p-4 text-center">Action</div>
-      </div>
-
-      {/* List Content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-950/50">
-        {filteredAndSortedData.length > 0 ? (
-          filteredAndSortedData.slice(0, visibleCount).map((player, idx) => {
-            const season = extractSeason(player.League);
-            const seasonColors = getSeasonColor(season);
-            return (
-            <div 
-              key={`${player.Player}-${player.Team}-${season}-${idx}`} 
-              className="grid grid-cols-12 border-b border-slate-800/50 hover:bg-white/5 transition-all duration-200 group items-center"
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-xs text-ink-3"><span className="text-ink font-semibold num">{filteredAndSortedData.length.toLocaleString('fr-FR')}</span> joueurs</span>
+            <button
+              onClick={() => exportToCSV(filteredAndSortedData.slice(0, 500), 'players')}
+              disabled={filteredAndSortedData.length === 0}
+              className="sv-btn sv-btn-secondary"
+              title="Exporter les 500 premiers résultats"
             >
-              <div className="col-span-3 p-4 flex items-center gap-3">
-                <div className="relative">
-                  <div className="relative overflow-hidden w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 border border-slate-700 group-hover:border-emerald-500/50 group-hover:text-emerald-400 transition-colors">
-                    {(player.Player || '?').substring(0, 1)}
-                    <PhotoOverlay src={player.Image} alt={player.Player} />
-                  </div>
-                  {/* Season Badge */}
-                  <div className={`absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${seasonColors.bg} ${seasonColors.text} border ${seasonColors.border}`}>
-                    {getSeasonShortLabel(season)}
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-slate-200 group-hover:text-white truncate">{player.Player}</div>
-                  <div className="text-xs text-slate-500 truncate">{player.Birth_country}</div>
-                </div>
-              </div>
-              <div className="col-span-1 p-4 text-sm text-slate-400 font-medium">{player.Age}</div>
-              <div className="col-span-1 p-4">
-                <span className="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300 group-hover:border-emerald-500/30 group-hover:text-emerald-400 transition-colors">
-                  {positionLabel(player.Position)}
-                </span>
-              </div>
-              <div className="col-span-2 p-4 text-sm text-slate-400 truncate group-hover:text-slate-300 transition-colors"><TeamLine player={player} /></div>
-              <div className="col-span-2 p-4 text-sm font-mono text-right text-emerald-400 font-bold tracking-tight">
-                {formatValue(Number(player['Market value']) || 0)}
-              </div>
-              <div className="col-span-1 p-4 text-sm font-mono text-right text-slate-300">
-                {(Number(player.xG) || 0).toFixed(2)}
-              </div>
-              <div className="col-span-1 p-4 text-sm font-mono text-right text-slate-300">
-                {(Number(player.xA) || 0).toFixed(2)}
-              </div>
-              <div className="col-span-1 p-4 flex justify-center gap-1">
-                <button 
-                  onClick={(e) => toggleWatchlist(player, e)}
-                  className={`p-2 rounded-lg transition-all ${
-                    watchlistIds.has(getPlayerSeasonId(player))
-                      ? 'bg-yellow-500/20 text-yellow-400'
-                      : 'bg-slate-800 text-slate-500 hover:text-yellow-400 hover:bg-yellow-500/10'
-                  }`}
-                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
-                >
-                  <Star className={`w-4 h-4 ${watchlistIds.has(getPlayerSeasonId(player)) ? 'fill-yellow-400' : ''}`} />
-                </button>
-                <button 
-                  onClick={() => onSelectPlayer(player)}
-                  className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:bg-emerald-500 hover:text-white transition-all shadow-sm hover:shadow-emerald-500/20"
-                  title="Voir la fiche"
-                >
-                  <Eye className="w-4 h-4" />
-                </button>
-              </div>
+              <Download className="w-3.5 h-3.5" />
+              Exporter CSV
+            </button>
+          </div>
+        </div>
+
+        {/* Filtres statistiques : toutes les conditions sont requises */}
+        {showAdvancedFilters && (
+          <div className="sv-panel p-3 animate-fade-in-down">
+            <div className="flex items-center justify-between mb-2">
+              <span className="sv-label">Conditions <span className="normal-case tracking-normal font-normal text-ink-4">(toutes requises)</span></span>
+              <button onClick={addFilter} className="sv-btn sv-btn-ghost sv-btn-sm !text-accent">
+                <Plus className="w-3.5 h-3.5" /> Ajouter une condition
+              </button>
             </div>
-          );
-          })
-        ) : (
-          <div className="flex flex-col items-center justify-center h-64 text-slate-500">
-            <Search className="w-12 h-12 mb-4 opacity-20" />
-            <p>Aucun joueur ne correspond à ces critères.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+              {activeFilters.map((filter) => (
+                <div key={filter.id} className="flex items-center gap-1.5">
+                  <select
+                    value={filter.key}
+                    onChange={(e) => updateFilter(filter.id, 'key', e.target.value)}
+                    className="sv-select sv-select-sm flex-1 min-w-0"
+                    aria-label="Métrique"
+                  >
+                    {numericKeys.map(k => <option key={k} value={k}>{metricLabel(k)}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Min"
+                    className="sv-input sv-input-sm !w-20"
+                    value={filter.min}
+                    onChange={(e) => updateFilter(filter.id, 'min', e.target.value)}
+                    aria-label="Minimum"
+                  />
+                  <span className="text-ink-4 text-xs">–</span>
+                  <input
+                    type="number"
+                    placeholder="Max"
+                    className="sv-input sv-input-sm !w-20"
+                    value={filter.max}
+                    onChange={(e) => updateFilter(filter.id, 'max', e.target.value)}
+                    aria-label="Maximum"
+                  />
+                  <button onClick={() => removeFilter(filter.id)} className="sv-icon-btn hover:!text-neg" title="Retirer la condition">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+              {activeFilters.length === 0 && (
+                <p className="col-span-full text-xs text-ink-3 py-1">
+                  Aucune condition. « Ajouter une condition » filtre sur une statistique (par exemple xG supérieur à 0,5).
+                </p>
+              )}
+            </div>
           </div>
         )}
+      </div>
+
+      {/* Tableau */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        <table className="sv-table">
+          <thead>
+            <tr>
+              <SortHeader field="Player" label="Joueur" className="pl-5" />
+              <SortHeader field="Age" label="Âge" align="right" />
+              <SortHeader field="Position" label="Poste" />
+              <SortHeader field="Team" label="Club" />
+              <SortHeader field="Minutes played" label="Min" align="right" title="Minutes jouées" />
+              <SortHeader field="Goals" label="Buts" align="right" />
+              <SortHeader field="Assists" label="PD" align="right" title="Passes décisives" />
+              <SortHeader field="xG" label="xG" align="right" />
+              <SortHeader field="xA" label="xA" align="right" />
+              <SortHeader field="Rating" label="Note" align="right" title="Note moyenne et percentile du rôle" />
+              <SortHeader field="Market value" label="Valeur" align="right" title="Valeur Transfermarkt" />
+              <SortHeader field="Contract expires" label="Contrat" align="right" />
+              <th className="w-[72px] pr-5"><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredAndSortedData.slice(0, visibleCount).map((player, idx) => {
+              const season = extractSeason(player.League);
+              const id = getPlayerSeasonId(player);
+              const watched = watchlistIds.has(id);
+              return (
+                <tr
+                  key={`${player.Player}-${player.Team}-${season}-${idx}`}
+                  className="group cursor-pointer"
+                  onClick={() => onSelectPlayer(player)}
+                >
+                  <td className="pl-5">
+                    <div className="flex items-center gap-2.5 min-w-[13rem]">
+                      <PlayerAvatar player={player} size="sm" season={multiSeason ? getSeasonShortLabel(season) : undefined} />
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium text-ink truncate group-hover:text-accent transition-colors">{player.Player}</div>
+                        {player['Passport country'] && (
+                          <div className="flex items-center gap-1 text-2xs text-ink-4">
+                            <CountryFlag code={String(player['Passport country'])} className="w-3 h-2" />
+                            {player['Passport country']}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="text-right text-ink-2">{player.Age ?? '–'}</td>
+                  <td><span className="sv-tag" title={positionName(player.Position)}>{positionLabel(player.Position)}</span></td>
+                  <td className="text-ink-2 max-w-[15rem]"><TeamLine player={player} className="max-w-full" /></td>
+                  <td className="text-right text-ink-3">{num(player['Minutes played'])}</td>
+                  <td className="text-right text-ink">{num(player.Goals)}</td>
+                  <td className="text-right text-ink">{num(player.Assists)}</td>
+                  <td className="text-right text-ink-2">{num(Number(player.xG) || 0, 2)}</td>
+                  <td className="text-right text-ink-2">{num(Number(player.xA) || 0, 2)}</td>
+                  <td className="text-right whitespace-nowrap">
+                    <span className="text-ink-2">{typeof player.Rating === 'number' ? player.Rating.toFixed(2) : '–'}</span>
+                    {typeof player['Rating pct'] === 'number' && <PercentileValue value={player['Rating pct'] as number} className="ml-2 text-2xs w-9 justify-end" />}
+                  </td>
+                  <td className="text-right text-ink font-medium">{formatValue(Number(player['Market value']) || 0)}</td>
+                  <td className="text-right text-ink-3 text-xs">{player['Contract expires'] ? String(player['Contract expires']).slice(0, 7).split('-').reverse().join('/') : '–'}</td>
+                  <td className="pr-5">
+                    <div className="flex justify-end gap-0.5">
+                      <button
+                        onClick={(e) => toggleWatchlist(player, e)}
+                        className={`sv-icon-btn ${watched ? '!text-warn' : 'opacity-60 group-hover:opacity-100'}`}
+                        title={watched ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
+                        aria-pressed={watched}
+                      >
+                        <Star className={`w-3.5 h-3.5 ${watched ? 'fill-warn' : ''}`} />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onSelectPlayer(player); }}
+                        className="sv-icon-btn opacity-60 group-hover:opacity-100"
+                        title="Voir la fiche"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filteredAndSortedData.length === 0 && (
+          <EmptyState icon={Search} title="Aucun joueur ne correspond à ces critères." />
+        )}
         {visibleCount < filteredAndSortedData.length && (
-          <div ref={loadMoreRef} className="p-4 text-center text-xs text-slate-500">
-            Affichage de {visibleCount} sur {filteredAndSortedData.length} joueurs…
+          <div ref={loadMoreRef} className="p-3 text-center text-2xs text-ink-4">
+            {visibleCount} sur {filteredAndSortedData.length} joueurs affichés…
           </div>
         )}
       </div>

@@ -51,17 +51,17 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
   if (!style) return null;
 
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">
-      <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-        <Compass className="w-5 h-5 text-emerald-500" /> Style de jeu : {styleLabel(style)}
+    <div className="bg-surface border border-line rounded-lg p-6 ">
+      <h3 className="text-xl font-bold text-ink mb-1 flex items-center gap-2">
+        <Compass className="w-5 h-5 text-accent" /> Style de jeu : {styleLabel(style)}
       </h3>
-      <p className="text-xs text-slate-500 mb-4">
+      <p className="text-xs text-ink-3 mb-4">
         Axe horizontal : contrôle du jeu ; axe vertical : pressing et verticalité. Six styles issus d'un k-means sur la possession, le territoire, le pressing (PPDA), la hauteur de ligne, le jeu direct et la construction, ajusté sur toutes les équipes-saisons de toutes les compétitions.
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <div className="flex items-center gap-4 text-xs text-slate-400 mb-2">
+          <div className="flex items-center gap-4 text-xs text-ink-3 mb-2">
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SELECTED }} />{team.team}</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SAME_STYLE }} />Même style</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: OTHER }} />Autres équipes</span>
@@ -84,9 +84,9 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
                     const p = payload?.[0]?.payload as Point | undefined;
                     if (!p) return null;
                     return (
-                      <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs">
-                        <div className="text-white font-bold">{p.team}</div>
-                        <div className="text-slate-400">{styleLabel(p.styleName)}</div>
+                      <div className="bg-raised border border-line-strong rounded-md px-3 py-2 text-xs">
+                        <div className="text-ink font-bold">{p.team}</div>
+                        <div className="text-ink-3">{styleLabel(p.styleName)}</div>
                       </div>
                     );
                   }}
@@ -103,18 +103,18 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
 
         {profile && (
           <div>
-            <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Profil du style</h4>
-            <p className="text-xs text-slate-500 mb-3">Moyenne des équipes de ce style, en écarts-types par rapport à toutes les équipes</p>
+            <h4 className="text-sm font-bold text-ink-3 uppercase tracking-wider mb-3">Profil du style</h4>
+            <p className="text-xs text-ink-3 mb-3">Moyenne des équipes de ce style, en écarts-types par rapport à toutes les équipes</p>
             <div className="space-y-2.5">
               {Object.entries(profile).map(([key, z]) => (
                 <div key={key} className="text-xs">
                   <div className="flex justify-between mb-1">
-                    <span className="text-slate-300">{PROFILE_LABELS[key] ?? key}</span>
-                    <span className="text-slate-400 font-mono">{z > 0 ? '+' : ''}{z.toFixed(1)}</span>
+                    <span className="text-ink-2">{PROFILE_LABELS[key] ?? key}</span>
+                    <span className="text-ink-3 font-mono">{z > 0 ? '+' : ''}{z.toFixed(1)}</span>
                   </div>
                   {/* Barre divergente centrée sur 0, bornée à ±2 écarts-types */}
-                  <div className="relative h-1.5 bg-slate-900 rounded-full">
-                    <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-600" />
+                  <div className="relative h-1.5 bg-raised rounded-full">
+                    <div className="absolute top-0 bottom-0 left-1/2 w-px bg-ink-4" />
                     <div
                       className="absolute top-0 bottom-0 rounded-full"
                       style={{

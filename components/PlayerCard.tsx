@@ -1,13 +1,13 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeason, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeason, getSeasonShortLabel, getSeasonLabel } from '../types';
 import { useShots } from '../hooks/useShots';
 import PlayerHeatmap from './PlayerHeatmap';
 import { metricLabel, positionName, roleLabel, styleLabel, footLabel, shotResultLabel, shotTypeLabel } from '../utils/labels';
 import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsights';
 import { dataLoader } from '../services/dataLoader';
-import { ArrowLeft, Sparkles, Trophy, Target, Activity, MapPin, Footprints, Ruler, FileText, Download, Share2, Settings2, X, Check, Search, Plus, Award, ChevronRight, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, Legend } from 'recharts';
+import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { generateScoutReport } from '../services/geminiService';
 import { getBestRoles } from '../utils/scoringUtils';
 import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
@@ -15,7 +15,9 @@ import ReactMarkdown from 'react-markdown';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { getFlagUrl } from '../utils/flags';
-import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
+import { TeamLogo, CompetitionBadge, CountryFlag, PlayerAvatar } from './Media';
+import { Panel, Stat, PercentileRow, PercentileValue, PercentileBar, PercentileLegend, LegendItem, EmptyState, Delta, PolarTick } from './ui';
+import { BRAND, CONTEXT, INK, SHOT, polarGridProps } from '../theme/charts';
 
 interface PlayerCardProps {
   player: PlayerData;
@@ -295,7 +297,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
       const canvas = await html2canvas(element, {
         scale: 2, // Higher resolution
         useCORS: true,
-        backgroundColor: '#0f172a', // Match theme background
+        backgroundColor: '#0B111A', // fond de l'application
         logging: false,
       });
 
@@ -338,619 +340,403 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
       return `€${val}`;
   };
 
-  const getRoleColor = (score: number) => {
-      if (score >= 90) return 'bg-emerald-500';
-      if (score >= 80) return 'bg-emerald-400';
-      if (score >= 70) return 'bg-yellow-400';
-      return 'bg-slate-500';
-  };
+  // Forces et faiblesses : métriques du radar les mieux et les moins bien classées dans le groupe de comparaison
+  const strengths = useMemo(() => [...chartData].sort((a, b) => b.A - a.A).filter(m => m.A >= 70).slice(0, 4), [chartData]);
+  const weaknesses = useMemo(() => [...chartData].sort((a, b) => a.A - b.A).filter(m => m.A <= 30).slice(0, 4), [chartData]);
+
+  const formatRaw = (v: number) => (Number.isInteger(v) ? v.toLocaleString('fr-FR') : v.toLocaleString('fr-FR', { maximumFractionDigits: 2 }));
+  const playerSeason = extractSeason(player.League);
+  const market = typeof player['Market value'] === 'number' ? player['Market value'] : undefined;
+  const estimate = typeof player['Estimated value'] === 'number' ? player['Estimated value'] : undefined;
+  const contract = player['Contract expires'] ? String(player['Contract expires']) : undefined;
+  const contractMonths = contract ? Math.round((new Date(contract).getTime() - Date.now()) / (30.44 * 86400000)) : undefined;
+
+  // Radar : percentile du joueur et repère de la médiane du groupe (50)
+  const radarData = useMemo(() => chartData.map(d => ({ ...d, median: 50 })), [chartData]);
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in pb-10">
+    <div className="p-5 space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
-        <button 
-            onClick={onBack}
-            className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
-        >
-            <ArrowLeft className="w-4 h-4" /> Retour à la liste
+        <button onClick={onBack} className="sv-btn sv-btn-ghost -ml-2">
+          <ArrowLeft className="w-3.5 h-3.5" /> Retour
         </button>
-
-        <button
-            onClick={handleExportPDF}
-            disabled={isExporting}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg transition-all border border-slate-700 hover:border-emerald-500 shadow-lg"
-        >
-            {isExporting ? (
-                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-            ) : (
-                <Download className="w-4 h-4 text-emerald-400" />
-            )}
-            <span>{isExporting ? 'Export en cours...' : 'Exporter en PDF'}</span>
+        <button onClick={handleExportPDF} disabled={isExporting} className="sv-btn sv-btn-secondary">
+          {isExporting
+            ? <span className="w-3.5 h-3.5 border-2 border-ink-4 border-t-ink rounded-full animate-spin" />
+            : <Download className="w-3.5 h-3.5" />}
+          {isExporting ? 'Export en cours…' : 'Exporter en PDF'}
         </button>
       </div>
 
-      {/* Printable Area Wrapper */}
-      <div ref={printRef} className="flex flex-col gap-6 bg-slate-900 p-4 -m-4 rounded-3xl"> 
+      {/* Zone exportée en PDF */}
+      <div ref={printRef} className="space-y-4 bg-canvas">
 
-      {/* Header Card */}
-      <div className="bg-gradient-to-r from-slate-950 to-slate-900 rounded-3xl p-6 lg:p-10 border border-slate-800 relative overflow-hidden shadow-2xl">
-         {/* Background Decoration */}
-         <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
-         
-         <div className="flex flex-col md:flex-row gap-8 items-start relative z-10">
-            {(() => {
-              const playerSeason = extractSeason(player.League);
-              const seasonColors = getSeasonColor(playerSeason);
-              return (
-                <div className="relative">
-                  <div className="relative overflow-hidden w-32 h-32 lg:w-40 lg:h-40 bg-slate-800 rounded-2xl flex items-center justify-center shadow-2xl border-2 border-emerald-500/30 text-slate-300">
-                     <span className="text-4xl font-bold">{(player.Player || '??').substring(0, 2).toUpperCase()}</span>
-                     <PhotoOverlay src={player.Image} alt={player.Player} />
-                  </div>
-                  <div className={`absolute -bottom-2 -right-2 px-3 py-1 rounded-lg text-sm font-bold ${seasonColors.bg} ${seasonColors.text} border ${seasonColors.border} shadow-lg`}>
-                    {getSeasonShortLabel(playerSeason)}
-                  </div>
-                </div>
-              );
-            })()}
-            
-            <div className="flex-1 w-full">
-               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-                  <div>
-                    <h1 className="text-4xl lg:text-5xl font-bold text-white tracking-tight mb-2">{player.Player}</h1>
-                    <div className="flex items-center gap-4 text-slate-300">
-                        <span className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700"><TeamLogo src={player['Team logo']} name={player.Team} size="xs" /> {player.Team}</span>
-                        <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700 text-sm"><CompetitionBadge competition={player.Competition} /></span>
-                        <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700">{getFlagUrl(player["Passport country"]) ? <CountryFlag code={player["Passport country"]} /> : <MapPin className="w-3.5 h-3.5 text-emerald-400"/>} {player["Passport country"] || 'Inconnue'}</span>
-                        {player["Team style"] && (
-                          <span className="flex items-center gap-1 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700 text-sm" title="Style de jeu de l'équipe cette saison (ACP + k-means sur les indicateurs d'équipe)">
-                            {styleLabel(player["Team style"])}
-                          </span>
-                        )}
-                    </div>
-                    {/* Profil Transfermarkt : taille, pied, fin de contrat */}
-                    {(player.Height || player.Foot || player["Contract expires"]) && (
-                      <div className="flex items-center gap-3 mt-3 text-sm text-slate-400">
-                        {typeof player.Height === 'number' && (
-                          <span className="flex items-center gap-1"><Ruler className="w-3.5 h-3.5 text-slate-500" /> {player.Height} cm</span>
-                        )}
-                        {player.Foot && (
-                          <span className="flex items-center gap-1"><Footprints className="w-3.5 h-3.5 text-slate-500" /> pied {footLabel(player.Foot)}</span>
-                        )}
-                        {player["Contract expires"] && (
-                          <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-slate-500" /> Contrat jusqu'au {player["Contract expires"]}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-right p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 backdrop-blur-sm">
-                     <div className="text-xs text-emerald-300 uppercase tracking-wider font-bold mb-1">Valeur marchande</div>
-                     <div className="text-3xl font-mono text-white font-bold tracking-tighter">
-                        {typeof player["Market value"] === 'number' ? formatCurrency(player["Market value"]) : 'N/A'}
-                     </div>
-                     <div className="text-[10px] text-slate-500 mt-1">
-                        {typeof player["Market value"] === 'number' ? 'Transfermarkt, actuelle' : 'Saison en cours seulement'}
-                     </div>
-                  </div>
-               </div>
-
-               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
-                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Ruler className="w-3 h-3"/> Minutes</div>
-                     <div className="text-lg font-bold text-slate-200">{player["Minutes played"]} <span className="text-xs text-slate-500 font-normal">{typeof player["Minutes share"] === 'number' ? `${Math.round(player["Minutes share"] * 100)}% de l'équipe` : ''}</span></div>
-                  </div>
-                   <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Activity className="w-3 h-3"/> Matchs</div>
-                     <div className="text-lg font-bold text-slate-200">{player["Matches played"]} <span className="text-xs text-slate-500 font-normal">{player.Starts ?? 0} titularisations</span></div>
-                  </div>
-                   <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Footprints className="w-3 h-3"/> Note</div>
-                     <div className="text-lg font-bold text-slate-200">{typeof player.Rating === 'number' ? player.Rating.toFixed(2) : 'N/A'} <span className="text-xs text-slate-500 font-normal">{typeof player["Rating pct"] === 'number' ? `P${player["Rating pct"]}` : ''}</span></div>
-                  </div>
-                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-1 uppercase font-semibold"><Target className="w-3 h-3"/> Âge</div>
-                     <div className="text-lg font-bold text-slate-200">{player.Age ?? 'N/A'} <span className="text-xs text-slate-500 font-normal">{player.Age !== undefined ? 'ans' : ''}</span></div>
-                  </div>
-               </div>
-            </div>
-         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Column: Charts */}
-        <div className="lg:col-span-1 flex flex-col gap-6">
-            
-            {/* Radar Chart */}
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col relative overflow-hidden group">
-                <div className="flex items-center justify-between mb-2 relative z-10">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Activity className="w-5 h-5 text-emerald-500" /> Profil de performance
-                    </h3>
-                    <div className="flex items-center gap-2">
-                        <button 
-                            onClick={() => setShowMetricConfig(!showMetricConfig)}
-                            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors border border-transparent hover:border-slate-700"
-                            title="Choisir les métriques"
-                        >
-                            <Settings2 className="w-4 h-4" />
-                        </button>
-                        <div className="text-xs font-medium px-2 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800">
-                            {COMPARISON_LABELS[comparisonMode]}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Metric Configuration Overlay */}
-                {showMetricConfig && (
-                    <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-sm p-4 flex flex-col animate-fade-in">
-                        <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
-                            <h4 className="text-sm font-bold text-white">Choisir les métriques</h4>
-                            <button onClick={() => setShowMetricConfig(false)} className="text-slate-400 hover:text-white">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        
-                        <div className="relative mb-3">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                            <input 
-                                type="text" 
-                                placeholder="Rechercher..." 
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white"
-                                value={metricSearch}
-                                onChange={(e) => setMetricSearch(e.target.value)}
-                            />
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
-                            {availableMetrics
-                                .filter(k => k.toLowerCase().includes(metricSearch.toLowerCase()))
-                                .map(key => (
-                                    <button
-                                        key={key}
-                                        onClick={() => toggleMetric(key)}
-                                        className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between ${
-                                            activeMetrics.includes(key) 
-                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
-                                            : 'hover:bg-slate-900 text-slate-400'
-                                        }`}
-                                    >
-                                        <span className="truncate pr-2">{metricLabel(key)}</span>
-                                        {activeMetrics.includes(key) && <Check className="w-3 h-3 shrink-0" />}
-                                    </button>
-                                ))
-                            }
-                        </div>
-                        
-                        <div className="mt-4 pt-2 border-t border-slate-800 text-center">
-                            <span className="text-[10px] text-slate-500">{activeMetrics.length} / 12 métriques choisies</span>
-                        </div>
-                    </div>
-                )}
-
-                {/* Comparison Controls */}
-                <div className="bg-slate-900 rounded-lg p-1 flex items-center justify-between border border-slate-800 mb-4 relative z-10">
-                    {(['all', 'position', 'league', 'position_league'] as ComparisonMode[]).map(mode => (
-                        <button
-                            key={mode}
-                            onClick={() => setComparisonMode(mode)}
-                            className={`flex-1 py-1.5 text-[9px] uppercase font-bold tracking-wider rounded-md transition-all ${
-                                comparisonMode === mode 
-                                ? 'bg-emerald-500 text-slate-950 shadow-sm' 
-                                : 'text-slate-500 hover:text-slate-300'
-                            }`}
-                        >
-                            {COMPARISON_SHORT_LABELS[mode]}
-                        </button>
-                    ))}
-                </div>
-                
-                {/* Cohort Info & Average Percentile */}
-                <div className="flex items-center justify-between mb-4 px-1">
-                  <div className="text-[10px] text-slate-500">
-                    <span className="text-slate-400 font-medium">{cohort.length}</span> {cohortDescription.split(' ').slice(1).join(' ')}
-                  </div>
-                  <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${
-                    averagePercentile >= 80 ? 'bg-emerald-500/20 text-emerald-400' :
-                    averagePercentile >= 60 ? 'bg-blue-500/20 text-blue-400' :
-                    averagePercentile >= 40 ? 'bg-yellow-500/20 text-yellow-400' :
-                    'bg-slate-500/20 text-slate-400'
-                  }`}>
-                    <BarChart3 className="w-3 h-3" />
-                    Top {Math.max(1, 100 - averagePercentile)}%
-                  </div>
-                </div>
-                
-                {/* Top Metrics Badges */}
-                {topMetrics.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-4">
-                    {topMetrics.map(m => (
-                      <div key={m.fullSubject} className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 rounded-full text-[10px] text-emerald-400 border border-emerald-500/20">
-                        <TrendingUp className="w-3 h-3" />
-                        Top {m.topPercent}% {m.subject}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex-1 min-h-[350px] w-full relative -ml-2">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <RadarChart cx="50%" cy="50%" outerRadius="75%" data={chartData} margin={{ top: 30, right: 30, bottom: 30, left: 30 }}>
-                            <defs>
-                                <linearGradient id="radarFill" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.5}/>
-                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.1}/>
-                                </linearGradient>
-                            </defs>
-                            
-                            {/* Styled Polar Grid */}
-                            <PolarGrid 
-                                gridType="polygon" 
-                                stroke="#334155" 
-                                strokeWidth={1} 
-                                strokeDasharray="4 4" 
-                            />
-                            
-                            {/* Enhanced Labels */}
-                            <PolarAngleAxis 
-                                dataKey="subject" 
-                                tick={{ fill: '#f8fafc', fontSize: 11, fontWeight: 600, dy: 3 }} 
-                            />
-                            
-                            {/* Clean Radius Axis */}
-                            <PolarRadiusAxis 
-                                angle={90} 
-                                domain={[0, 100]} 
-                                tickCount={6} 
-                                tick={false} 
-                                axisLine={false} 
-                            />
-
-                            {/* The Radar Shape */}
-                            <Radar
-                                name={player.Player}
-                                dataKey="A"
-                                stroke="#10b981"
-                                strokeWidth={3}
-                                fill="url(#radarFill)"
-                                fillOpacity={1}
-                                activeDot={{ r: 6, strokeWidth: 0, fill: '#fff' }}
-                            />
-                            
-                            <Tooltip 
-                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.5rem', color: '#f8fafc', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
-                                itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
-                                labelStyle={{ color: '#94a3b8', marginBottom: '0.25rem', fontSize: '12px', textTransform: 'uppercase' }}
-                                formatter={(value: number, name: string, props: any) => [`${value} (valeur : ${props.payload.rawValue})`, 'Percentile']}
-                            />
-                        </RadarChart>
-                    </ResponsiveContainer>
-                </div>
-                
-                <div className="mt-2 text-center">
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest">Groupe de comparaison : {cohort.length} joueurs</p>
-                </div>
-            </div>
-
-            {/* US-05: Season Evolution Comparison */}
-            {evolutionData && playerSeasons.length >= 2 && (
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-blue-400" /> Évolution sur la saison
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    {playerSeasons.slice(0, 2).map((ps, idx) => {
-                      const season = extractSeason(ps.League);
-                      const colors = getSeasonColor(season);
-                      return (
-                        <span key={season} className={`px-2 py-1 rounded text-[10px] font-bold ${colors.bg} ${colors.text} border ${colors.border}`}>
-                          {getSeasonShortLabel(season)}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  {evolutionData.map(item => (
-                    <div key={item.metric} className="flex items-center gap-3 p-2 bg-slate-900/50 rounded-lg hover:bg-slate-900 transition-colors">
-                      {/* Trend Icon */}
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                        item.trend === 'up' ? 'bg-emerald-500/20 text-emerald-400' :
-                        item.trend === 'down' ? 'bg-red-500/20 text-red-400' :
-                        'bg-slate-700/50 text-slate-500'
-                      }`}>
-                        {item.trend === 'up' ? <TrendingUp className="w-3 h-3" /> :
-                         item.trend === 'down' ? <TrendingDown className="w-3 h-3" /> :
-                         <Minus className="w-3 h-3" />}
-                      </div>
-                      
-                      {/* Metric Name */}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-slate-300 font-medium truncate" title={item.metric}>
-                          {item.shortMetric}
-                        </div>
-                      </div>
-                      
-                      {/* Previous Value */}
-                      <div className="text-xs text-slate-500 font-mono w-14 text-right">
-                        {item.previous % 1 !== 0 ? item.previous.toFixed(2) : item.previous}
-                      </div>
-                      
-                      {/* Arrow */}
-                      <div className="text-slate-600">→</div>
-                      
-                      {/* Current Value */}
-                      <div className="text-xs text-white font-mono font-bold w-14 text-right">
-                        {item.current % 1 !== 0 ? item.current.toFixed(2) : item.current}
-                      </div>
-                      
-                      {/* Change Indicator */}
-                      <div className={`text-[10px] font-bold px-2 py-0.5 rounded w-16 text-center ${
-                        item.trend === 'up' ? 'bg-emerald-500/20 text-emerald-400' :
-                        item.trend === 'down' ? 'bg-red-500/20 text-red-400' :
-                        'bg-slate-700 text-slate-400'
-                      }`}>
-                        {item.trend === 'up' ? '+' : ''}{item.percentChange}%
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                
-                {/* Summary */}
-                <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between">
-                  <div className="text-xs text-slate-500">
-                    Comparaison {extractSeason(playerSeasons[1].League)} → {extractSeason(playerSeasons[0].League)}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-slate-500">En progrès :</span>
-                    <span className="text-xs font-bold text-emerald-400">
-                      {evolutionData.filter(e => e.trend === 'up').length}/{evolutionData.length}
-                    </span>
-                  </div>
-                </div>
+      {/* ===== Identité et indicateurs clés ===== */}
+      <section className="sv-panel">
+        <div className="flex flex-col lg:flex-row gap-4 p-4">
+          <div className="flex gap-4 min-w-0 flex-1">
+            <PlayerAvatar player={player} size="xl" />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-semibold text-ink tracking-tight">{player.Player}</h1>
+                <span className="sv-tag" title="Saison">{getSeasonShortLabel(playerSeason)}</span>
               </div>
-            )}
-
-            {/* No Evolution Data Message */}
-            {playerSeasons.length < 2 && (
-              <div className="bg-slate-950/50 border border-slate-800/50 border-dashed rounded-3xl p-6 text-center">
-                <TrendingUp className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                <p className="text-sm text-slate-500">Évolution indisponible</p>
-                <p className="text-xs text-slate-600">Une seule saison disponible pour ce joueur</p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[13px] text-ink-2">
+                <span className="flex items-center gap-1.5"><TeamLogo src={player['Team logo']} name={player.Team} size="xs" /> {player.Team}</span>
+                <span className="text-ink-4">·</span>
+                <CompetitionBadge competition={player.Competition} />
+                {player['Passport country'] && (
+                  <>
+                    <span className="text-ink-4">·</span>
+                    <span className="flex items-center gap-1.5">{getFlagUrl(player['Passport country']) ? <CountryFlag code={player['Passport country']} /> : <MapPin className="w-3.5 h-3.5 text-ink-4" />} {player['Passport country']}</span>
+                  </>
+                )}
               </div>
-            )}
-
-            {/* Heatmap of the season */}
-            <PlayerHeatmap player={player} />
-
-            {/* Age curve and one-year projection */}
-            <DevelopmentPanel player={player} metrics={developmentMetrics} />
-
-            {/* US-09: Suggested Roles */}
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl break-inside-avoid">
-                 <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                     <Award className="w-5 h-5 text-purple-400" /> Meilleurs rôles
-                 </h3>
-                 <p className="text-xs text-slate-500 mb-4">
-                    Moyenne pondérée des percentiles du rôle, parmi les joueurs du même poste et du même niveau.
-                 </p>
-                 <div className="space-y-3">
-                     {bestRoles.map((role, idx) => (
-                         <div key={role.role} className="relative overflow-hidden bg-slate-900 rounded-xl p-3 border border-slate-800">
-                             {/* Progress Bar Background */}
-                             <div 
-                                className={`absolute left-0 top-0 bottom-0 opacity-10 ${getRoleColor(role.normalizedScore)}`} 
-                                style={{ width: `${role.normalizedScore}%` }}
-                             ></div>
-                             
-                             <div className="flex justify-between items-center relative z-10">
-                                 <div className="flex items-center gap-3">
-                                     <div className="text-xs font-bold text-slate-600 w-4">{idx + 1}</div>
-                                     <span className="font-semibold text-slate-200 text-sm">{roleLabel(role.role)}</span>
-                                 </div>
-                                 <div className="flex items-center gap-2">
-                                     <div className={`text-sm font-bold px-2 py-0.5 rounded text-slate-950 ${getRoleColor(role.normalizedScore)}`}>
-                                         {role.normalizedScore}
-                                     </div>
-                                 </div>
-                             </div>
-                         </div>
-                     ))}
-                 </div>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                <span className="sv-tag !border-accent/50 !text-accent !bg-accent/10" title={positionCategory}>{positionName(player.Position)}</span>
+                {bestRoles[0] && <span className="sv-tag" title="Meilleur rôle (indice de rôle)">{roleLabel(bestRoles[0].role)} · {bestRoles[0].normalizedScore}</span>}
+                {player['Team style'] && (
+                  <span className="sv-tag" title="Style de jeu de l'équipe cette saison (ACP + k-means sur les indicateurs d'équipe)">Équipe : {styleLabel(player['Team style'])}</span>
+                )}
+                {typeof player.Height === 'number' && <span className="sv-tag !font-normal"><Ruler className="w-3 h-3 text-ink-4" /> {player.Height} cm</span>}
+                {player.Foot && <span className="sv-tag !font-normal"><Footprints className="w-3 h-3 text-ink-4" /> pied {footLabel(player.Foot)}</span>}
+              </div>
             </div>
-        </div>
-
-        {/* Right Column: AI Scout Report & Shot Map */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
-
-            {/* RAPM, finishing, pass network, value vs performance */}
-            <ImpactPanel player={player} />
-            
-            {/* AI Scout Report */}
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-xl flex flex-col">
-                <div className="flex items-center justify-between mb-6 pb-6 border-b border-slate-800">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                        <FileText className="w-6 h-6 text-purple-400" /> 
-                        <span>Rapport de scouting IA</span>
-                    </h3>
-                    {!report && (
-                        <button 
-                        onClick={handleGenerateReport}
-                        disabled={loadingReport}
-                        className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl text-sm font-bold transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40"
-                    >
-                        {loadingReport ? (
-                            <>
-                                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-                                Analyse en cours...
-                            </>
-                        ) : (
-                            <>
-                                <Sparkles className="w-4 h-4" />
-                                Générer le rapport
-                            </>
-                        )}
-                    </button>
-                    )}
-                </div>
-
-                <div className="flex-1 bg-slate-900/30 rounded-2xl p-2 md:p-6 overflow-y-auto max-h-[600px] min-h-[400px]">
-                    {report ? (
-                        <div className="prose prose-invert prose-sm md:prose-base max-w-none">
-                            <ReactMarkdown 
-                                components={{
-                                    h1: ({node, ...props}) => <h1 className="text-2xl font-bold text-white mb-4" {...props} />,
-                                    h2: ({node, ...props}) => <h2 className="text-xl font-bold text-emerald-400 mt-8 mb-4 flex items-center gap-2" {...props} />,
-                                    h3: ({node, ...props}) => <div className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-6 mb-3 border-b border-slate-800 pb-2" {...props} />,
-                                    strong: ({node, ...props}) => <strong className="text-white font-bold bg-slate-800/50 px-1 rounded" {...props} />,
-                                    ul: ({node, ...props}) => <ul className="space-y-3 my-4 pl-0" {...props} />,
-                                    li: ({node, ...props}) => <li className="flex items-start gap-3 text-slate-300 bg-slate-900/50 p-3 rounded-lg border border-slate-800/50 hover:border-slate-700 transition-colors" {...props} />,
-                                    p: ({node, ...props}) => <p className="leading-relaxed text-slate-300 mb-4" {...props} />
-                                }}
-                            >
-                                {report}
-                            </ReactMarkdown>
-                            
-                            <div className="mt-8 pt-6 border-t border-slate-800 flex items-center justify-between text-xs text-slate-500">
-                                <span>Généré par Gemini 2.5 Flash</span>
-                                <span>{new Date().toLocaleDateString()}</span>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-8 py-10">
-                            <div className="relative group cursor-pointer" onClick={handleGenerateReport}>
-                                <div className="absolute inset-0 bg-emerald-500/20 blur-2xl rounded-full group-hover:bg-emerald-500/30 transition-all duration-500"></div>
-                                <div className="w-24 h-24 rounded-3xl bg-slate-800 border-2 border-slate-700 group-hover:border-emerald-500 flex items-center justify-center relative z-10 transition-all duration-300 shadow-2xl">
-                                    <Sparkles className="w-10 h-10 text-emerald-500 group-hover:scale-110 transition-transform" />
-                                </div>
-                            </div>
-                            <div className="text-center max-w-sm space-y-3">
-                                <h4 className="text-white font-bold text-lg">Rapport de scouting détaillé</h4>
-                                <p className="text-sm leading-relaxed">
-                                    Un modèle de langage traduit les statistiques en langage football.
-                                    <br/>Contient : <span className="text-emerald-400">rôle tactique</span>, <span className="text-emerald-400">forces et faiblesses</span> et <span className="text-emerald-400">projection</span>.
-                                </p>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* US-11: Player Shot Map Visualization */}
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-xl flex flex-col">
-                <div className="flex items-center justify-between mb-6 pb-6 border-b border-slate-800">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                        <Crosshair className="w-6 h-6 text-red-400" /> 
-                        <span>Carte des tirs de la saison</span>
-                    </h3>
-                    <div className="flex gap-4">
-                        <div className="text-center">
-                            <div className="text-[10px] uppercase text-slate-500 font-bold">Buts</div>
-                            <div className="text-lg font-bold text-emerald-400">{shotStats.goals}</div>
-                        </div>
-                        <div className="text-center">
-                            <div className="text-[10px] uppercase text-slate-500 font-bold">xG</div>
-                            <div className="text-lg font-bold text-blue-400">{shotStats.xG.toFixed(2)}</div>
-                        </div>
-                        <div className="text-center">
-                            <div className="text-[10px] uppercase text-slate-500 font-bold">Tirs</div>
-                            <div className="text-lg font-bold text-white">{shotStats.total}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="bg-[#1a2c2c] rounded-2xl p-4 border border-slate-800/50 relative min-h-[400px] flex items-center justify-center overflow-hidden">
-                     {/* Horizontal Pitch Container */}
-                     <div className="relative w-full aspect-[105/68] max-w-[600px] bg-emerald-900/30 border-2 border-white/30 rounded-lg shadow-2xl">
-                        {/* Pitch Markings */}
-                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/grass.png')] opacity-30"></div>
-                        <div className="absolute top-1/2 left-0 w-full h-px bg-white/20 -translate-y-1/2"></div> {/* Halfway Line */}
-                        <div className="absolute right-0 top-1/4 bottom-1/4 w-px bg-white/20"></div> {/* Penalty Area Line */}
-                        <div className="absolute right-0 top-[40%] bottom-[40%] w-[5%] border border-white/20 bg-emerald-800/50"></div> {/* 6 yard box */}
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-white/50"></div> {/* Goal Line Own */}
-                        <div className="absolute right-0 top-0 bottom-0 w-1 bg-white/50"></div> {/* Goal Line Opp */}
-                        <div className="absolute left-1/2 top-1/2 w-16 h-16 border border-white/20 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
-                        <div className="absolute right-[11%] top-1/2 w-1 h-1 bg-white rounded-full"></div> {/* Penalty Spot */}
-
-                        {/* Plots */}
-                        {playerShots.length > 0 ? playerShots.map((shot, i) => {
-                            const isGoal = shot.result === 'Goal';
-                            const color = isGoal ? '#10b981' : shot.result === 'SavedShot' ? '#3b82f6' : '#ef4444';
-                            // Normalize size
-                            const size = Math.max(6, Math.min(20, shot.xG * 30));
-
-                            return (
-                                <div 
-                                    key={i}
-                                    className="absolute rounded-full border border-black/20 hover:scale-150 transition-transform cursor-pointer shadow-sm z-10 group"
-                                    style={{
-                                        left: `${shot.X * 100}%`,
-                                        top: `${shot.Y * 100}%`,
-                                        width: `${size}px`,
-                                        height: `${size}px`,
-                                        backgroundColor: color,
-                                        opacity: 0.8,
-                                        transform: 'translate(-50%, -50%)'
-                                    }}
-                                >
-                                    {isGoal && <div className="absolute inset-0 border border-white rounded-full animate-pulse"></div>}
-                                    
-                                    {/* Tooltip */}
-                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 bg-slate-900/90 text-[10px] text-white p-2 rounded hidden group-hover:block z-50 pointer-events-none">
-                                        <div className="font-bold">{shotResultLabel(shot.result)}</div>
-                                        <div>xG: {shot.xG.toFixed(2)}</div>
-                                        <div>Minute : {shot.minute}'</div>
-                                        <div>Surface : {shotTypeLabel(shot.shotType)}</div>
-                                    </div>
-                                </div>
-                            );
-                        }) : (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-white/30 text-sm font-medium">Aucune donnée de tir pour ce joueur.</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-                 {/* Legend */}
-                 <div className="mt-4 flex justify-center gap-6">
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="w-3 h-3 rounded-full bg-emerald-500"></div> But
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="w-3 h-3 rounded-full bg-blue-500"></div> Arrêté
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="w-3 h-3 rounded-full bg-red-500"></div> Manqué ou contré
-                    </div>
-                 </div>
-            </div>
-
-        </div>
-      </div>
-      
-      {/* Detailed Stat Grid (Compact for Print) */}
-      <div className="bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-xl break-inside-avoid">
-          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-             <Share2 className="w-5 h-5 text-emerald-500" /> Toutes les métriques
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {Object.entries(player).map(([key, value]) => {
-                if (!isMetricKey(key, value)) return null;
-                return (
-                    <div key={key} className="bg-slate-900/50 p-3 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
-                        <div className="text-[10px] text-slate-500 uppercase font-semibold truncate mb-1" title={metricLabel(key)}>{metricLabel(key)}</div>
-                        <div className="text-sm font-mono text-slate-200 font-bold">
-                            {typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value}
-                        </div>
-                    </div>
-                );
-            })}
           </div>
+
+          {/* Valeur et contrat */}
+          <div className="grid grid-cols-3 lg:w-[26rem] shrink-0 border border-line rounded-md divide-x divide-line">
+            <Stat className="px-3 py-2.5" label="Valeur marché" value={market !== undefined ? formatCurrency(market) : 'N/D'}
+              sub={market !== undefined ? 'Transfermarkt, actuelle' : 'Saison en cours seulement'} />
+            <Stat className="px-3 py-2.5" label="Valeur modèle" value={estimate !== undefined ? formatCurrency(estimate) : 'N/D'}
+              tone={market && estimate ? (estimate >= 1.5 * market ? 'pos' : estimate <= 0.67 * market ? 'neg' : 'default') : 'default'}
+              sub={market && estimate ? `×${(estimate / market).toFixed(1)} vs marché` : 'Estimée par la performance'}
+              title="Valeur attendue d'après la performance (modèle ridge) : une indication, pas un prix" />
+            <Stat className="px-3 py-2.5" label="Contrat" value={contract ? contract.slice(0, 7).split('-').reverse().join('/') : 'N/D'}
+              tone={contractMonths !== undefined && contractMonths <= 12 ? 'neg' : 'default'}
+              sub={contractMonths !== undefined ? (contractMonths <= 0 ? 'Échu' : `${contractMonths} mois restants`) : 'Inconnu'} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 md:grid-cols-6 border-t border-line divide-x divide-line">
+          <Stat className="px-4 py-2.5" label="Âge" value={player.Age ?? 'N/D'} sub={player['Birth date'] ? String(player['Birth date']) : undefined} />
+          <Stat className="px-4 py-2.5" label="Minutes" value={Number(player['Minutes played'] || 0).toLocaleString('fr-FR')}
+            sub={typeof player['Minutes share'] === 'number' ? `${Math.round(player['Minutes share'] * 100)} % des minutes de l'équipe` : undefined} />
+          <Stat className="px-4 py-2.5" label="Matchs" value={player['Matches played']} sub={`${player.Starts ?? 0} titularisations`} />
+          <Stat className="px-4 py-2.5" label="Buts · xG" value={<>{player.Goals ?? 0} <span className="text-ink-3 font-normal text-sm">· {(Number(player.xG) || 0).toFixed(1)}</span></>}
+            sub={typeof player['Goals per 90'] === 'number' ? `${(player['Goals per 90'] as number).toFixed(2)} par 90` : undefined} />
+          <Stat className="px-4 py-2.5" label="Passes déc. · xA" value={<>{player.Assists ?? 0} <span className="text-ink-3 font-normal text-sm">· {(Number(player.xA) || 0).toFixed(1)}</span></>}
+            sub={typeof player['xA per 90'] === 'number' ? `${(player['xA per 90'] as number).toFixed(2)} xA par 90` : undefined} />
+          <Stat className="px-4 py-2.5" label="Note" value={typeof player.Rating === 'number' ? player.Rating.toFixed(2) : 'N/D'}
+            sub={typeof player['Rating pct'] === 'number' ? <PercentileValue value={player['Rating pct'] as number} className="text-2xs" /> : undefined} />
+        </div>
+      </section>
+
+      {/* ===== Percentiles : radar, barres, forces et faiblesses, rôles ===== */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <Panel
+          className="xl:col-span-4 relative"
+          title="Profil de performance"
+          subtitle={`Percentiles ${COMPARISON_LABELS[comparisonMode]} · ${cohortDescription}`}
+          right={
+            <button onClick={() => setShowMetricConfig(!showMetricConfig)} className="sv-icon-btn" title="Choisir les métriques" aria-expanded={showMetricConfig}>
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
+          }
+        >
+          {showMetricConfig && (
+            <div className="absolute inset-0 z-30 bg-surface rounded-lg border border-line-strong p-4 flex flex-col animate-fade-in">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink">Choisir les métriques</h4>
+                <button onClick={() => setShowMetricConfig(false)} className="sv-icon-btn" aria-label="Fermer"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="relative mb-2">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
+                <input type="text" placeholder="Rechercher une métrique" className="sv-input sv-input-sm pl-8" value={metricSearch} onChange={(e) => setMetricSearch(e.target.value)} />
+              </div>
+              <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-px">
+                {availableMetrics
+                  .filter(k => k.toLowerCase().includes(metricSearch.toLowerCase()) || metricLabel(k).toLowerCase().includes(metricSearch.toLowerCase()))
+                  .map(key => {
+                    const on = activeMetrics.includes(key);
+                    return (
+                      <button key={key} onClick={() => toggleMetric(key)}
+                        className={`w-full text-left px-2 h-7 rounded text-xs flex items-center justify-between ${on ? 'bg-accent/10 text-accent' : 'text-ink-3 hover:bg-raised hover:text-ink'}`}>
+                        <span className="truncate pr-2">{metricLabel(key)}</span>
+                        {on && <Check className="w-3 h-3 shrink-0" />}
+                      </button>
+                    );
+                  })}
+              </div>
+              <div className="mt-2 pt-2 border-t border-line text-2xs text-ink-4 text-center">{activeMetrics.length} / 12 métriques choisies</div>
+            </div>
+          )}
+
+          <div className="sv-seg w-full" role="group" aria-label="Groupe de comparaison">
+            {(['position', 'position_league', 'league', 'all'] as ComparisonMode[]).map(mode => (
+              <button key={mode} onClick={() => setComparisonMode(mode)} title={COMPARISON_LABELS[mode]}
+                className={`sv-seg-btn flex-1 ${comparisonMode === mode ? 'sv-seg-on' : ''}`} aria-pressed={comparisonMode === mode}>
+                {COMPARISON_SHORT_LABELS[mode]}
+              </button>
+            ))}
+          </div>
+
+          <div className="h-[300px] -mx-2 mt-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart cx="50%" cy="50%" outerRadius="66%" data={radarData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}>
+                <PolarGrid {...polarGridProps} />
+                <PolarAngleAxis dataKey="subject" tick={<PolarTick />} />
+                <PolarRadiusAxis angle={90} domain={[0, 100]} tickCount={5} tick={false} axisLine={false} />
+                <Radar name="Médiane du groupe" dataKey="median" stroke={CONTEXT} strokeDasharray="3 3" strokeWidth={1} fill="none" isAnimationActive={false} />
+                <Radar name={player.Player} dataKey="A" stroke={BRAND} strokeWidth={2} fill={BRAND} fillOpacity={0.14}
+                  dot={{ r: 2.5, fill: BRAND, strokeWidth: 0 }} activeDot={{ r: 4, fill: BRAND, stroke: INK.surface, strokeWidth: 2 }} isAnimationActive={false} />
+                <Tooltip
+                  cursor={false}
+                  content={({ payload }) => {
+                    const d = payload?.[0]?.payload as (typeof chartData)[number] | undefined;
+                    if (!d) return null;
+                    return (
+                      <div className="sv-tooltip">
+                        <div className="text-ink-3 mb-0.5">{d.subject}</div>
+                        <div className="flex items-center gap-2"><PercentileValue value={d.A} /><span className="text-ink-2">valeur {formatRaw(d.rawValue)}</span></div>
+                        <div className="text-2xs text-ink-4">rang {d.rank} sur {d.cohortSize}</div>
+                      </div>
+                    );
+                  }}
+                />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex gap-3">
+              <LegendItem color={BRAND} shape="line">{player.Player.split(' ').pop()}</LegendItem>
+              <LegendItem color={CONTEXT} shape="line">Médiane du groupe</LegendItem>
+            </div>
+            <span className="text-2xs text-ink-3" title="Moyenne des percentiles des métriques du radar">
+              Moyenne <PercentileValue value={averagePercentile} className="text-2xs" />
+            </span>
+          </div>
+        </Panel>
+
+        <Panel className="xl:col-span-5" title="Percentiles" subtitle="Valeur brute et rang percentile dans le groupe de comparaison"
+          right={<span className="text-2xs text-ink-4">{cohort.length} joueurs</span>}>
+          <div className="space-y-0.5">
+            {chartData.map(d => (
+              <PercentileRow key={d.fullSubject} label={d.subject} value={formatRaw(d.rawValue)} percentile={d.A}
+                title={`${metricLabel(d.fullSubject)} : ${formatRaw(d.rawValue)}, rang ${d.rank} sur ${d.cohortSize}`} />
+            ))}
+          </div>
+          <PercentileLegend className="mt-3 pt-3 border-t border-line" />
+
+          <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-line">
+            <div>
+              <div className="sv-label flex items-center gap-1.5 mb-1.5"><TrendingUp className="w-3 h-3 text-accent" /> Forces</div>
+              {strengths.length > 0 ? strengths.map(m => (
+                <div key={m.fullSubject} className="flex items-center justify-between gap-2 h-6 text-xs">
+                  <span className="text-ink-2 truncate">{m.subject}</span>
+                  <PercentileValue value={m.A} className="text-xs shrink-0" />
+                </div>
+              )) : <p className="text-xs text-ink-4">Aucune métrique au-dessus du 70e percentile.</p>}
+            </div>
+            <div>
+              <div className="sv-label flex items-center gap-1.5 mb-1.5"><TrendingDown className="w-3 h-3 text-neg" /> Faiblesses</div>
+              {weaknesses.length > 0 ? weaknesses.map(m => (
+                <div key={m.fullSubject} className="flex items-center justify-between gap-2 h-6 text-xs">
+                  <span className="text-ink-2 truncate">{m.subject}</span>
+                  <PercentileValue value={m.A} className="text-xs shrink-0" />
+                </div>
+              )) : <p className="text-xs text-ink-4">Aucune métrique sous le 30e percentile.</p>}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel className="xl:col-span-3" title="Meilleurs rôles" icon={Award}
+          subtitle="Indice du rôle : moyenne pondérée des percentiles, parmi les joueurs du même poste et du même niveau.">
+          <div className="space-y-2">
+            {bestRoles.map((role, idx) => (
+              <div key={role.role}>
+                <div className="flex items-center justify-between gap-2 text-xs mb-1">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="w-3 text-ink-4 num">{idx + 1}</span>
+                    <span className={`truncate ${idx === 0 ? 'text-ink font-medium' : 'text-ink-2'}`}>{roleLabel(role.role)}</span>
+                  </span>
+                  <span className="num font-semibold text-ink">{role.normalizedScore}</span>
+                </div>
+                <PercentileBar value={role.normalizedScore} className="ml-5" />
+              </div>
+            ))}
+            {bestRoles.length === 0 && <p className="text-xs text-ink-4">Aucun rôle évaluable pour ce poste.</p>}
+          </div>
+        </Panel>
       </div>
 
-      </div> {/* End Print Ref */}
+      {/* ===== Impact, finition, réseau, valeur ===== */}
+      <ImpactPanel player={player} />
+
+      {/* ===== Projection, évolution, zones d'action ===== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-12 gap-4">
+        <div className="xl:col-span-5"><DevelopmentPanel player={player} metrics={developmentMetrics} /></div>
+
+        <Panel className="xl:col-span-4" title="Évolution sur un an" icon={TrendingUp}
+          subtitle={evolutionData && playerSeasons.length >= 2
+            ? `${getSeasonLabel(extractSeason(playerSeasons[1].League))} → ${getSeasonLabel(extractSeason(playerSeasons[0].League))}, métriques du radar`
+            : undefined}
+          right={evolutionData && playerSeasons.length >= 2
+            ? <span className="text-2xs text-ink-3">En progrès <span className="text-ink font-semibold num">{evolutionData.filter(e => e.trend === 'up').length}/{evolutionData.length}</span></span>
+            : undefined}>
+          {evolutionData && playerSeasons.length >= 2 ? (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="sv-label text-left">
+                  <th className="font-semibold pb-1.5">Métrique</th>
+                  <th className="font-semibold pb-1.5 text-right">{getSeasonShortLabel(extractSeason(playerSeasons[1].League))}</th>
+                  <th className="font-semibold pb-1.5 text-right">{getSeasonShortLabel(extractSeason(playerSeasons[0].League))}</th>
+                  <th className="font-semibold pb-1.5 text-right">Écart</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evolutionData.map(item => (
+                  <tr key={item.metric} className="border-t border-line/70 h-7">
+                    <td className="text-ink-2 truncate max-w-[10rem]" title={item.metric}>{item.shortMetric}</td>
+                    <td className="text-right text-ink-3 num">{formatRaw(Number(item.previous.toFixed(2)))}</td>
+                    <td className="text-right text-ink num font-medium">{formatRaw(Number(item.current.toFixed(2)))}</td>
+                    <td className="text-right w-16">
+                      <span className="inline-flex items-center gap-1 justify-end">
+                        {item.trend === 'up' ? <TrendingUp className="w-3 h-3 text-pos" /> : item.trend === 'down' ? <TrendingDown className="w-3 h-3 text-neg" /> : <Minus className="w-3 h-3 text-ink-4" />}
+                        <Delta value={item.percentChange} suffix=" %" />
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <EmptyState icon={TrendingUp} title="Évolution indisponible" className="!py-6">Une seule saison disponible pour ce joueur.</EmptyState>
+          )}
+        </Panel>
+
+        <div className="xl:col-span-3 lg:col-span-2"><PlayerHeatmap player={player} /></div>
+      </div>
+
+      {/* ===== Tirs et rapport ===== */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+        <Panel className="xl:col-span-5" title="Carte des tirs de la saison" icon={Crosshair}
+          right={
+            <div className="flex gap-5">
+              <Stat label="Tirs" value={shotStats.total} />
+              <Stat label="Buts" value={shotStats.goals} />
+              <Stat label="xG" value={shotStats.xG.toFixed(2)} />
+              <Stat label="Buts − xG" value={<Delta value={shotStats.goals - shotStats.xG} digits={2} />} />
+            </div>
+          }>
+          <ShotPitch shots={playerShots} />
+          <div className="mt-2 flex flex-wrap gap-4">
+            <LegendItem color={SHOT.goal}>But</LegendItem>
+            <LegendItem color={SHOT.saved}>Arrêté</LegendItem>
+            <LegendItem color={SHOT.missed}>Manqué ou contré</LegendItem>
+            <span className="text-2xs text-ink-4">Taille du point = xG · moitié offensive</span>
+          </div>
+        </Panel>
+
+        {/* Rapport IA : fonctionnalité secondaire, en appui des données */}
+        <Panel className="xl:col-span-7" title="Rapport rédigé" icon={FileText}
+          subtitle="Synthèse en langage football générée à partir des statistiques ci-dessus (Gemini). À relire : elle ne remplace pas l'analyse."
+          right={!report && (
+            <button onClick={handleGenerateReport} disabled={loadingReport} className="sv-btn sv-btn-secondary sv-btn-sm">
+              {loadingReport ? <span className="w-3 h-3 border-2 border-ink-4 border-t-ink rounded-full animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {loadingReport ? 'Rédaction…' : 'Générer'}
+            </button>
+          )}>
+          <div className="max-h-[520px] overflow-y-auto pr-1">
+            {report ? (
+              <div className="text-[13px]">
+                <ReactMarkdown
+                  components={{
+                    h1: ({node, ...props}) => <h1 className="text-base font-semibold text-ink mb-3" {...props} />,
+                    h2: ({node, ...props}) => <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-accent mt-5 mb-2" {...props} />,
+                    h3: ({node, ...props}) => <div className="sv-label mt-4 mb-2 pb-1 border-b border-line" {...props} />,
+                    strong: ({node, ...props}) => <strong className="text-ink font-semibold" {...props} />,
+                    ul: ({node, ...props}) => <ul className="space-y-1.5 my-2 pl-4 list-disc marker:text-ink-4" {...props} />,
+                    li: ({node, ...props}) => <li className="text-ink-2 leading-relaxed" {...props} />,
+                    p: ({node, ...props}) => <p className="leading-relaxed text-ink-2 mb-3" {...props} />
+                  }}
+                >
+                  {report}
+                </ReactMarkdown>
+                <div className="mt-4 pt-3 border-t border-line flex items-center justify-between text-2xs text-ink-4">
+                  <span>Généré par Gemini 2.5 Flash</span>
+                  <span>{new Date().toLocaleDateString('fr-FR')}</span>
+                </div>
+              </div>
+            ) : (
+              <EmptyState icon={Sparkles} title="Aucun rapport généré" className="!py-8">
+                Contient le rôle tactique, les forces et faiblesses et la projection, à partir des percentiles, du RAPM et des courbes d'âge.
+              </EmptyState>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      {/* ===== Toutes les métriques ===== */}
+      <Panel title="Toutes les métriques" icon={BarChart3} subtitle="Valeurs de la saison ; percentile du rôle quand le pipeline le fournit.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-6">
+          {Object.entries(player).filter(([key, value]) => isMetricKey(key, value)).map(([key, value]) => {
+            const pct = player[`${key} pct`];
+            return (
+              <div key={key} className="flex items-center gap-2 h-7 border-b border-line/60 text-xs min-w-0">
+                <span className="flex-1 text-ink-3 truncate" title={metricLabel(key)}>{metricLabel(key)}</span>
+                <span className="text-ink num font-medium">{typeof value === 'number' ? value.toLocaleString('fr-FR', { maximumFractionDigits: 2 }) : value}</span>
+                <span className="w-10 text-right">{typeof pct === 'number' ? <PercentileValue value={pct} className="text-2xs" /> : null}</span>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Terrain horizontal (attaque vers la droite) et tirs du joueur, taille du point = xG
+ */
+const ShotPitch: React.FC<{ shots: ReturnType<typeof useShots>['shots'] }> = ({ shots }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 105, H = 68;
+  const line = 'rgba(137,150,167,0.35)';
+  return (
+    <div className="relative w-full aspect-[52.5/68] max-w-[340px] mx-auto bg-raised/60 rounded-md border border-line overflow-hidden">
+      {/* Moitié offensive : les tirs viennent presque tous de là */}
+      <svg viewBox={`${W / 2} 0 ${W / 2} ${H}`} className="absolute inset-0 w-full h-full" fill="none" stroke={line} strokeWidth="0.3">
+        <rect x="0.3" y="0.3" width={W - 0.6} height={H - 0.6} />
+        <line x1={W / 2} y1="0.3" x2={W / 2} y2={H - 0.3} />
+        <circle cx={W / 2} cy={H / 2} r="9.15" />
+        <rect x={W - 16.5} y={(H - 40.32) / 2} width="16.2" height="40.32" />
+        <rect x={W - 5.5} y={(H - 18.32) / 2} width="5.2" height="18.32" />
+        <rect x="0.3" y={(H - 40.32) / 2} width="16.2" height="40.32" />
+        <rect x="0.3" y={(H - 18.32) / 2} width="5.2" height="18.32" />
+        <circle cx={W - 11} cy={H / 2} r="0.4" fill={line} />
+        {shots.map((shot, i) => {
+          const color = shot.result === 'Goal' ? SHOT.goal : shot.result === 'SavedShot' ? SHOT.saved : SHOT.missed;
+          const r = Math.max(0.7, Math.min(2.6, Math.sqrt(shot.xG) * 3.2));
+          return (
+            <circle key={i} cx={shot.X * W} cy={shot.Y * H} r={r} fill={color} fillOpacity={shot.result === 'Goal' ? 0.95 : 0.7}
+              stroke={INK.surface} strokeWidth="0.25" style={{ cursor: 'pointer' }}
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+          );
+        })}
+      </svg>
+      {hover !== null && shots[hover] && (
+        <div className="sv-tooltip absolute pointer-events-none z-10"
+          style={{ left: `${Math.min(Math.max((shots[hover].X - 0.5) * 200, 0), 60)}%`, top: `${Math.max(shots[hover].Y * 100 - 14, 2)}%` }}>
+          <div className="text-ink font-medium">{shotResultLabel(shots[hover].result)}</div>
+          <div>xG {shots[hover].xG.toFixed(2)} · {shots[hover].minute}e min · {shotTypeLabel(shots[hover].shotType)}</div>
+        </div>
+      )}
+      {shots.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-ink-4">Aucune donnée de tir pour ce joueur.</div>
+      )}
     </div>
   );
 };

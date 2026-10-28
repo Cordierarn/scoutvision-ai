@@ -42,19 +42,19 @@ const LabPage: React.FC<{ playerData: PlayerData[] }> = ({ playerData }) => {
       <div className="p-6 space-y-6 max-w-[96rem] mx-auto">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2.5"><FlaskConical className="w-6 h-6 text-emerald-400" /> Laboratoire</h1>
-            <p className="text-sm text-slate-400 mt-1 max-w-3xl">
+            <h1 className="text-2xl font-bold text-ink flex items-center gap-2.5"><FlaskConical className="w-6 h-6 text-accent" /> Laboratoire</h1>
+            <p className="text-sm text-ink-3 mt-1 max-w-3xl">
               Des idées neuves testées sur les données match par match (compositions, buts, momentum, réseaux de passes, entraîneurs, arbitres) :
               chacune a un verdict chiffré, et les idées reçues démenties comptent autant que les découvertes.
             </p>
           </div>
-          {lab && <span className="text-[11px] text-slate-500">Calculé le {new Date(lab.generatedAt).toLocaleDateString('fr-FR')} sur {lab.matches.toLocaleString('fr-FR')} matchs</span>}
+          {lab && <span className="text-[11px] text-ink-3">Calculé le {new Date(lab.generatedAt).toLocaleDateString('fr-FR')} sur {lab.matches.toLocaleString('fr-FR')} matchs</span>}
         </div>
 
-        <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3" role="tablist">
+        <div className="flex flex-wrap gap-2 border-b border-line pb-3" role="tablist">
           {TABS.map(t => (
             <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => open(t.key)}
-              className={`px-3.5 py-1.5 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-emerald-500 text-slate-900 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-900'}`}>
+              className={`px-3.5 py-1.5 rounded-md text-sm transition-colors ${tab === t.key ? 'bg-accent text-accent-ink font-semibold' : 'text-ink-3 hover:text-ink hover:bg-raised'}`}>
               {t.label}
             </button>
           ))}

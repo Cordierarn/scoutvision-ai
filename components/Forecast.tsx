@@ -28,14 +28,14 @@ const MatchRow: React.FC<{ match: ForecastMatch }> = ({ match }) => {
     { key: 'away', label: `Victoire ${match.away}`, value: match.pAway, color: AWAY },
   ];
   return (
-    <div className="grid grid-cols-12 items-center gap-3 px-4 py-3 border-b border-slate-800/60 hover:bg-white/[0.02]">
-      <div className="col-span-3 flex items-center justify-end gap-2 min-w-0 text-sm text-slate-200">
+    <div className="grid grid-cols-12 items-center gap-3 px-4 py-3 border-b border-line/60 hover:bg-raised/60">
+      <div className="col-span-3 flex items-center justify-end gap-2 min-w-0 text-sm text-ink">
         <span className="truncate text-right">{match.home}</span>
         <TeamLogo src={match.homeLogo} name={match.home} size="sm" />
       </div>
 
       <div className="col-span-6">
-        <div className="flex h-3 rounded-full overflow-hidden gap-[2px] bg-slate-950">
+        <div className="flex h-3 rounded-full overflow-hidden gap-[2px] bg-surface">
           {segments.map(s => (
             <div
               key={s.key}
@@ -46,18 +46,18 @@ const MatchRow: React.FC<{ match: ForecastMatch }> = ({ match }) => {
           ))}
         </div>
         <div className="flex justify-between text-xs mt-1.5 font-mono">
-          <span className="text-slate-200">{pct(match.pHome)}%</span>
-          <span className="text-slate-400">Nul {pct(match.pDraw)}%</span>
-          <span className="text-slate-200">{pct(match.pAway)}%</span>
+          <span className="text-ink">{pct(match.pHome)}%</span>
+          <span className="text-ink-3">Nul {pct(match.pDraw)}%</span>
+          <span className="text-ink">{pct(match.pAway)}%</span>
         </div>
       </div>
 
-      <div className="col-span-3 flex items-center gap-2 min-w-0 text-sm text-slate-200">
+      <div className="col-span-3 flex items-center gap-2 min-w-0 text-sm text-ink">
         <TeamLogo src={match.awayLogo} name={match.away} size="sm" />
         <span className="truncate">{match.away}</span>
       </div>
 
-      <div className="col-span-12 -mt-1 text-center text-[11px] text-slate-500">
+      <div className="col-span-12 -mt-1 text-center text-[11px] text-ink-3">
         xG attendus {match.xgHome.toFixed(2)} – {match.xgAway.toFixed(2)}
       </div>
 
@@ -71,15 +71,15 @@ const MatchRow: React.FC<{ match: ForecastMatch }> = ({ match }) => {
 
       {/* Marché : probabilités sans marge et avantage du modèle sur la meilleure cote */}
       {match.market && (
-        <div className="col-span-12 grid grid-cols-3 gap-2 text-[11px] font-mono bg-slate-900/60 rounded-lg px-3 py-1.5">
+        <div className="col-span-12 grid grid-cols-3 gap-2 text-[11px] font-mono bg-raised/60 rounded-md px-3 py-1.5">
           {['Domicile', 'Nul', 'Extérieur'].map((label, i) => {
             const edge = match.market!.edge[i];
             const value = edge !== null && edge > VALUE_EDGE;
             return (
               <div key={label} className={i === 1 ? 'text-center' : i === 2 ? 'text-right' : ''}>
-                <span className="text-slate-500">{label} : marché {pct(match.market!.fair[i])}%</span>
-                {match.market!.best[i] !== null && <span className="text-slate-400"> · cote {match.market!.best[i]!.toFixed(2)}</span>}
-                {value && <span className="text-white font-bold"> · avantage +{Math.round(edge! * 100)}%</span>}
+                <span className="text-ink-3">{label} : marché {pct(match.market!.fair[i])}%</span>
+                {match.market!.best[i] !== null && <span className="text-ink-3"> · cote {match.market!.best[i]!.toFixed(2)}</span>}
+                {value && <span className="text-ink font-bold"> · avantage +{Math.round(edge! * 100)}%</span>}
               </div>
             );
           })}
@@ -95,9 +95,9 @@ const VALUE_EDGE = 0.05;
 const LeverageBadge: React.FC<{ item?: { objective: string; delta: number }; align?: 'right' }> = ({ item, align }) => {
   if (!item || item.delta < 0.05) return <span />;
   return (
-    <span className={`text-slate-400 ${align === 'right' ? 'text-right' : ''}`}
+    <span className={`text-ink-3 ${align === 'right' ? 'text-right' : ''}`}
       title="Variation de la probabilité d'atteindre l'objectif entre une victoire et une défaite">
-      Enjeu {item.objective} : <span className="text-amber-300 font-semibold">{Math.round(item.delta * 100)} pts</span>
+      Enjeu {item.objective} : <span className="text-warn font-semibold">{Math.round(item.delta * 100)} pts</span>
     </span>
   );
 };
@@ -112,7 +112,7 @@ const byLevel = (keys: string[]) => [...keys].sort((a, b) => {
 });
 
 const chip = (active: boolean) =>
-  `shrink-0 px-3 py-1.5 rounded-full text-xs border ${active ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`;
+  `shrink-0 px-3 py-1.5 rounded-full text-xs border ${active ? 'bg-accent/10 border-accent/40 text-accent' : 'border-line-strong text-ink-3 hover:text-ink'}`;
 
 /**
  * Probabilité en pourcentage, « <1 % » et « – » pour les petites valeurs
@@ -126,8 +126,8 @@ const prob = (p?: number) => (p === undefined ? '' : p >= 0.995 ? '>99%' : p < 0
 const ProjectedTable: React.FC<{ rows: ProjectedRow[] }> = ({ rows }) => {
   const max = Math.max(...rows.map(r => r.projectedPoints), 1);
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
-      <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-slate-500 border-b border-slate-800">
+    <div className="bg-surface border border-line rounded-lg overflow-hidden">
+      <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-ink-3 border-b border-line">
         <div className="col-span-1">#</div>
         <div className="col-span-3">Équipe</div>
         <div className="col-span-1 text-right">J</div>
@@ -139,25 +139,25 @@ const ProjectedTable: React.FC<{ rows: ProjectedRow[] }> = ({ rows }) => {
         <div className="col-span-2 text-right">Pts projetés</div>
       </div>
       {rows.map(r => (
-        <div key={r.team} className="grid grid-cols-12 items-center px-4 py-2 border-b border-slate-800/60 text-sm hover:bg-white/[0.02]">
-          <div className="col-span-1 text-slate-400 font-mono">{r.rank}</div>
-          <div className="col-span-3 flex items-center gap-2 min-w-0 text-slate-200">
+        <div key={r.team} className="grid grid-cols-12 items-center px-4 py-2 border-b border-line/60 text-sm hover:bg-raised/60">
+          <div className="col-span-1 text-ink-3 font-mono">{r.rank}</div>
+          <div className="col-span-3 flex items-center gap-2 min-w-0 text-ink">
             <TeamLogo src={r.logo} name={r.team} size="xs" />
             <span className="truncate">{r.team}</span>
           </div>
-          <div className="col-span-1 text-right text-slate-400 font-mono">{r.played}</div>
-          <div className="col-span-1 text-right text-slate-200 font-mono">{r.points}</div>
-          <div className="col-span-1 text-right text-slate-400 font-mono">{r.goalDiff > 0 ? `+${r.goalDiff}` : r.goalDiff}</div>
-          <div className="col-span-1 text-right text-slate-200 font-mono">{prob(r.pTitle)}</div>
-          <div className="col-span-1 text-right text-slate-200 font-mono">{prob(r.pTop4)}</div>
-          <div className="col-span-1 text-right text-slate-200 font-mono">{prob(r.pBottom3)}</div>
+          <div className="col-span-1 text-right text-ink-3 font-mono">{r.played}</div>
+          <div className="col-span-1 text-right text-ink font-mono">{r.points}</div>
+          <div className="col-span-1 text-right text-ink-3 font-mono">{r.goalDiff > 0 ? `+${r.goalDiff}` : r.goalDiff}</div>
+          <div className="col-span-1 text-right text-ink font-mono">{prob(r.pTitle)}</div>
+          <div className="col-span-1 text-right text-ink font-mono">{prob(r.pTop4)}</div>
+          <div className="col-span-1 text-right text-ink font-mono">{prob(r.pBottom3)}</div>
           <div className="col-span-2 flex items-center gap-2 justify-end">
             {/* Barre : points acquis (plein) puis points attendus (clair) */}
-            <div className="flex-1 max-w-[110px] h-2 rounded-full bg-slate-900 overflow-hidden flex" title={`${r.points} pts acquis + ${r.expectedPoints} attendus sur ${r.remaining} matchs`}>
+            <div className="flex-1 max-w-[110px] h-2 rounded-full bg-raised overflow-hidden flex" title={`${r.points} pts acquis + ${r.expectedPoints} attendus sur ${r.remaining} matchs`}>
               <div style={{ width: `${(r.points / max) * 100}%`, background: HOME }} />
               <div style={{ width: `${(r.expectedPoints / max) * 100}%`, background: HOME, opacity: 0.4 }} />
             </div>
-            <span className="text-white font-mono font-bold w-8 text-right">{Math.round(r.projectedPoints)}</span>
+            <span className="text-ink font-mono font-bold w-8 text-right">{Math.round(r.projectedPoints)}</span>
           </div>
         </div>
       ))}
@@ -175,11 +175,11 @@ const MIN_POOL_WEIGHT = 0.3;
  * à deux erreurs-types près ET que le modèle garde un poids net dans le mélange avec le marché
  */
 function verdict(s?: Pick<MarketSummary, 'matches' | 'poolWeight' | 'bets' | 'clv' | 'clvSe'>): { label: string; tone: string } {
-  if (!s || !s.matches) return { label: 'Pas de données', tone: 'text-slate-500' };
+  if (!s || !s.matches) return { label: 'Pas de données', tone: 'text-ink-3' };
   const clvSignificant = s.clv !== undefined && s.clvSe !== undefined && s.bets !== undefined && s.bets >= 30 && s.clv - 2 * s.clvSe > 0;
-  if (clvSignificant && s.poolWeight >= MIN_POOL_WEIGHT) return { label: 'Avantage possible', tone: 'text-emerald-300' };
+  if (clvSignificant && s.poolWeight >= MIN_POOL_WEIGHT) return { label: 'Avantage possible', tone: 'text-accent' };
   if (s.poolWeight >= MIN_POOL_WEIGHT) return { label: 'Information complémentaire', tone: 'text-sky-300' };
-  return { label: 'Le marché absorbe le modèle', tone: 'text-slate-400' };
+  return { label: 'Le marché absorbe le modèle', tone: 'text-ink-3' };
 }
 
 /**
@@ -193,26 +193,26 @@ const OverUnderSection: React.FC<{ data?: MarketEvaluation['overUnder'] }> = ({ 
     .filter(([, s]) => s.matches)
     .sort((a, b) => (dataLoader.getCompetition(a[0])?.tier ?? 9) - (dataLoader.getCompetition(b[0])?.tier ?? 9) || b[1].matches - a[1].matches);
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
+    <div className="bg-surface border border-line rounded-lg overflow-hidden">
       <div className="p-5">
         <div className="flex items-baseline justify-between mb-3">
-          <h3 className="text-white font-bold">Plus / moins de 2,5 buts</h3>
+          <h3 className="text-ink font-bold">Plus / moins de 2,5 buts</h3>
           <span className={`text-sm font-semibold ${v.tone}`}>{v.label}</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div><div className="text-[11px] text-slate-500 uppercase">Brier modèle / marché</div><div className="text-white font-mono">{o.brierModel.toFixed(4)} / {o.brierMarket.toFixed(4)}</div></div>
-          <div><div className="text-[11px] text-slate-500 uppercase">Poids du modèle</div><div className="text-white font-mono">{o.poolWeight.toFixed(2)}</div></div>
-          <div><div className="text-[11px] text-slate-500 uppercase">Gain contre la clôture</div><div className="text-white font-mono">{signedPct(o.clv)} <span className="text-slate-500 text-xs">± {((o.clvSe ?? 0) * 200).toFixed(1)}</span></div></div>
-          <div><div className="text-[11px] text-slate-500 uppercase">Rendement simulé</div><div className="text-white font-mono">{signedPct(o.roi)} <span className="text-slate-500 text-xs">± {((o.roiSe ?? 0) * 200).toFixed(1)}</span></div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Brier modèle / marché</div><div className="text-ink font-mono">{o.brierModel.toFixed(4)} / {o.brierMarket.toFixed(4)}</div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Poids du modèle</div><div className="text-ink font-mono">{o.poolWeight.toFixed(2)}</div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Gain contre la clôture</div><div className="text-ink font-mono">{signedPct(o.clv)} <span className="text-ink-3 text-xs">± {((o.clvSe ?? 0) * 200).toFixed(1)}</span></div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Rendement simulé</div><div className="text-ink font-mono">{signedPct(o.roi)} <span className="text-ink-3 text-xs">± {((o.roiSe ?? 0) * 200).toFixed(1)}</span></div></div>
         </div>
-        <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+        <p className="text-xs text-ink-3 mt-4 leading-relaxed">
           {o.matches.toLocaleString('fr-FR')} matchs des 16 championnats européens qui ont ces cotes, du {data?.period?.[0]} au {data?.period?.[1]}.
           Chaque semaine, le modèle joint est réajusté sur les seuls matchs déjà joués, puis il prédit la probabilité de plus de 2,5 buts
           (Poisson avec correction Dixon-Coles). Brier : plus bas = meilleur. {o.bets ?? 0} paris simulés quand l'avantage dépasse 5 % sur la cote moyenne avant match.
           {' '}{Math.round(o.overRate * 100)} % des matchs ont dépassé 2,5 buts.
         </p>
       </div>
-      <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-slate-500 border-y border-slate-800">
+      <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-ink-3 border-y border-line">
         <div className="col-span-3">Compétition</div>
         <div className="col-span-1 text-right">Matchs</div>
         <div className="col-span-2 text-right">Brier mod. / marché</div>
@@ -224,13 +224,13 @@ const OverUnderSection: React.FC<{ data?: MarketEvaluation['overUnder'] }> = ({ 
       {comps.map(([c, s]) => {
         const vc = verdict(s);
         return (
-          <div key={c} className="grid grid-cols-12 items-center px-4 py-2 border-b border-slate-800/60 text-sm">
-            <div className="col-span-3 text-slate-200"><CompetitionBadge competition={c} /></div>
-            <div className="col-span-1 text-right text-slate-400 font-mono">{s.matches}</div>
-            <div className="col-span-2 text-right font-mono text-slate-300">{s.brierModel.toFixed(3)} / {s.brierMarket.toFixed(3)}</div>
-            <div className="col-span-1 text-right font-mono text-slate-300">{s.poolWeight.toFixed(2)}</div>
-            <div className="col-span-1 text-right font-mono text-slate-400">{s.bets ?? '–'}</div>
-            <div className="col-span-2 text-right font-mono text-slate-300">{signedPct(s.clv)}</div>
+          <div key={c} className="grid grid-cols-12 items-center px-4 py-2 border-b border-line/60 text-sm">
+            <div className="col-span-3 text-ink"><CompetitionBadge competition={c} /></div>
+            <div className="col-span-1 text-right text-ink-3 font-mono">{s.matches}</div>
+            <div className="col-span-2 text-right font-mono text-ink-2">{s.brierModel.toFixed(3)} / {s.brierMarket.toFixed(3)}</div>
+            <div className="col-span-1 text-right font-mono text-ink-2">{s.poolWeight.toFixed(2)}</div>
+            <div className="col-span-1 text-right font-mono text-ink-3">{s.bets ?? '–'}</div>
+            <div className="col-span-2 text-right font-mono text-ink-2">{signedPct(s.clv)}</div>
             <div className={`col-span-2 text-right text-xs ${vc.tone}`}>{vc.label}</div>
           </div>
         );
@@ -241,7 +241,7 @@ const OverUnderSection: React.FC<{ data?: MarketEvaluation['overUnder'] }> = ({ 
 
 const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }) => {
   if (!evaluation?.overall) {
-    return <p className="text-sm text-slate-500">Évaluation indisponible : les cotes football-data n'ont pas pu être chargées.</p>;
+    return <p className="text-sm text-ink-3">Évaluation indisponible : les cotes football-data n'ont pas pu être chargées.</p>;
   }
   const o = evaluation.overall;
   const v = verdict(o);
@@ -250,18 +250,18 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
     .sort((a, b) => (dataLoader.getCompetition(a[0])?.tier ?? 9) - (dataLoader.getCompetition(b[0])?.tier ?? 9) || b[1].matches - a[1].matches);
   return (
     <div className="space-y-5">
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5">
+      <div className="bg-surface border border-line rounded-lg p-5">
         <div className="flex items-baseline justify-between mb-3">
-          <h3 className="text-white font-bold">Le modèle face aux cotes de clôture</h3>
+          <h3 className="text-ink font-bold">Le modèle face aux cotes de clôture</h3>
           <span className={`text-sm font-semibold ${v.tone}`}>{v.label}</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div><div className="text-[11px] text-slate-500 uppercase">RPS modèle / marché</div><div className="text-white font-mono">{o.rpsModel.toFixed(4)} / {o.rpsMarket.toFixed(4)}</div></div>
-          <div><div className="text-[11px] text-slate-500 uppercase">Poids du modèle</div><div className="text-white font-mono">{o.poolWeight.toFixed(2)}</div></div>
-          <div><div className="text-[11px] text-slate-500 uppercase">Gain contre la clôture</div><div className="text-white font-mono">{signedPct(o.clv)} <span className="text-slate-500 text-xs">± {((o.clvSe ?? 0) * 200).toFixed(1)}</span></div></div>
-          <div><div className="text-[11px] text-slate-500 uppercase">Rendement simulé</div><div className="text-white font-mono">{signedPct(o.roi)} <span className="text-slate-500 text-xs">± {((o.roiSe ?? 0) * 200).toFixed(1)}</span></div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">RPS modèle / marché</div><div className="text-ink font-mono">{o.rpsModel.toFixed(4)} / {o.rpsMarket.toFixed(4)}</div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Poids du modèle</div><div className="text-ink font-mono">{o.poolWeight.toFixed(2)}</div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Gain contre la clôture</div><div className="text-ink font-mono">{signedPct(o.clv)} <span className="text-ink-3 text-xs">± {((o.clvSe ?? 0) * 200).toFixed(1)}</span></div></div>
+          <div><div className="text-[11px] text-ink-3 uppercase">Rendement simulé</div><div className="text-ink font-mono">{signedPct(o.roi)} <span className="text-ink-3 text-xs">± {((o.roiSe ?? 0) * 200).toFixed(1)}</span></div></div>
         </div>
-        <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+        <p className="text-xs text-ink-3 mt-4 leading-relaxed">
           {o.matches.toLocaleString('fr-FR')} matchs du {evaluation.period?.[0]} au {evaluation.period?.[1]}, prédits avant d'être joués (backtest du pipeline).
           Marché = cote de clôture sans marge (Betfair Exchange, sinon Pinnacle ou moyenne). RPS : plus bas = meilleur.
           Poids du modèle : sa part optimale dans un mélange avec le marché (0 = il n'apporte rien que le marché ne sache déjà).
@@ -270,8 +270,8 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
         </p>
       </div>
 
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
-        <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-slate-500 border-b border-slate-800">
+      <div className="bg-surface border border-line rounded-lg overflow-hidden">
+        <div className="grid grid-cols-12 px-4 py-2.5 text-[11px] uppercase font-semibold text-ink-3 border-b border-line">
           <div className="col-span-3">Compétition</div>
           <div className="col-span-1 text-right">Matchs</div>
           <div className="col-span-2 text-right">RPS mod. / marché</div>
@@ -283,13 +283,13 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
         {comps.map(([c, s]) => {
           const vc = verdict(s);
           return (
-            <div key={c} className="grid grid-cols-12 items-center px-4 py-2 border-b border-slate-800/60 text-sm">
-              <div className="col-span-3 text-slate-200"><CompetitionBadge competition={c} /></div>
-              <div className="col-span-1 text-right text-slate-400 font-mono">{s.matches}</div>
-              <div className="col-span-2 text-right font-mono text-slate-300">{s.rpsModel.toFixed(3)} / {s.rpsMarket.toFixed(3)}</div>
-              <div className="col-span-1 text-right font-mono text-slate-300">{s.poolWeight.toFixed(2)}</div>
-              <div className="col-span-1 text-right font-mono text-slate-400">{s.bets ?? '–'}</div>
-              <div className="col-span-2 text-right font-mono text-slate-300">{signedPct(s.clv)}</div>
+            <div key={c} className="grid grid-cols-12 items-center px-4 py-2 border-b border-line/60 text-sm">
+              <div className="col-span-3 text-ink"><CompetitionBadge competition={c} /></div>
+              <div className="col-span-1 text-right text-ink-3 font-mono">{s.matches}</div>
+              <div className="col-span-2 text-right font-mono text-ink-2">{s.rpsModel.toFixed(3)} / {s.rpsMarket.toFixed(3)}</div>
+              <div className="col-span-1 text-right font-mono text-ink-2">{s.poolWeight.toFixed(2)}</div>
+              <div className="col-span-1 text-right font-mono text-ink-3">{s.bets ?? '–'}</div>
+              <div className="col-span-2 text-right font-mono text-ink-2">{signedPct(s.clv)}</div>
               <div className={`col-span-2 text-right text-xs ${vc.tone}`}>{vc.label}</div>
             </div>
           );
@@ -298,7 +298,7 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
 
       <OverUnderSection data={evaluation.overUnder} />
 
-      <p className="text-xs text-slate-500 leading-relaxed">
+      <p className="text-xs text-ink-3 leading-relaxed">
         Les cotes viennent de football-data.co.uk (27 compétitions ; pas de coupes d'Europe, Croatie, Tchéquie, Serbie, Corée ni Arabie saoudite).
         Un avantage affiché sur un match à venir n'est qu'un écart entre le modèle et le marché : tant que le gain contre la clôture n'est pas
         positif sur des centaines de paris, le marché a probablement raison. Le jeu comporte des risques : ne misez que ce que vous pouvez perdre.
@@ -340,10 +340,10 @@ const Forecast: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto p-6 animate-fade-in">
-      <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-        <CalendarDays className="w-6 h-6 text-emerald-400" /> Pronostics
+      <h1 className="text-2xl font-bold text-ink flex items-center gap-2">
+        <CalendarDays className="w-6 h-6 text-accent" /> Pronostics
       </h1>
-      <p className="text-sm text-slate-500 mt-1 mb-5">
+      <p className="text-sm text-ink-3 mt-1 mb-5">
         Probabilités de victoire, nul et défaite selon les forces offensives et défensives des équipes en xG, avantage du terrain compris (modèle du pipeline PitchAPI, coupes d'Europe comprises).
         Ce sont des probabilités, pas des certitudes : un favori à 60 % ne gagne pas 4 fois sur 10.
       </p>
@@ -354,22 +354,22 @@ const Forecast: React.FC = () => {
         <button onClick={() => setTab('market')} className={chip(tab === 'market')}>Modèle vs marché</button>
       </div>
 
-      {error && <p className="text-rose-400 text-sm">Pronostics indisponibles : {error}</p>}
+      {error && <p className="text-neg text-sm">Pronostics indisponibles : {error}</p>}
 
       {tab === 'matches' && (
         <>
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs text-slate-500 uppercase font-semibold mr-1">Période</span>
+            <span className="text-xs text-ink-3 uppercase font-semibold mr-1">Période</span>
             {HORIZONS.map(h => (
               <button key={h.days} onClick={() => setHorizon(h.days)} className={chip(horizon === h.days)}>{h.label}</button>
             ))}
           </div>
 
           {matches && upcoming.length === 0 && (
-            <div className="bg-slate-950 border border-dashed border-slate-800 rounded-2xl p-10 text-center">
-              <p className="text-slate-300">Aucun match à venir sur cette période.</p>
-              <p className="text-xs text-slate-500 mt-2">
-                Pour rafraîchir les pronostics, lancez dans PitchApi-big-5 <code className="text-slate-400">python -m pitchapi_big5 forecast</code>, puis préparez à nouveau les données.
+            <div className="bg-surface border border-dashed border-line rounded-lg p-10 text-center">
+              <p className="text-ink-2">Aucun match à venir sur cette période.</p>
+              <p className="text-xs text-ink-3 mt-2">
+                Pour rafraîchir les pronostics, lancez dans PitchApi-big-5 <code className="text-ink-3">python -m pitchapi_big5 forecast</code>, puis préparez à nouveau les données.
               </p>
             </div>
           )}
@@ -386,7 +386,7 @@ const Forecast: React.FC = () => {
                 ))}
               </div>
 
-              <div className="flex items-center gap-4 text-xs text-slate-400 mb-3">
+              <div className="flex items-center gap-4 text-xs text-ink-3 mb-3">
                 <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ background: HOME }} />Victoire à domicile</span>
                 <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ background: DRAW }} />Nul</span>
                 <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ background: AWAY }} />Victoire à l'extérieur</span>
@@ -394,12 +394,12 @@ const Forecast: React.FC = () => {
 
               <div className="space-y-6">
                 {byDate.map(([date, list]) => (
-                  <div key={date} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
-                    <div className="px-4 py-2.5 border-b border-slate-800 text-sm font-semibold text-slate-300">{formatDate(date)}</div>
+                  <div key={date} className="bg-surface border border-line rounded-lg overflow-hidden">
+                    <div className="px-4 py-2.5 border-b border-line text-sm font-semibold text-ink-2">{formatDate(date)}</div>
                     {list.map(m => (
                       <div key={m.match_id}>
                         {!competition && (
-                          <div className="px-4 pt-2 text-[11px] text-slate-500"><CompetitionBadge competition={m.competition} /></div>
+                          <div className="px-4 pt-2 text-[11px] text-ink-3"><CompetitionBadge competition={m.competition} /></div>
                         )}
                         <MatchRow match={m} />
                       </div>
@@ -424,7 +424,7 @@ const Forecast: React.FC = () => {
             ))}
           </div>
           <ProjectedTable rows={file!.tables[activeTable]} />
-          <p className="text-[11px] text-slate-500 mt-3">
+          <p className="text-[11px] text-ink-3 mt-3">
             Points projetés = points acquis + somme des points attendus (3 × P(victoire) + P(nul)) sur les matchs restants. Barre pleine : points acquis ; claire : points attendus.
           </p>
         </>

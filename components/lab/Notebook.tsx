@@ -165,26 +165,26 @@ const Notebook: React.FC<{ lab: LabExperiments; onOpen: (tab: LabTab) => void }>
   const count = (v: Verdict) => list.filter(c => c.verdict === v).length;
   return (
     <div className="space-y-5">
-      <p className="text-sm text-slate-400 leading-relaxed max-w-4xl">
+      <p className="text-sm text-ink-3 leading-relaxed max-w-4xl">
         {list.length} idées testées sur {lab.matches.toLocaleString('fr-FR')} matchs de 35 compétitions : {count('validated')} validées,{' '}
         {count('partial')} partielles, {count('debunked')} démenties, {count('measured')} mesures. Chaque test est refait à chaque mise à jour des
         données ; quand il s'agit de prévoir, la validation se fait sur des matchs ou des saisons que le modèle n'a pas vus.
       </p>
       <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
         {list.map(c => (
-          <article key={c.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-5 flex flex-col">
+          <article key={c.id} className="bg-surface border border-line rounded-lg p-5 flex flex-col">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] uppercase tracking-wider text-slate-500">{c.theme}</span>
+              <span className="text-[11px] uppercase tracking-wider text-ink-3">{c.theme}</span>
               <VerdictBadge verdict={c.verdict} />
             </div>
-            <h3 className="mt-3 text-base font-semibold text-white leading-snug">{c.question}</h3>
+            <h3 className="mt-3 text-base font-semibold text-ink leading-snug">{c.question}</h3>
             <div className="mt-4">
-              <div className="text-2xl font-semibold text-white">{c.figure}</div>
-              <div className="text-[11px] text-slate-500 mt-1 leading-snug">{c.caption}</div>
+              <div className="text-2xl font-semibold text-ink">{c.figure}</div>
+              <div className="text-[11px] text-ink-3 mt-1 leading-snug">{c.caption}</div>
             </div>
-            <p className="mt-3 text-sm text-slate-400 leading-relaxed flex-1">{c.text}</p>
+            <p className="mt-3 text-sm text-ink-3 leading-relaxed flex-1">{c.text}</p>
             {c.tab && (
-              <button onClick={() => onOpen(c.tab!)} className="mt-4 self-start inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300">
+              <button onClick={() => onOpen(c.tab!)} className="mt-4 self-start inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:text-accent">
                 Explorer <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
             )}

@@ -156,16 +156,16 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
       
       {/* Search Header */}
       <div className="w-full max-w-2xl mx-auto text-center mb-4">
-        <h1 className="text-3xl font-bold text-white mb-2">Joueurs similaires</h1>
-        <p className="text-slate-400 mb-6">Trouvez les joueurs au profil statistique le plus proche (distance euclidienne sur les métriques de performance).</p>
+        <h1 className="text-3xl font-bold text-ink mb-2">Joueurs similaires</h1>
+        <p className="text-ink-3 mb-6">Trouvez les joueurs au profil statistique le plus proche (distance euclidienne sur les métriques de performance).</p>
         
         <div className="relative z-50">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-3 w-5 h-5" />
             <input 
               type="text" 
               placeholder="Rechercher un joueur de référence..."
-              className="w-full bg-slate-800 border border-slate-700 text-white pl-12 pr-4 py-4 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-xl text-lg"
+              className="w-full bg-overlay border border-line-strong text-ink pl-12 pr-4 py-4 rounded-md focus:ring-2 focus:ring-accent focus:outline-none  text-lg"
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -182,7 +182,7 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
 
           {/* Search Results Dropdown */}
           {searchTerm && !referencePlayer && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 mt-2 bg-overlay border border-line-strong rounded-md  overflow-hidden max-h-80 overflow-y-auto">
               {filteredSearch.map((p, idx) => {
                 const pSeason = extractSeason(p.League);
                 const pSeasonColors = getSeasonColor(pSeason);
@@ -193,11 +193,11 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                     setReferencePlayer(p);
                     setSearchTerm(p.Player || '');
                   }}
-                  className="w-full text-left px-4 py-3 hover:bg-slate-700 flex items-center justify-between group transition-colors border-b border-slate-700/50 last:border-0"
+                  className="w-full text-left px-4 py-3 hover:bg-line-strong flex items-center justify-between group transition-colors border-b border-line-strong/50 last:border-0"
                 >
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <div className="relative overflow-hidden w-9 h-9 rounded-full bg-slate-900 flex items-center justify-center text-xs font-bold text-slate-400 group-hover:text-emerald-400 group-hover:bg-emerald-500/10 transition-colors">
+                      <div className="relative overflow-hidden w-9 h-9 rounded-full bg-raised flex items-center justify-center text-xs font-bold text-ink-3 group-hover:text-accent group-hover:bg-accent/10 transition-colors">
                           {(p.Player || '??').substring(0, 2).toUpperCase()}
                           <PhotoOverlay src={p.Image} alt={p.Player} />
                       </div>
@@ -206,16 +206,16 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                       </div>
                     </div>
                     <div>
-                        <div className="font-medium text-slate-200">{p.Player || 'Inconnu'}</div>
-                        <div className="text-xs text-slate-500 flex items-center gap-1"><TeamLine player={p} /> • {positionLabel(p.Position) || 'N/A'}</div>
+                        <div className="font-medium text-ink">{p.Player || 'Inconnu'}</div>
+                        <div className="text-xs text-ink-3 flex items-center gap-1"><TeamLine player={p} /> • {positionLabel(p.Position) || 'N/A'}</div>
                     </div>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-emerald-400 opacity-0 group-hover:opacity-100 transition-all transform -translate-x-2 group-hover:translate-x-0" />
+                  <ArrowRight className="w-4 h-4 text-ink-4 group-hover:text-accent opacity-0 group-hover:opacity-100 transition-all transform -translate-x-2 group-hover:translate-x-0" />
                 </button>
                 );
               })}
               {filteredSearch.length === 0 && (
-                  <div className="p-4 text-slate-500 text-center text-sm">Aucun joueur trouvé</div>
+                  <div className="p-4 text-ink-3 text-center text-sm">Aucun joueur trouvé</div>
               )}
             </div>
           )}
@@ -226,16 +226,16 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
         <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
             {/* Left: Settings & Reference */}
             <div className="w-full lg:w-80 flex flex-col gap-4">
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-lg relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 p-24 bg-emerald-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+                <div className="bg-surface border border-line rounded-lg p-6  relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-24 bg-accent/5 rounded-full  -mr-10 -mt-10 pointer-events-none"></div>
                     <div className="relative z-10">
-                        <h2 className="text-xs font-bold text-emerald-500 uppercase tracking-widest mb-4">Joueur de référence</h2>
+                        <h2 className="text-xs font-bold text-accent uppercase tracking-widest mb-4">Joueur de référence</h2>
                         {(() => {
                           const refSeason = extractSeason(referencePlayer.League);
                           const refSeasonColors = getSeasonColor(refSeason);
                           return (
                             <div className="relative w-20 h-20 mb-4">
-                              <div className="relative overflow-hidden w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center text-2xl font-bold text-slate-300 border-2 border-slate-700">
+                              <div className="relative overflow-hidden w-20 h-20 bg-overlay rounded-lg flex items-center justify-center text-2xl font-bold text-ink-2 border-2 border-line-strong">
                                 {(referencePlayer.Player || '??').substring(0, 2).toUpperCase()}
                                 <PhotoOverlay src={referencePlayer.Image} alt={referencePlayer.Player} />
                               </div>
@@ -245,68 +245,68 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                             </div>
                           );
                         })()}
-                        <h3 className="text-2xl font-bold text-white leading-tight mb-1">{referencePlayer.Player || 'Inconnu'}</h3>
-                        <p className="text-slate-400 text-sm mb-4"><TeamLine player={referencePlayer} /></p>
+                        <h3 className="text-2xl font-bold text-ink leading-tight mb-1">{referencePlayer.Player || 'Inconnu'}</h3>
+                        <p className="text-ink-3 text-sm mb-4"><TeamLine player={referencePlayer} /></p>
                         
                         <div className="flex items-center gap-2 mb-2">
-                             <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700 text-xs text-slate-300 font-mono">{positionLabel(referencePlayer.Position)}</span>
-                             <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700 text-xs text-slate-300 font-mono">{referencePlayer.Age ?? '–'} ans</span>
+                             <span className="px-2 py-1 bg-overlay rounded border border-line-strong text-xs text-ink-2 font-mono">{positionLabel(referencePlayer.Position)}</span>
+                             <span className="px-2 py-1 bg-overlay rounded border border-line-strong text-xs text-ink-2 font-mono">{referencePlayer.Age ?? '–'} ans</span>
                         </div>
-                        <div className="text-emerald-400 font-mono font-bold text-lg mt-2">
+                        <div className="text-accent font-mono font-bold text-lg mt-2">
                              {typeof referencePlayer["Market value"] === 'number' ? `€${referencePlayer["Market value"].toLocaleString()}` : '–'}
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-lg">
-                     <h3 className="text-sm font-semibold text-slate-300 mb-3">Paramètres</h3>
+                <div className="bg-surface border border-line rounded-lg p-5 ">
+                     <h3 className="text-sm font-semibold text-ink-2 mb-3">Paramètres</h3>
                      
                      <div className="space-y-3">
                        {/* Position Category Badge */}
                        <div className="flex items-center justify-between text-xs">
-                         <span className="text-slate-500">Type de poste</span>
-                         <span className="px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded font-medium">{positionCategory}</span>
+                         <span className="text-ink-3">Type de poste</span>
+                         <span className="px-2 py-1 bg-accent/10 text-accent rounded font-medium">{positionCategory}</span>
                        </div>
                        
                        {/* Metrics Used Count */}
                        <div className="flex items-center justify-between text-xs">
-                         <span className="text-slate-500">Métriques comparées</span>
-                         <span className="text-slate-300 font-mono">{metricKeys.length}</span>
+                         <span className="text-ink-3">Métriques comparées</span>
+                         <span className="text-ink-2 font-mono">{metricKeys.length}</span>
                        </div>
                        
-                       <div className="h-px bg-slate-800 my-2"></div>
+                       <div className="h-px bg-overlay my-2"></div>
                        
                        {/* Same Position Filter */}
                        <label className="flex items-center gap-3 cursor-pointer group">
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${samePositionOnly ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
-                               {samePositionOnly && <Check className="w-3 h-3 text-slate-950" />}
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${samePositionOnly ? 'bg-accent border-accent' : 'bg-raised border-line-strong group-hover:border-ink-4'}`}>
+                               {samePositionOnly && <Check className="w-3 h-3 text-accent-ink" />}
                           </div>
                           <input type="checkbox" className="hidden" checked={samePositionOnly} onChange={() => setSamePositionOnly(!samePositionOnly)} />
-                          <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">Même poste uniquement</span>
+                          <span className="text-sm text-ink-3 group-hover:text-ink transition-colors">Même poste uniquement</span>
                        </label>
                        
                        {/* Top Metrics Toggle */}
                        <label className="flex items-center gap-3 cursor-pointer group">
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${useTopMetrics ? 'bg-purple-500 border-purple-500' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
-                               {useTopMetrics && <Check className="w-3 h-3 text-slate-950" />}
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${useTopMetrics ? 'bg-purple-500 border-purple-500' : 'bg-raised border-line-strong group-hover:border-ink-4'}`}>
+                               {useTopMetrics && <Check className="w-3 h-3 text-accent-ink" />}
                           </div>
                           <input type="checkbox" className="hidden" checked={useTopMetrics} onChange={() => setUseTopMetrics(!useTopMetrics)} />
-                          <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">Utiliser ses meilleures métriques</span>
+                          <span className="text-sm text-ink-3 group-hover:text-ink transition-colors">Utiliser ses meilleures métriques</span>
                        </label>
                      </div>
                      
                      {/* Metrics Preview */}
                      {metricKeys.length > 0 && (
-                       <div className="mt-4 pt-3 border-t border-slate-800">
-                         <div className="text-[10px] uppercase text-slate-600 font-bold mb-2">Métriques de comparaison</div>
+                       <div className="mt-4 pt-3 border-t border-line">
+                         <div className="text-[10px] uppercase text-ink-4 font-bold mb-2">Métriques de comparaison</div>
                          <div className="flex flex-wrap gap-1">
                            {metricKeys.slice(0, 6).map(m => (
-                             <span key={m} className="px-1.5 py-0.5 bg-slate-900 rounded text-[9px] text-slate-500 truncate max-w-[80px]" title={metricLabel(m)}>
+                             <span key={m} className="px-1.5 py-0.5 bg-raised rounded text-[9px] text-ink-3 truncate max-w-[80px]" title={metricLabel(m)}>
                                {metricLabel(m).replace(' par 90', '')}
                              </span>
                            ))}
                            {metricKeys.length > 6 && (
-                             <span className="px-1.5 py-0.5 text-[9px] text-slate-600">+{metricKeys.length - 6}</span>
+                             <span className="px-1.5 py-0.5 text-[9px] text-ink-4">+{metricKeys.length - 6}</span>
                            )}
                          </div>
                        </div>
@@ -316,7 +316,7 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
 
             {/* Right: Results */}
             <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-                <h2 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
                     <GitCompare className="w-5 h-5 text-purple-400" />
                     Profils les plus proches
                 </h2>
@@ -326,11 +326,11 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                         const playerSeason = extractSeason(player.League);
                         const playerSeasonColors = getSeasonColor(playerSeason);
                         return (
-                        <div key={getPlayerSeasonId(player)} className="bg-slate-950 border border-slate-800 rounded-2xl p-0 overflow-hidden hover:border-slate-600 transition-all flex flex-col">
-                            <div className="p-4 border-b border-slate-800/50 flex justify-between items-start bg-slate-900/30">
+                        <div key={getPlayerSeasonId(player)} className="bg-surface border border-line rounded-lg p-0 overflow-hidden hover:border-line-strong transition-all flex flex-col">
+                            <div className="p-4 border-b border-line/50 flex justify-between items-start bg-raised/30">
                                 <div className="flex items-center gap-3">
                                     <div className="relative">
-                                      <div className="relative overflow-hidden w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 border border-slate-700">
+                                      <div className="relative overflow-hidden w-10 h-10 rounded-full bg-overlay flex items-center justify-center text-xs font-bold text-ink-3 border border-line-strong">
                                           {(player.Player || '??').substring(0, 2).toUpperCase()}
                                           <PhotoOverlay src={player.Image} alt={player.Player} />
                                       </div>
@@ -339,20 +339,20 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                                       </div>
                                     </div>
                                     <div>
-                                        <div className="font-bold text-slate-200 text-sm">{player.Player || 'Inconnu'}</div>
-                                        <div className="text-xs text-slate-500 truncate max-w-[160px]"><TeamLine player={player} /></div>
+                                        <div className="font-bold text-ink text-sm">{player.Player || 'Inconnu'}</div>
+                                        <div className="text-xs text-ink-3 truncate max-w-[160px]"><TeamLine player={player} /></div>
                                     </div>
                                 </div>
                                 <div className="flex flex-col items-end">
-                                    <div className={`text-lg font-bold ${score > 85 ? 'text-emerald-400' : score > 70 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                                    <div className={`text-lg font-bold ${score > 85 ? 'text-accent' : score > 70 ? 'text-warn' : 'text-ink-3'}`}>
                                         {score.toFixed(0)}%
                                     </div>
-                                    <div className="text-[10px] text-slate-600 uppercase tracking-wider font-bold">Similarité</div>
+                                    <div className="text-[10px] text-ink-4 uppercase tracking-wider font-bold">Similarité</div>
                                 </div>
                             </div>
                             
                             {/* Mini Radar Comparison */}
-                            <div className="h-40 w-full relative bg-slate-950/50">
+                            <div className="h-40 w-full relative bg-surface/50">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <RadarChart cx="50%" cy="50%" outerRadius="65%" data={getChartData(player)}>
                                         <PolarGrid stroke="#334155" strokeOpacity={0.5} />
@@ -363,18 +363,18 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                                     </RadarChart>
                                 </ResponsiveContainer>
                                 <div className="absolute bottom-2 right-2 flex gap-3 text-[10px]">
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-slate-500">Référence</span></div>
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div><span className="text-slate-500">Joueur</span></div>
+                                     <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-accent"></div><span className="text-ink-3">Référence</span></div>
+                                     <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div><span className="text-ink-3">Joueur</span></div>
                                 </div>
                             </div>
 
-                            <div className="p-3 bg-slate-900/50 mt-auto border-t border-slate-800 flex items-center justify-between">
-                                <div className="text-xs text-slate-400 font-mono">
+                            <div className="p-3 bg-raised/50 mt-auto border-t border-line flex items-center justify-between">
+                                <div className="text-xs text-ink-3 font-mono">
                                     €{typeof player["Market value"] === 'number' ? (player["Market value"]/1000000).toFixed(1) + 'M' : '-'}
                                 </div>
                                 <button 
                                    onClick={() => onSelectPlayer(player)}
-                                   className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg transition-colors border border-slate-700"
+                                   className="text-xs bg-overlay hover:bg-line-strong text-ink-2 px-3 py-1.5 rounded-md transition-colors border border-line-strong"
                                 >
                                     Voir la fiche
                                 </button>

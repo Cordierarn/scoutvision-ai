@@ -1,7 +1,8 @@
 import React, { ReactNode, useState, useEffect } from 'react';
-import { LayoutDashboard, Users, Settings, LogOut, Search, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Calendar, Star, CalendarDays, FlaskConical } from 'lucide-react';
+import { Users, Settings, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Star, CalendarDays, FlaskConical, UserSearch, ChevronRight } from 'lucide-react';
 import { getWatchlist } from '../services/storageService';
 import { getSeasonLabel } from '../types';
+import { BrandMark } from './Media';
 
 interface LayoutProps {
   children: ReactNode;
@@ -16,6 +17,7 @@ interface LayoutProps {
 // Libellés du fil d'Ariane, par vue
 const VIEW_LABELS: Record<string, string> = {
   TEAM_ANALYSIS: 'Analyse d\'équipe',
+  RECRUITMENT: 'Recrutement',
   PROSPECTS: 'Chasseur de pépites',
   WATCHLIST: 'Liste de suivi',
   DASHBOARD: 'Base joueurs',
@@ -27,6 +29,42 @@ const VIEW_LABELS: Record<string, string> = {
   PLAYER_DETAIL: 'Fiche joueur',
 };
 
+interface NavItem { view: string; label: string; icon: React.ElementType; also?: string[] }
+
+// Navigation groupée par usage : joueurs, équipes, modèles, rapports
+const NAV: { group: string; items: NavItem[] }[] = [
+  {
+    group: 'Joueurs',
+    items: [
+      { view: 'DASHBOARD', label: 'Base joueurs', icon: Users, also: ['PLAYER_DETAIL'] },
+      { view: 'PROSPECTS', label: 'Chasseur de pépites', icon: Gem },
+      { view: 'COMPARISON', label: 'Comparaison', icon: ArrowLeftRight },
+      { view: 'SIMILARITY', label: 'Joueurs similaires', icon: GitCompare },
+      { view: 'WATCHLIST', label: 'Liste de suivi', icon: Star },
+    ],
+  },
+  {
+    group: 'Équipes',
+    items: [
+      { view: 'TEAM_ANALYSIS', label: 'Analyse d\'équipe', icon: TrendingUp },
+      { view: 'RECRUITMENT', label: 'Recrutement', icon: UserSearch },
+    ],
+  },
+  {
+    group: 'Modèles',
+    items: [
+      { view: 'FORECAST', label: 'Pronostics', icon: CalendarDays },
+      { view: 'LAB', label: 'Laboratoire', icon: FlaskConical },
+    ],
+  },
+  {
+    group: 'Rapports',
+    items: [
+      { view: 'SCOUT_REPORT', label: 'Rapports de scouting', icon: ClipboardList },
+    ],
+  },
+];
+
 const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, globalSeason, setGlobalSeason, seasonOptions = [], hasData }) => {
   const [watchlistCount, setWatchlistCount] = useState(0);
 
@@ -36,14 +74,14 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
       setWatchlistCount(getWatchlist().length);
     };
     updateCount();
-    
+
     // Listen for storage events to update count
     const handleStorage = () => updateCount();
     window.addEventListener('storage', handleStorage);
-    
+
     // Also check when switching views
     const interval = setInterval(updateCount, 2000);
-    
+
     return () => {
       window.removeEventListener('storage', handleStorage);
       clearInterval(interval);
@@ -51,145 +89,92 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
   }, [currentView]);
 
   return (
-    <div className="flex h-screen bg-slate-900 text-slate-100 overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-20 lg:w-64 bg-slate-950 border-r border-slate-800 flex flex-col transition-all duration-300">
-        <div className="h-16 flex items-center justify-center lg:justify-start lg:px-6 border-b border-slate-800">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center mr-0 lg:mr-3 shadow-lg shadow-emerald-500/20">
-            <Search className="text-slate-950 w-5 h-5" />
-          </div>
-          <span className="hidden lg:block font-bold text-xl tracking-tight">ScoutVision</span>
+    <div className="flex h-screen bg-canvas text-ink-2 overflow-hidden">
+      {/* Barre latérale : icônes seules sous 1024 px */}
+      <aside className="w-14 lg:w-56 shrink-0 bg-surface border-r border-line flex flex-col">
+        <div className="h-12 flex items-center justify-center lg:justify-start lg:px-4 gap-2.5 border-b border-line">
+          <BrandMark className="w-[18px] h-[22px] shrink-0" />
+          <span className="hidden lg:block text-[15px] font-semibold tracking-tight text-ink">
+            Scout<span className="text-accent">Vision</span>
+          </span>
         </div>
 
-        <nav className="flex-1 py-6 flex flex-col gap-2 px-3">
-          <button 
-             onClick={() => onNavigate('TEAM_ANALYSIS')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'TEAM_ANALYSIS' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <TrendingUp className="w-6 h-6" />
-            <span className="hidden lg:block">Analyse d'équipe</span>
-          </button>
-
-          <button 
-             onClick={() => onNavigate('PROSPECTS')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'PROSPECTS' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <Gem className="w-6 h-6" />
-            <span className="hidden lg:block">Chasseur de pépites</span>
-          </button>
-
-          <button 
-             onClick={() => onNavigate('WATCHLIST')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'WATCHLIST' ? 'bg-yellow-500/10 text-yellow-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <div className="relative">
-              <Star className="w-6 h-6" />
-              {watchlistCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 text-slate-950 text-[10px] font-bold rounded-full flex items-center justify-center">
-                  {watchlistCount > 9 ? '9+' : watchlistCount}
-                </span>
-              )}
+        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4" aria-label="Navigation principale">
+          {NAV.map(section => (
+            <div key={section.group}>
+              <div className="hidden lg:block px-2 mb-1 sv-label text-ink-4">{section.group}</div>
+              <div className="space-y-px">
+                {section.items.map(item => {
+                  const active = currentView === item.view || item.also?.includes(currentView);
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.view}
+                      onClick={() => onNavigate(item.view)}
+                      title={item.label}
+                      aria-current={active ? 'page' : undefined}
+                      className={`relative w-full flex items-center justify-center lg:justify-start gap-2.5 h-8 px-2 rounded-md text-[13px] transition-colors ${
+                        active ? 'bg-raised text-ink font-medium' : 'text-ink-3 hover:bg-raised/60 hover:text-ink'
+                      }`}
+                    >
+                      {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-accent" aria-hidden />}
+                      <span className="relative">
+                        <Icon className={`w-4 h-4 ${active ? 'text-accent' : ''}`} />
+                        {item.view === 'WATCHLIST' && watchlistCount > 0 && (
+                          <span className="lg:hidden absolute -top-1.5 -right-2 min-w-[14px] h-[14px] px-0.5 bg-warn text-accent-ink text-[9px] font-bold rounded-sm flex items-center justify-center">
+                            {watchlistCount > 9 ? '9+' : watchlistCount}
+                          </span>
+                        )}
+                      </span>
+                      <span className="hidden lg:block truncate">{item.label}</span>
+                      {item.view === 'WATCHLIST' && watchlistCount > 0 && (
+                        <span className="hidden lg:inline-flex ml-auto text-2xs num text-ink-3">{watchlistCount}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <span className="hidden lg:block">Liste de suivi</span>
-          </button>
-
-          <button 
-            onClick={() => onNavigate('DASHBOARD')}
-            className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'DASHBOARD' || currentView === 'PLAYER_DETAIL' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <Users className="w-6 h-6" />
-            <span className="hidden lg:block">Base joueurs</span>
-          </button>
-          
-          <button 
-             onClick={() => onNavigate('SCOUT_REPORT')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'SCOUT_REPORT' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <ClipboardList className="w-6 h-6" />
-            <span className="hidden lg:block">Rapports de scouting</span>
-          </button>
-          
-          <button 
-             onClick={() => onNavigate('SIMILARITY')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'SIMILARITY' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <GitCompare className="w-6 h-6" />
-            <span className="hidden lg:block">Joueurs similaires</span>
-          </button>
-
-          <button 
-             onClick={() => onNavigate('COMPARISON')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'COMPARISON' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <ArrowLeftRight className="w-6 h-6" />
-            <span className="hidden lg:block">Comparaison</span>
-          </button>
-
-          <button 
-             onClick={() => onNavigate('FORECAST')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'FORECAST' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <CalendarDays className="w-6 h-6" />
-            <span className="hidden lg:block">Pronostics</span>
-          </button>
-
-          <button
-             onClick={() => onNavigate('LAB')}
-             className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${currentView === 'LAB' ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-          >
-            <FlaskConical className="w-6 h-6" />
-            <span className="hidden lg:block">Laboratoire</span>
-          </button>
+          ))}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
-          <button className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-300 transition-colors w-full">
-            <Settings className="w-5 h-5" />
-            <span className="hidden lg:block text-sm">Paramètres</span>
+        <div className="p-2 border-t border-line">
+          <button className="w-full flex items-center justify-center lg:justify-start gap-2.5 h-8 px-2 rounded-md text-[13px] text-ink-4 hover:text-ink-2 hover:bg-raised/60 transition-colors" title="Paramètres">
+            <Settings className="w-4 h-4" />
+            <span className="hidden lg:block">Paramètres</span>
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-         {/* Top Header */}
-         <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 z-10">
-            <div className="text-sm breadcrumbs text-slate-400">
-              <span className="text-slate-500">ScoutVision</span> / <span className="text-slate-200 font-medium">{VIEW_LABELS[currentView] ?? currentView}</span>
-            </div>
-            
-            <div className="flex items-center gap-6">
-               
-               {/* Global Season Selector */}
-               {hasData && setGlobalSeason && (
-                   <div className="flex items-center gap-3 bg-slate-800 rounded-lg p-1 pr-3 border border-slate-700">
-                      <div className="bg-slate-700 p-1.5 rounded-md">
-                         <Calendar className="w-4 h-4 text-emerald-400" />
-                      </div>
-                      <select 
-                        value={globalSeason}
-                        onChange={(e) => setGlobalSeason(e.target.value)}
-                        className="bg-transparent border-none text-sm text-white font-medium focus:ring-0 cursor-pointer p-0"
-                      >
-                         {seasonOptions.map(season => (
-                           <option key={season} value={season}>
-                             {season === 'All' ? 'Toutes les saisons' : `Saison ${getSeasonLabel(season)}`}
-                           </option>
-                         ))}
-                      </select>
-                   </div>
-               )}
+      {/* Contenu */}
+      <main className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative">
+         <header className="h-12 shrink-0 bg-canvas border-b border-line flex items-center justify-between gap-4 px-5 z-10">
+            <nav className="flex items-center gap-1.5 text-[13px] min-w-0" aria-label="Fil d'Ariane">
+              <span className="text-ink-4">ScoutVision</span>
+              <ChevronRight className="w-3.5 h-3.5 text-ink-4 shrink-0" />
+              <span className="text-ink font-medium truncate">{VIEW_LABELS[currentView] ?? currentView}</span>
+            </nav>
 
-               <div className="flex items-center gap-4">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-emerald-400">
-                    JD
-                  </div>
-               </div>
-            </div>
+            {/* Saison analysée, partagée par toutes les vues */}
+            {hasData && setGlobalSeason && (
+              <label className="flex items-center gap-2 shrink-0">
+                <span className="sv-label hidden sm:inline">Saison</span>
+                <select
+                  value={globalSeason}
+                  onChange={(e) => setGlobalSeason(e.target.value)}
+                  className="sv-select sv-select-sm font-medium"
+                >
+                  {seasonOptions.map(season => (
+                    <option key={season} value={season}>
+                      {season === 'All' ? 'Toutes les saisons' : getSeasonLabel(season)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
          </header>
 
-         {/* Scrollable Content Area */}
-         <div className="flex-1 overflow-y-auto p-4 lg:p-0 scroll-smooth">
+         <div className="flex-1 overflow-y-auto">
            {children}
          </div>
       </main>

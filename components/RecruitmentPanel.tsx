@@ -144,9 +144,9 @@ function isSeasonInProgress(season: string | undefined): boolean {
 // ============================================
 
 const Card: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
-  <section className={`bg-slate-950 border border-slate-800 rounded-2xl p-5 ${className}`}>
-    <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{title}</h3>
-    {subtitle && <p className="text-xs text-slate-500 mt-1">{subtitle}</p>}
+  <section className={`bg-surface border border-line rounded-lg p-5 ${className}`}>
+    <h3 className="text-sm font-bold text-ink uppercase tracking-wider">{title}</h3>
+    {subtitle && <p className="text-xs text-ink-3 mt-1">{subtitle}</p>}
     <div className="mt-4">{children}</div>
   </section>
 );
@@ -154,7 +154,7 @@ const Card: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNode; class
 const NeedChip: React.FC<{ level: NeedLevel }> = ({ level }) => {
   const { label, icon: Icon } = NEED_LABELS[level];
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-[11px] font-semibold text-slate-200 whitespace-nowrap">
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-line-strong bg-raised text-[11px] font-semibold text-ink whitespace-nowrap">
       <Icon className="w-3.5 h-3.5" style={{ color: STATUS[level] }} aria-hidden />
       {label}
     </span>
@@ -162,14 +162,14 @@ const NeedChip: React.FC<{ level: NeedLevel }> = ({ level }) => {
 };
 
 const FlagChip: React.FC<{ label: string; title: string; icon: React.ElementType }> = ({ label, title, icon: Icon }) => (
-  <span title={title} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-700/70 text-[10px] text-slate-300 whitespace-nowrap">
-    <Icon className="w-3 h-3 text-slate-400" aria-hidden />
+  <span title={title} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-line-strong/70 text-[10px] text-ink-2 whitespace-nowrap">
+    <Icon className="w-3 h-3 text-ink-3" aria-hidden />
     {label}
   </span>
 );
 
 const Avatar: React.FC<{ player?: PlayerData; name: string; size?: string }> = ({ player, name, size = 'w-9 h-9' }) => (
-  <div className={`relative overflow-hidden ${size} rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0`}>
+  <div className={`relative overflow-hidden ${size} rounded-full bg-overlay flex items-center justify-center text-[10px] font-bold text-ink-3 shrink-0`}>
     {name.substring(0, 2).toUpperCase()}
     <PhotoOverlay src={player?.Image} alt={name} />
   </div>
@@ -186,15 +186,15 @@ const NeedRow: React.FC<{ need: SlotNeed; matches: number; selected: boolean; on
     <button
       onClick={onSelect}
       aria-pressed={selected}
-      className={`w-full text-left grid grid-cols-[6.5rem_2.5rem_1fr_auto] items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${selected ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-transparent hover:bg-slate-900'}`}
+      className={`w-full text-left grid grid-cols-[6.5rem_2.5rem_1fr_auto] items-center gap-3 px-3 py-2.5 rounded-md border transition-colors ${selected ? 'border-accent/50 bg-accent/5' : 'border-transparent hover:bg-raised'}`}
     >
       <NeedChip level={need.level} />
-      <span className="text-xs font-bold text-slate-400 text-center">{positionLabel(need.position)}</span>
+      <span className="text-xs font-bold text-ink-3 text-center">{positionLabel(need.position)}</span>
       <span className="flex items-center gap-2.5 min-w-0">
         <Avatar player={need.starter} name={name} size="w-8 h-8" />
         <span className="min-w-0">
-          <span className="block text-sm text-white font-medium truncate">{name}</span>
-          <span className="block text-[11px] text-slate-500 truncate">
+          <span className="block text-sm text-ink font-medium truncate">{name}</span>
+          <span className="block text-[11px] text-ink-3 truncate">
             {need.presetName ?? positionName(need.position)}
             {need.flags.length > 0 && ' · '}
             {need.flags.map(f => NEED_FLAGS[f].label).join(' · ')}
@@ -205,13 +205,13 @@ const NeedRow: React.FC<{ need: SlotNeed; matches: number; selected: boolean; on
       <span className="text-right">
         {need.forecast ? (
           <>
-            <span className="block text-sm font-mono text-slate-200 tabular-nums">
-              {round(need.forecast.now)} <span className="text-slate-500">→</span> {round(need.forecast.next)}
+            <span className="block text-sm font-mono text-ink tabular-nums">
+              {round(need.forecast.now)} <span className="text-ink-3">→</span> {round(need.forecast.next)}
             </span>
-            <span className="block text-[11px] text-slate-500">{ordinal(need.rank ?? 50)} percentile</span>
+            <span className="block text-[11px] text-ink-3">{ordinal(need.rank ?? 50)} percentile</span>
           </>
         ) : (
-          <span className="text-[11px] text-slate-500">non mesurable</span>
+          <span className="text-[11px] text-ink-3">non mesurable</span>
         )}
       </span>
     </button>
@@ -223,15 +223,15 @@ const DivergingRow: React.FC<{ label: string; rank: number; detail: string }> = 
   const width = Math.abs(rank - 50);
   return (
     <div className="grid grid-cols-[7.5rem_1fr_3rem] items-center gap-3" title={detail}>
-      <span className="text-xs text-slate-300 truncate">{label}</span>
+      <span className="text-xs text-ink-2 truncate">{label}</span>
       <div className="relative h-2.5">
-        <div className="absolute inset-y-0 left-1/2 w-px bg-slate-600" />
+        <div className="absolute inset-y-0 left-1/2 w-px bg-ink-4" />
         <div
           className={`absolute inset-y-0 ${above ? 'left-1/2 rounded-r' : 'right-1/2 rounded-l'}`}
           style={{ width: `${width}%`, backgroundColor: above ? BLUE : RED }}
         />
       </div>
-      <span className="text-xs font-mono text-slate-300 text-right tabular-nums">{ordinal(rank)}</span>
+      <span className="text-xs font-mono text-ink-2 text-right tabular-nums">{ordinal(rank)}</span>
     </div>
   );
 };
@@ -272,11 +272,11 @@ const CandidateScatter: React.FC<{ candidates: Candidate[]; baseline?: number; b
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-slate-400 mb-2">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-ink-3 mb-2">
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BLUE }} /> Meilleur rapport qualité-prix (personne n'est meilleur pour moins cher)</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> Autres candidats</span>
         {baseline !== undefined && (
-          <span className="inline-flex items-center gap-1.5"><span className="w-4 h-px bg-slate-400" /> {baselineName ?? 'Titulaire'}, projeté</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-4 h-px bg-ink-3" /> {baselineName ?? 'Titulaire'}, projeté</span>
         )}
       </div>
       <div className="h-72">
@@ -300,10 +300,10 @@ const CandidateScatter: React.FC<{ candidates: Candidate[]; baseline?: number; b
                 const p = payload?.[0]?.payload as ScatterPoint | undefined;
                 if (!p) return null;
                 return (
-                  <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs">
-                    <div className="text-white font-bold text-sm">{round(p.y)}</div>
-                    <div className="text-slate-300">{p.name}</div>
-                    <div className="text-slate-500">{p.team} · {formatEuros(p.x * 1e6)}</div>
+                  <div className="bg-raised border border-line-strong rounded-md px-3 py-2 text-xs">
+                    <div className="text-ink font-bold text-sm">{round(p.y)}</div>
+                    <div className="text-ink-2">{p.name}</div>
+                    <div className="text-ink-3">{p.team} · {formatEuros(p.x * 1e6)}</div>
                   </div>
                 );
               }}
@@ -322,7 +322,7 @@ const CandidateScatter: React.FC<{ candidates: Candidate[]; baseline?: number; b
         </ResponsiveContainer>
       </div>
       {unpriced > 0 && (
-        <p className="text-[11px] text-slate-500 mt-1">{unpriced} candidat{unpriced > 1 ? 's' : ''} sans valeur Transfermarkt connue, absent{unpriced > 1 ? 's' : ''} du graphique (présent{unpriced > 1 ? 's' : ''} dans la liste).</p>
+        <p className="text-[11px] text-ink-3 mt-1">{unpriced} candidat{unpriced > 1 ? 's' : ''} sans valeur Transfermarkt connue, absent{unpriced > 1 ? 's' : ''} du graphique (présent{unpriced > 1 ? 's' : ''} dans la liste).</p>
       )}
     </div>
   );
@@ -352,7 +352,7 @@ const MetricDumbbells: React.FC<{ candidate: Candidate; preset: RolePreset; extr
   const good = (v: number | undefined, w: number) => (v === undefined ? undefined : w < 0 ? 100 - v : v);
   return (
     <div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 mb-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-3 mb-2">
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BLUE }} /> {candidate.player.Player}, projeté chez nous</span>
         {incumbent && <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> {incumbentName}, projeté</span>}
       </div>
@@ -362,25 +362,25 @@ const MetricDumbbells: React.FC<{ candidate: Candidate; preset: RolePreset; extr
           const i = good(incumbent?.metrics[metric]?.next, w);
           return (
             <div key={metric} className="grid grid-cols-[11rem_1fr_4.5rem] items-center gap-3 text-[11px]">
-              <span className="text-slate-300 truncate" title={metric}>
-                {metricLabel(metric)}{w < 0 && <span className="text-slate-500"> (inversé)</span>}
+              <span className="text-ink-2 truncate" title={metric}>
+                {metricLabel(metric)}{w < 0 && <span className="text-ink-3"> (inversé)</span>}
               </span>
               <div className="relative h-3">
-                <div className="absolute top-1/2 inset-x-0 h-px bg-slate-800" />
+                <div className="absolute top-1/2 inset-x-0 h-px bg-overlay" />
                 {c !== undefined && i !== undefined && (
-                  <div className="absolute top-1/2 h-px bg-slate-500" style={{ left: `${Math.min(c, i)}%`, width: `${Math.abs(c - i)}%` }} />
+                  <div className="absolute top-1/2 h-px bg-ink-4" style={{ left: `${Math.min(c, i)}%`, width: `${Math.abs(c - i)}%` }} />
                 )}
-                {i !== undefined && <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-slate-950" style={{ left: `${i}%`, backgroundColor: CONTEXT }} />}
-                {c !== undefined && <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-slate-950" style={{ left: `${c}%`, backgroundColor: BLUE }} />}
+                {i !== undefined && <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-surface" style={{ left: `${i}%`, backgroundColor: CONTEXT }} />}
+                {c !== undefined && <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-surface" style={{ left: `${c}%`, backgroundColor: BLUE }} />}
               </div>
-              <span className="text-right font-mono text-slate-400 tabular-nums">
+              <span className="text-right font-mono text-ink-3 tabular-nums">
                 {c === undefined ? '–' : round(c)}{incumbent && <> / {i === undefined ? '–' : round(i)}</>}
               </span>
             </div>
           );
         })}
       </div>
-      <p className="text-[10px] text-slate-500 mt-2">Percentiles projetés la saison prochaine dans l'équipe (0-100, à droite = mieux). « Inversé » : moins c'est mieux, l'échelle est retournée.</p>
+      <p className="text-[10px] text-ink-3 mt-2">Percentiles projetés la saison prochaine dans l'équipe (0-100, à droite = mieux). « Inversé » : moins c'est mieux, l'échelle est retournée.</p>
     </div>
   );
 };
@@ -395,12 +395,12 @@ const PartsLine: React.FC<{ candidate: Candidate }> = ({ candidate }) => {
     ['Adaptation', parts.adaptation, 'Coût moyen d\'un changement de championnat ou de club'],
   ];
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-      <span>Indice actuel <span className="font-mono text-slate-200">{round(candidate.forecast.now)}</span></span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-3">
+      <span>Indice actuel <span className="font-mono text-ink">{round(candidate.forecast.now)}</span></span>
       {items.map(([label, v, title]) => (
-        <span key={label} title={title}>{label} <span className="font-mono text-slate-200">{signed(v)}</span></span>
+        <span key={label} title={title}>{label} <span className="font-mono text-ink">{signed(v)}</span></span>
       ))}
-      <span>= projeté <span className="font-mono text-white font-bold">{round(candidate.forecast.next)}</span></span>
+      <span>= projeté <span className="font-mono text-ink font-bold">{round(candidate.forecast.next)}</span></span>
     </div>
   );
 };
@@ -590,18 +590,18 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
   // ============================================
 
   if (!team) {
-    return <div className="p-8 text-slate-500">Équipe introuvable dans les données chargées.</div>;
+    return <div className="p-8 text-ink-3">Équipe introuvable dans les données chargées.</div>;
   }
   if (team.missingLeague) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6">
+      <div className="flex flex-col items-center justify-center h-64 text-ink-3 text-center px-6">
         <UserSearch className="w-12 h-12 mb-3 opacity-20" />
         <p>{team.name} n'a pas de championnat couvert cette saison : le recrutement s'appuie sur le championnat de l'équipe.</p>
       </div>
     );
   }
   if (!models || market === undefined || lineups === undefined) {
-    return <div className="h-full min-h-[600px] bg-slate-900 animate-pulse" />;
+    return <div className="h-full min-h-[600px] bg-raised animate-pulse" />;
   }
 
   const levelGap = transfer ? (c: PlayerData) => leagueLevel(transfer, c.Competition, c['League tier']) : null;
@@ -615,8 +615,8 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
       <div className="flex flex-wrap items-center gap-4">
         <TeamLogo src={ready!.logo} name={ready!.name} size="lg" />
         <div className="min-w-0">
-          <h2 className="text-2xl font-bold text-white">Recrutement · {ready!.name}</h2>
-          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400 mt-1">
+          <h2 className="text-2xl font-bold text-ink">Recrutement · {ready!.name}</h2>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-ink-3 mt-1">
             <CompetitionBadge competition={ready!.competition} />
             <span>· saison {ready!.season} · projection pour la saison suivante</span>
           </div>
@@ -625,13 +625,13 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
 
       <div className="space-y-2">
         {ready!.fromCup && (
-          <p className="flex items-start gap-2 text-xs text-slate-400"><Info className="w-4 h-4 shrink-0 text-slate-500" /> Analyse faite sur le championnat de l'équipe ({ready!.leagueName}) : l'entrée choisie est une coupe d'Europe.</p>
+          <p className="flex items-start gap-2 text-xs text-ink-3"><Info className="w-4 h-4 shrink-0 text-ink-3" /> Analyse faite sur le championnat de l'équipe ({ready!.leagueName}) : l'entrée choisie est une coupe d'Europe.</p>
         )}
         {ready!.inProgress && (
-          <p className="flex items-start gap-2 text-xs text-slate-400"><Info className="w-4 h-4 shrink-0 text-slate-500" /> Saison en cours : les percentiles reposent sur peu de matchs (seuil de minutes abaissé à {IN_PROGRESS_MIN_MINUTES}) et les championnats en année civile ont plus de recul. Recoupez avec la saison précédente (sélecteur de saison en haut) avant de juger un joueur.</p>
+          <p className="flex items-start gap-2 text-xs text-ink-3"><Info className="w-4 h-4 shrink-0 text-ink-3" /> Saison en cours : les percentiles reposent sur peu de matchs (seuil de minutes abaissé à {IN_PROGRESS_MIN_MINUTES}) et les championnats en année civile ont plus de recul. Recoupez avec la saison précédente (sélecteur de saison en haut) avant de juger un joueur.</p>
         )}
         {!transfer && (
-          <p className="flex items-start gap-2 text-xs text-amber-300/90"><TriangleAlert className="w-4 h-4 shrink-0" /> Modèle de transfert absent (relancez scripts/prepare_data.py) : les candidats ne sont projetés qu'avec les courbes d'âge, sans tenir compte de leur championnat.</p>
+          <p className="flex items-start gap-2 text-xs text-warn"><TriangleAlert className="w-4 h-4 shrink-0" /> Modèle de transfert absent (relancez scripts/prepare_data.py) : les candidats ne sont projetés qu'avec les courbes d'âge, sans tenir compte de leur championnat.</p>
         )}
       </div>
 
@@ -649,9 +649,9 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                 <button
                   key={f.formation}
                   onClick={() => update({ formationIdx: idx, slot: null, role: null })}
-                  className={`px-3 py-1 rounded-full text-xs border ${idx === formationIdx ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-semibold' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                  className={`px-3 py-1 rounded-full text-xs border ${idx === formationIdx ? 'bg-accent/10 border-accent/40 text-accent font-semibold' : 'border-line-strong text-ink-3 hover:text-ink'}`}
                 >
-                  {f.formation} <span className="text-slate-500">· {f.matches}</span>
+                  {f.formation} <span className="text-ink-3">· {f.matches}</span>
                 </button>
               ))}
             </div>
@@ -674,7 +674,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                 <button
                   key={pos}
                   onClick={() => update({ manualPosition: pos, role: null })}
-                  className={`px-3 py-1.5 rounded-lg text-xs border ${state.manualPosition === pos ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-semibold' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                  className={`px-3 py-1.5 rounded-md text-xs border ${state.manualPosition === pos ? 'bg-accent/10 border-accent/40 text-accent font-semibold' : 'border-line-strong text-ink-3 hover:text-ink'}`}
                 >
                   {positionName(pos)}
                 </button>
@@ -682,7 +682,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
             </div>
           )}
           {needs.length > 0 && (
-            <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+            <p className="text-[11px] text-ink-3 mt-3 leading-relaxed">
               Prioritaire : titulaire projeté dans les 40 % les plus faibles du championnat. À évaluer : aucun joueur de ce poste n'a 40 % des minutes de l'équipe, le besoin n'est pas mesurable. À renforcer : entre 40 et 65 %, ou titulaire plus solide mais en fin de contrat, en déclin lié à l'âge, ou poste en rotation. Solide : au-delà.
             </p>
           )}
@@ -695,7 +695,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
           >
             {profile.length > 0 ? (
               <>
-                <div className="flex gap-4 text-[11px] text-slate-400 mb-3">
+                <div className="flex gap-4 text-[11px] text-ink-3 mb-3">
                   <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: BLUE }} /> Au-dessus de la médiane</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: RED }} /> En dessous</span>
                 </div>
@@ -706,15 +706,15 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                   ))}
                 </div>
               </>
-            ) : <p className="text-sm text-slate-500">Pas assez de données de joueurs.</p>}
+            ) : <p className="text-sm text-ink-3">Pas assez de données de joueurs.</p>}
           </Card>
           {output.length > 0 && (
             <div className="grid grid-cols-2 gap-3">
               {output.map(o => (
-                <div key={o.label} className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                  <div className="text-[11px] text-slate-500">{o.label}</div>
-                  <div className="text-lg font-semibold text-white">{o.value}</div>
-                  <div className="text-[11px] text-slate-400">{ordinal(o.rank)} percentile du championnat</div>
+                <div key={o.label} className="bg-surface border border-line rounded-md p-3">
+                  <div className="text-[11px] text-ink-3">{o.label}</div>
+                  <div className="text-lg font-semibold text-ink">{o.value}</div>
+                  <div className="text-[11px] text-ink-3">{ordinal(o.rank)} percentile du championnat</div>
                 </div>
               ))}
             </div>
@@ -725,14 +725,14 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
       {/* Profil recherché */}
       {preset && position && (
         <Card
-          title={<span className="flex items-center gap-2"><UserSearch className="w-4 h-4 text-emerald-400" /> Profil recherché · {positionName(position)}</span>}
+          title={<span className="flex items-center gap-2"><UserSearch className="w-4 h-4 text-accent" /> Profil recherché · {positionName(position)}</span>}
           subtitle={need?.starter && incumbent
             ? `Comparé au titulaire, ${need.starter.Player}, projeté dans le même rôle la saison prochaine (indice ${round(incumbent.next)}).`
             : 'Pas de titulaire régulier noté à ce poste : les candidats sont classés par indice projeté.'}
         >
           <div className="space-y-4">
             <div>
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Rôle</div>
+              <div className="text-[11px] text-ink-3 uppercase tracking-wider mb-2">Rôle</div>
               <div className="flex flex-wrap gap-2">
                 {roleOptions.map(([name, p]) => {
                   const own = need?.starter && models ? forecastRole(need.starter, p, models) : undefined;
@@ -741,25 +741,25 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                       key={name}
                       onClick={() => update({ role: name })}
                       title={p.description}
-                      className={`px-3 py-1.5 rounded-lg text-xs border ${name === roleName ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-semibold' : 'border-slate-700 text-slate-300 hover:text-white'}`}
+                      className={`px-3 py-1.5 rounded-md text-xs border ${name === roleName ? 'bg-accent/10 border-accent/40 text-accent font-semibold' : 'border-line-strong text-ink-2 hover:text-ink'}`}
                     >
-                      {name}{own && <span className="text-slate-500 font-mono"> · {round(own.now)}</span>}
+                      {name}{own && <span className="text-ink-3 font-mono"> · {round(own.now)}</span>}
                     </button>
                   );
                 })}
               </div>
-              {preset.description && <p className="text-xs text-slate-400 mt-2">{preset.description}</p>}
+              {preset.description && <p className="text-xs text-ink-3 mt-2">{preset.description}</p>}
             </div>
 
             {partner?.starter && (
               <div>
                 <div className="flex items-center justify-between gap-3 mb-2">
-                  <span className="text-[11px] text-slate-500 uppercase tracking-wider">
+                  <span className="text-[11px] text-ink-3 uppercase tracking-wider">
                     Complémentarité avec {partner.starter.Player} ({positionName(partner.position)})
                   </span>
                   {complements.length > 0 && (
-                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                      <input type="checkbox" className="accent-emerald-500" checked={state.useComplements}
+                    <label className="flex items-center gap-2 text-xs text-ink-2 cursor-pointer">
+                      <input type="checkbox" className="accent-accent" checked={state.useComplements}
                         onChange={e => update({ useComplements: e.target.checked })} />
                       En tenir compte
                     </label>
@@ -768,80 +768,80 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                 {complements.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {complements.map(c => (
-                      <span key={c.metric} className={`px-2 py-1 rounded-lg border text-xs ${state.useComplements ? 'border-slate-600 text-slate-200' : 'border-slate-800 text-slate-500'}`}>
-                        {metricLabel(c.metric)} <span className="font-mono text-slate-500">· {ordinal(c.value)} pct</span>
+                      <span key={c.metric} className={`px-2 py-1 rounded-md border text-xs ${state.useComplements ? 'border-line-strong text-ink' : 'border-line text-ink-3'}`}>
+                        {metricLabel(c.metric)} <span className="font-mono text-ink-3">· {ordinal(c.value)} pct</span>
                       </span>
                     ))}
-                    <span className="text-[11px] text-slate-500 self-center">Ses points faibles comptent en plus dans l'indice du candidat.</span>
+                    <span className="text-[11px] text-ink-3 self-center">Ses points faibles comptent en plus dans l'indice du candidat.</span>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500">Aucun point faible marqué (sous le {COMPLEMENT_THRESHOLD}e percentile) sur les métriques du poste.</p>
+                  <p className="text-xs text-ink-3">Aucun point faible marqué (sous le {COMPLEMENT_THRESHOLD}e percentile) sur les métriques du poste.</p>
                 )}
               </div>
             )}
 
             {/* Filtres : une rangée au-dessus des résultats */}
-            <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-800">
-              <SlidersHorizontal className="w-4 h-4 text-slate-500 mb-2" aria-hidden />
-              <label className="text-[11px] text-slate-500">
+            <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-line">
+              <SlidersHorizontal className="w-4 h-4 text-ink-3 mb-2" aria-hidden />
+              <label className="text-[11px] text-ink-3">
                 Âge
                 <span className="flex items-center gap-1 mt-1">
                   <input type="number" min={AGE_RANGE[0]} max={AGE_RANGE[1]} value={state.filters.minAge}
                     onChange={e => updateFilters({ minAge: Number(e.target.value) || AGE_RANGE[0] })}
-                    className="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" aria-label="Âge minimum" />
-                  <span className="text-slate-600">–</span>
+                    className="w-14 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink" aria-label="Âge minimum" />
+                  <span className="text-ink-4">–</span>
                   <input type="number" min={AGE_RANGE[0]} max={AGE_RANGE[1]} value={state.filters.maxAge}
                     onChange={e => updateFilters({ maxAge: Number(e.target.value) || AGE_RANGE[1] })}
-                    className="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" aria-label="Âge maximum" />
+                    className="w-14 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink" aria-label="Âge maximum" />
                 </span>
               </label>
-              {market && <label className="text-[11px] text-slate-500">
+              {market && <label className="text-[11px] text-ink-3">
                 Valeur max (M€)
                 <input type="number" min={0} step={0.5} placeholder="sans limite"
                   value={state.filters.maxValue === undefined ? '' : state.filters.maxValue / 1e6}
                   onChange={e => updateFilters({ maxValue: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) * 1e6 })}
-                  className="block mt-1 w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200" />
+                  className="block mt-1 w-28 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink" />
               </label>}
               {market && state.filters.maxValue !== undefined && (
-                <label className="flex items-center gap-1.5 text-[11px] text-slate-400 pb-1.5">
-                  <input type="checkbox" className="accent-emerald-500" checked={state.filters.includeUnknownValue}
+                <label className="flex items-center gap-1.5 text-[11px] text-ink-3 pb-1.5">
+                  <input type="checkbox" className="accent-accent" checked={state.filters.includeUnknownValue}
                     onChange={e => updateFilters({ includeUnknownValue: e.target.checked })} />
                   garder les valeurs inconnues
                 </label>
               )}
-              <label className="text-[11px] text-slate-500">
+              <label className="text-[11px] text-ink-3">
                 Minutes min.
                 <select value={state.filters.minMinutes} onChange={e => updateFilters({ minMinutes: Number(e.target.value) })}
-                  className="block mt-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                   {[0, 450, 900, 1350, 1800, 2400].map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </label>
-              <label className="text-[11px] text-slate-500">
+              <label className="text-[11px] text-ink-3">
                 Contrat
                 <select value={state.filters.contractWithinMonths ?? ''}
                   onChange={e => updateFilters({ contractWithinMonths: e.target.value === '' ? undefined : Number(e.target.value) })}
-                  className="block mt-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                   <option value="">Tous</option>
                   <option value={6}>Fin ≤ 6 mois</option>
                   <option value={12}>Fin ≤ 12 mois</option>
                   <option value={24}>Fin ≤ 24 mois</option>
                 </select>
               </label>
-              <label className="text-[11px] text-slate-500">
+              <label className="text-[11px] text-ink-3">
                 Championnats
                 <select value={state.filters.leagues} onChange={e => updateFilters({ leagues: e.target.value as LeagueScope })}
-                  className="block mt-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                   {LEAGUE_SCOPES.filter(s => s.key !== 'lower' || transfer).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
-              <label className="text-[11px] text-slate-500">
+              <label className="text-[11px] text-ink-3">
                 Trier par
                 <select value={state.sort} onChange={e => update({ sort: e.target.value as SortKey })}
-                  className="block mt-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                   {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
-              {!fullAge && <span className="text-[10px] text-slate-500 pb-1.5">Âge inconnu : joueur écarté</span>}
+              {!fullAge && <span className="text-[10px] text-ink-3 pb-1.5">Âge inconnu : joueur écarté</span>}
             </div>
           </div>
         </Card>
@@ -854,7 +854,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
           subtitle={`${candidates.length} joueur${candidates.length > 1 ? 's' : ''} (40 au plus), classés par indice projeté dans l'équipe la saison prochaine${market ? ` · valeurs Transfermarkt au ${market.scrapedAt ?? '—'}` : ' · valeurs Transfermarkt indisponibles'}.`}
         >
           {candidates.length === 0 ? (
-            <p className="text-sm text-slate-500">Aucun joueur ne correspond aux filtres.</p>
+            <p className="text-sm text-ink-3">Aucun joueur ne correspond aux filtres.</p>
           ) : (
             <div className="space-y-6">
               <CandidateScatter
@@ -870,7 +870,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-[11px] text-slate-500 uppercase tracking-wider border-b border-slate-800">
+                    <tr className="text-[11px] text-ink-3 uppercase tracking-wider border-b border-line">
                       <th className="text-left font-semibold py-2 pr-3">Joueur</th>
                       <th className="text-right font-semibold py-2 px-3">Indice projeté</th>
                       <th className="text-right font-semibold py-2 px-3" title={`Rang parmi les joueurs de ${ready!.leagueName} éligibles au rôle`}>Rang</th>
@@ -888,35 +888,35 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                         <React.Fragment key={id}>
                           <tr
                             id={`candidate-${id}`}
-                            className={`border-b border-slate-800/60 cursor-pointer ${open ? 'bg-slate-900/70' : 'hover:bg-slate-900/40'}`}
+                            className={`border-b border-line/60 cursor-pointer ${open ? 'bg-raised/70' : 'hover:bg-raised/40'}`}
                             onClick={() => setExpanded(open ? null : id)}
                           >
                             <td className="py-2.5 pr-3">
                               <div className="flex items-center gap-3 min-w-[15rem]">
                                 <Avatar player={c.player} name={c.player.Player} />
                                 <div className="min-w-0">
-                                  <div className="text-white font-medium truncate">
+                                  <div className="text-ink font-medium truncate">
                                     {c.player.Player}
-                                    <span className="text-slate-500 font-normal text-xs"> · {c.player.Age ?? '?'} ans · {positionLabel(c.player.Position)}</span>
+                                    <span className="text-ink-3 font-normal text-xs"> · {c.player.Age ?? '?'} ans · {positionLabel(c.player.Position)}</span>
                                   </div>
-                                  <TeamLine player={c.player} className="text-xs text-slate-400 max-w-[16rem]" />
+                                  <TeamLine player={c.player} className="text-xs text-ink-3 max-w-[16rem]" />
                                 </div>
                               </div>
                             </td>
                             <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                              <span className="text-lg font-semibold text-white">{round(c.forecast.next)}</span>
+                              <span className="text-lg font-semibold text-ink">{round(c.forecast.next)}</span>
                               {c.gain !== undefined && (
-                                <span className="block text-[11px] text-slate-400">{signed(c.gain)} vs titulaire</span>
+                                <span className="block text-[11px] text-ink-3">{signed(c.gain)} vs titulaire</span>
                               )}
                             </td>
-                            <td className="py-2.5 px-3 text-right text-xs text-slate-300 whitespace-nowrap tabular-nums">{ordinal(c.rank)}</td>
-                            <td className="py-2.5 px-3 text-right text-xs text-slate-400 whitespace-nowrap tabular-nums">{c.thresholds.met}/{c.thresholds.total}</td>
+                            <td className="py-2.5 px-3 text-right text-xs text-ink-2 whitespace-nowrap tabular-nums">{ordinal(c.rank)}</td>
+                            <td className="py-2.5 px-3 text-right text-xs text-ink-3 whitespace-nowrap tabular-nums">{c.thresholds.met}/{c.thresholds.total}</td>
                             <td className="py-2.5 px-3 text-xs whitespace-nowrap">
-                              <span className="text-slate-200">{formatEuros(c.market?.value)}</span>
+                              <span className="text-ink">{formatEuros(c.market?.value)}</span>
                               {c.market?.estimated !== undefined && (
-                                <span className="text-slate-500" title="Valeur estimée par la performance (modèle, saison actuelle)"> · est. {formatEuros(c.market.estimated)}</span>
+                                <span className="text-ink-3" title="Valeur estimée par la performance (modèle, saison actuelle)"> · est. {formatEuros(c.market.estimated)}</span>
                               )}
-                              <span className="block text-slate-500">contrat {formatMonth(c.market?.contract)}</span>
+                              <span className="block text-ink-3">contrat {formatMonth(c.market?.contract)}</span>
                             </td>
                             <td className="py-2.5 px-3">
                               <div className="flex flex-wrap gap-1 min-w-[12rem] max-w-[22rem]">
@@ -927,32 +927,32 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                                 ))}
                               </div>
                             </td>
-                            <td className="py-2.5 pl-3 text-slate-500">
+                            <td className="py-2.5 pl-3 text-ink-3">
                               {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                             </td>
                           </tr>
                           {open && (
-                            <tr className="bg-slate-900/70 border-b border-slate-800">
+                            <tr className="bg-raised/70 border-b border-line">
                               <td colSpan={7} className="px-4 pb-5 pt-2">
                                 <div className="grid grid-cols-1 lg:grid-cols-[1fr_16rem] gap-6">
                                   <div className="space-y-3">
                                     <PartsLine candidate={c} />
                                     <MetricDumbbells candidate={c} preset={preset} extraWeights={extraWeights} incumbent={incumbent} incumbentName={incumbentName} />
                                   </div>
-                                  <div className="space-y-2 text-xs text-slate-400">
-                                    <div>Minutes : <span className="text-slate-200">{c.player['Minutes played']}</span> ({c.player['Matches played']} matchs)</div>
+                                  <div className="space-y-2 text-xs text-ink-3">
+                                    <div>Minutes : <span className="text-ink">{c.player['Minutes played']}</span> ({c.player['Matches played']} matchs)</div>
                                     {levelGap && c.player.Competition !== ready!.competition && (
                                       <div>
                                         Écart de niveau moyen vers {ready!.leagueName} :{' '}
-                                        <span className="text-slate-200 font-mono">{signed(levelGap(c.player) - leagueLevel(transfer!, ready!.competition, ready!.tier))}</span> pts de percentile
+                                        <span className="text-ink font-mono">{signed(levelGap(c.player) - leagueLevel(transfer!, ready!.competition, ready!.tier))}</span> pts de percentile
                                         {' '}({transfer!.leagues[c.player.Competition ?? '']?.moves ?? 0} transferts observés)
                                       </div>
                                     )}
-                                    {c.player['Team style'] && <div>Style de son équipe : <span className="text-slate-200">{String(c.player['Team style'])}</span></div>}
+                                    {c.player['Team style'] && <div>Style de son équipe : <span className="text-ink">{String(c.player['Team style'])}</span></div>}
                                     {onSelectPlayer && (
                                       <button
                                         onClick={e => { e.stopPropagation(); onSelectPlayer(c.player); }}
-                                        className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-900 font-semibold hover:bg-emerald-400"
+                                        className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-accent-ink font-semibold hover:bg-accent-strong"
                                       >
                                         Fiche du joueur <ExternalLink className="w-3.5 h-3.5" />
                                       </button>
@@ -974,16 +974,16 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
       )}
 
       {/* Méthode */}
-      <section className="bg-slate-950 border border-slate-800 rounded-2xl">
+      <section className="bg-surface border border-line rounded-lg">
         <button onClick={() => setShowMethod(v => !v)} className="w-full flex items-center justify-between px-5 py-4 text-left" aria-expanded={showMethod}>
-          <span className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2"><Info className="w-4 h-4 text-slate-500" /> Méthode et fiabilité</span>
-          {showMethod ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
+          <span className="text-sm font-bold text-ink uppercase tracking-wider flex items-center gap-2"><Info className="w-4 h-4 text-ink-3" /> Méthode et fiabilité</span>
+          {showMethod ? <ChevronDown className="w-4 h-4 text-ink-3" /> : <ChevronRight className="w-4 h-4 text-ink-3" />}
         </button>
         {showMethod && (
-          <div className="px-5 pb-5 grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs text-slate-400 leading-relaxed">
+          <div className="px-5 pb-5 grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs text-ink-3 leading-relaxed">
             <div className="space-y-3">
               <p>
-                <span className="text-slate-200 font-semibold">Projection.</span> Chaque percentile d'un candidat est projeté à la saison
+                <span className="text-ink font-semibold">Projection.</span> Chaque percentile d'un candidat est projeté à la saison
                 suivante (retour vers la moyenne et âge, courbes d'âge), puis traduit vers notre équipe : écart de niveau entre les
                 championnats, domination territoriale de notre équipe par rapport à la sienne, coût moyen d'adaptation d'un changement
                 de championnat ou de club. L'indice du rôle (rôles du Chasseur de pépites) est recalculé sur ces percentiles projetés,
@@ -991,14 +991,14 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
               </p>
               {transfer && (
                 <p>
-                  <span className="text-slate-200 font-semibold">Calibrage.</span> {transfer.pairs.toLocaleString('fr-FR')} paires de saisons
+                  <span className="text-ink font-semibold">Calibrage.</span> {transfer.pairs.toLocaleString('fr-FR')} paires de saisons
                   consécutives au même poste, dont {transfer.movers.toLocaleString('fr-FR')} changements de championnat et{' '}
                   {transfer.clubChanges.toLocaleString('fr-FR')} changements de club dans un même championnat.
                 </p>
               )}
               {validation?.index && (
                 <p>
-                  <span className="text-slate-200 font-semibold">Validation hors échantillon</span> (saison {validation.season}, absente de
+                  <span className="text-ink font-semibold">Validation hors échantillon</span> (saison {validation.season}, absente de
                   l'ajustement, {validation.movers} changements de championnat) : erreur moyenne de l'indice de rôle{' '}
                   {decimal(validation.index.movers.model)} points, contre {decimal(validation.index.movers.persistence)} en reprenant
                   l'indice actuel et {decimal(validation.index.movers.development)} avec les seules courbes d'âge ; corrélation de rang avec
@@ -1008,32 +1008,32 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                 </p>
               )}
               <p>
-                <span className="text-slate-200 font-semibold">Limites.</span> Un percentile varie beaucoup d'une saison à l'autre : la
+                <span className="text-ink font-semibold">Limites.</span> Un percentile varie beaucoup d'une saison à l'autre : la
                 liste est un point de départ pour la vidéo et le scouting, pas un verdict. Les joueurs qui changent de club sont
                 sélectionnés (ceux qui ont convaincu), les coéquipiers, le système et la santé ne sont pas modélisés, et les valeurs
                 Transfermarkt sont une estimation du marché, pas un prix.
               </p>
               <p>
-                <span className="text-slate-200 font-semibold">Recherche</span> (release « recherche ») : transférabilité limitée de la
+                <span className="text-ink font-semibold">Recherche</span> (release « recherche ») : transférabilité limitée de la
                 performance et contexte d'équipe, recrutement multicritère sous budget (frontière qualité-prix), complémentarité au sein
                 d'une ligne, liste courte et décision humaine.
               </p>
             </div>
             {transfer && (
               <div>
-                <div className="text-slate-200 font-semibold mb-1">Traduction vers {ready!.leagueName}</div>
+                <div className="text-ink font-semibold mb-1">Traduction vers {ready!.leagueName}</div>
                 <p className="mb-3">
                   Écart moyen de percentile attendu pour un joueur qui rejoint {ready!.leagueName} depuis chaque championnat (moyenne des
                   métriques). Les percentiles PitchAPI sont calculés par niveau (1, 2, 3) : c'est une traduction, pas un classement de force.
                 </p>
                 <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1 max-h-72 overflow-y-auto pr-2">
-                  <span className="text-[10px] uppercase text-slate-500">Championnat</span>
-                  <span className="text-[10px] uppercase text-slate-500 text-right">Écart</span>
-                  <span className="text-[10px] uppercase text-slate-500 text-right">Transferts</span>
+                  <span className="text-[10px] uppercase text-ink-3">Championnat</span>
+                  <span className="text-[10px] uppercase text-ink-3 text-right">Écart</span>
+                  <span className="text-[10px] uppercase text-ink-3 text-right">Transferts</span>
                   {Object.entries(transfer.leagues).map(([key, l]) => (
                     <React.Fragment key={key}>
-                      <span className={key === ready!.competition ? 'text-white' : ''}><CompetitionBadge competition={key} /></span>
-                      <span className="font-mono text-right text-slate-200 tabular-nums">{key === ready!.competition ? '—' : signed(l.level - leagueLevel(transfer, ready!.competition, ready!.tier))}</span>
+                      <span className={key === ready!.competition ? 'text-ink' : ''}><CompetitionBadge competition={key} /></span>
+                      <span className="font-mono text-right text-ink tabular-nums">{key === ready!.competition ? '—' : signed(l.level - leagueLevel(transfer, ready!.competition, ready!.tier))}</span>
                       <span className="font-mono text-right tabular-nums">{l.moves}</span>
                     </React.Fragment>
                   ))}

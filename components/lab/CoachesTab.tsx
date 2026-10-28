@@ -28,7 +28,7 @@ const StyleBar: React.FC<{ value: number }> = ({ value }) => {
   const above = value >= 0;
   return (
     <div className="relative h-2.5 flex-1">
-      <div className="absolute inset-y-0 left-1/2 w-px bg-slate-600" />
+      <div className="absolute inset-y-0 left-1/2 w-px bg-ink-4" />
       <div className={`absolute inset-y-0 ${above ? 'left-1/2 rounded-r' : 'right-1/2 rounded-l'}`}
         style={{ width: `${width}%`, backgroundColor: above ? DIVERGING.above : DIVERGING.below }} />
     </div>
@@ -48,7 +48,7 @@ const ChangeChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
   }, [cc]);
   return (
     <div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-400 mb-2">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-ink-3 mb-2">
         <span className="inline-flex items-center gap-1.5"><span className="w-4 h-0.5" style={{ backgroundColor: SERIES[0] }} /> Clubs qui changent d'entraîneur ({cc.changes})</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-4 h-0.5" style={{ backgroundColor: CONTEXT }} /> Clubs comparables qui gardent le leur</span>
       </div>
@@ -66,10 +66,10 @@ const ChangeChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                 if (!payload?.length) return null;
                 const p = payload[0].payload as { changers: number; controls: number };
                 return (
-                  <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs space-y-1">
-                    <div className="text-slate-400">Match {label}</div>
-                    <div className="flex items-center gap-2"><span className="w-3 h-0.5" style={{ backgroundColor: SERIES[0] }} /><span className="text-white font-semibold">{frNumber(p.changers, 3, true)}</span><span className="text-slate-500">qui changent</span></div>
-                    <div className="flex items-center gap-2"><span className="w-3 h-0.5" style={{ backgroundColor: CONTEXT }} /><span className="text-white font-semibold">{frNumber(p.controls, 3, true)}</span><span className="text-slate-500">témoins</span></div>
+                  <div className="bg-raised border border-line-strong rounded-md px-3 py-2 text-xs space-y-1">
+                    <div className="text-ink-3">Match {label}</div>
+                    <div className="flex items-center gap-2"><span className="w-3 h-0.5" style={{ backgroundColor: SERIES[0] }} /><span className="text-ink font-semibold">{frNumber(p.changers, 3, true)}</span><span className="text-ink-3">qui changent</span></div>
+                    <div className="flex items-center gap-2"><span className="w-3 h-0.5" style={{ backgroundColor: CONTEXT }} /><span className="text-ink font-semibold">{frNumber(p.controls, 3, true)}</span><span className="text-ink-3">témoins</span></div>
                   </div>
                 );
               }}
@@ -79,7 +79,7 @@ const ChangeChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-[11px] text-slate-500 mt-1">
+      <p className="text-[11px] text-ink-3 mt-1">
         xG différentiel par match, corrigé de l'adversaire et du terrain, moyenne glissante sur 3 matchs (avant et après séparément). Témoins : pour chaque
         changement, les 10 périodes de 20 matchs sans changement d'entraîneur (tous championnats) dont la forme des 10 matchs d'avant et le niveau plus
         ancien étaient les plus proches.
@@ -130,11 +130,11 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
       >
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_20rem] gap-6">
           <ChangeChart lab={lab} />
-          <div className="space-y-3 text-sm text-slate-400 leading-relaxed">
-            <p>Avant le changement, ces équipes sont en crise : <span className="text-white font-semibold">{frNumber(cc.prePerf, 2, true)}</span> xG par match sur 10 matchs, contre {frNumber(cc.otherPerf, 2, true)} pour les autres.</p>
-            <p>Après, elles remontent : <span className="text-white font-semibold">{frNumber(cc.naive, 3, true)}</span> xG et <span className="text-white font-semibold">{frNumber(cc.naivePoints, 2, true)}</span> point par match.</p>
-            <p>Mais le simple retour à la moyenne prévoyait déjà <span className="text-white font-semibold">{frNumber(cc.expectedRebound, 3, true)}</span> : l'effet propre du changement est de {frNumber(cc.effect, 3, true)} xG par match (IC 95 % [{frNumber(cc.effectCi[0], 3, true)} ; {frNumber(cc.effectCi[1], 3, true)}]), soit {frNumber(cc.effectPoints, 2, true)} point.</p>
-            <p className="text-xs text-slate-500">Réserve : si les dirigeants jugent le niveau réel d'une équipe mieux que ses 30 derniers matchs, cette mesure surestime l'effet du changement. Elle est pourtant nulle.</p>
+          <div className="space-y-3 text-sm text-ink-3 leading-relaxed">
+            <p>Avant le changement, ces équipes sont en crise : <span className="text-ink font-semibold">{frNumber(cc.prePerf, 2, true)}</span> xG par match sur 10 matchs, contre {frNumber(cc.otherPerf, 2, true)} pour les autres.</p>
+            <p>Après, elles remontent : <span className="text-ink font-semibold">{frNumber(cc.naive, 3, true)}</span> xG et <span className="text-ink font-semibold">{frNumber(cc.naivePoints, 2, true)}</span> point par match.</p>
+            <p>Mais le simple retour à la moyenne prévoyait déjà <span className="text-ink font-semibold">{frNumber(cc.expectedRebound, 3, true)}</span> : l'effet propre du changement est de {frNumber(cc.effect, 3, true)} xG par match (IC 95 % [{frNumber(cc.effectCi[0], 3, true)} ; {frNumber(cc.effectCi[1], 3, true)}]), soit {frNumber(cc.effectPoints, 2, true)} point.</p>
+            <p className="text-xs text-ink-3">Réserve : si les dirigeants jugent le niveau réel d'une équipe mieux que ses 30 derniers matchs, cette mesure surestime l'effet du changement. Elle est pourtant nulle.</p>
           </div>
         </div>
       </Panel>
@@ -148,7 +148,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           >
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
               <div>
-                <div className="flex gap-4 text-[11px] text-slate-400 mb-3">
+                <div className="flex gap-4 text-[11px] text-ink-3 mb-3">
                   <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: CONTEXT }} /> Style d'avant du club</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: SERIES[0] }} /> Style apporté par l'entraîneur</span>
                 </div>
@@ -157,19 +157,19 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                     const w = data.imprint[d];
                     return (
                       <div key={d} className="grid grid-cols-[9rem_1fr_6.5rem] items-center gap-3 text-xs">
-                        <span className="text-slate-300">{DIM_LABELS[d]?.label ?? d}</span>
+                        <span className="text-ink-2">{DIM_LABELS[d]?.label ?? d}</span>
                         <div className="space-y-1">
                           <div className="h-2 rounded-r" style={{ width: `${Math.max(0, w.club) * 100}%`, backgroundColor: CONTEXT }} />
                           <div className="h-2 rounded-r" style={{ width: `${Math.max(0, w.coach) * 100}%`, backgroundColor: SERIES[0] }} />
                         </div>
-                        <span className="text-right font-mono text-slate-400 tabular-nums" title={`IC 95 % du poids de l'entraîneur : [${frNumber(w.ci[0], 2)} ; ${frNumber(w.ci[1], 2)}]`}>
+                        <span className="text-right font-mono text-ink-3 tabular-nums" title={`IC 95 % du poids de l'entraîneur : [${frNumber(w.ci[0], 2)} ; ${frNumber(w.ci[1], 2)}]`}>
                           {frNumber(w.club, 2)} · {frNumber(w.coach, 2)}
                         </span>
                       </div>
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-slate-500 mt-3">
+                <p className="text-[11px] text-ink-3 mt-3">
                   Exemple : un entraîneur dont l'équipe pressait un écart-type plus haut que son championnat fait monter le pressing de son nouveau club d'environ {frNumber(data.imprint.pressing.coach, 2)} écart-type.
                   Ses résultats, eux, ne le suivent pas : r = {frNumber(res.r, 2)} entre deux clubs successifs (IC [{frNumber(res.ci[0], 2, true)} ; {frNumber(res.ci[1], 2, true)}]).
                 </p>
@@ -177,32 +177,32 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
 
               <div>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3" />
                   <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Chercher un entraîneur..."
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                    className="w-full bg-raised border border-line-strong rounded-md pl-9 pr-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
                   {matchesCoach.length > 0 && (
-                    <div className="absolute z-20 mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                    <div className="absolute z-20 mt-1 w-full bg-raised border border-line-strong rounded-md  overflow-hidden">
                       {matchesCoach.map(c => (
-                        <button key={c} onClick={() => { setCoach(c); setQuery(''); }} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-800">{c}</button>
+                        <button key={c} onClick={() => { setCoach(c); setQuery(''); }} className="w-full text-left px-3 py-2 text-sm text-ink-2 hover:bg-overlay">{c}</button>
                       ))}
                     </div>
                   )}
                 </div>
                 {selected && signature && (
                   <div className="mt-4">
-                    <div className="text-lg font-semibold text-white">{selected}</div>
+                    <div className="text-lg font-semibold text-ink">{selected}</div>
                     <div className="space-y-2 mt-3">
                       {data.dimensions.map(d => (
                         <div key={d} className="flex items-center gap-3 text-xs">
-                          <span className="w-36 text-slate-300">{DIM_LABELS[d]?.label ?? d}</span>
+                          <span className="w-36 text-ink-2">{DIM_LABELS[d]?.label ?? d}</span>
                           <StyleBar value={signature[d]} />
-                          <span className="w-12 text-right font-mono text-slate-400 tabular-nums">{frNumber(signature[d], 2, true)}</span>
+                          <span className="w-12 text-right font-mono text-ink-3 tabular-nums">{frNumber(signature[d], 2, true)}</span>
                         </div>
                       ))}
                     </div>
                     <table className="w-full text-xs mt-4">
                       <thead>
-                        <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                        <tr className="text-[10px] uppercase tracking-wider text-ink-3 border-b border-line">
                           <th className="text-left font-semibold py-1.5">Club</th>
                           <th className="text-left font-semibold py-1.5">Période</th>
                           <th className="text-right font-semibold py-1.5">Matchs</th>
@@ -211,16 +211,16 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                       </thead>
                       <tbody>
                         {spells.map(s => (
-                          <tr key={`${s.team_id}-${s.start}`} className="border-b border-slate-800/60">
-                            <td className="py-1.5"><span className="inline-flex items-center gap-1.5 text-slate-200">{s.team} <CompetitionBadge competition={s.comp} showName={false} /></span></td>
-                            <td className="py-1.5 text-slate-400">{s.start.slice(0, 7)} → {s.end.slice(0, 7)}</td>
-                            <td className="py-1.5 text-right text-slate-400 tabular-nums">{s.n}</td>
-                            <td className="py-1.5 text-right font-mono text-slate-300 tabular-nums">{frNumber(s.perf, 2, true)}</td>
+                          <tr key={`${s.team_id}-${s.start}`} className="border-b border-line/60">
+                            <td className="py-1.5"><span className="inline-flex items-center gap-1.5 text-ink">{s.team} <CompetitionBadge competition={s.comp} showName={false} /></span></td>
+                            <td className="py-1.5 text-ink-3">{s.start.slice(0, 7)} → {s.end.slice(0, 7)}</td>
+                            <td className="py-1.5 text-right text-ink-3 tabular-nums">{s.n}</td>
+                            <td className="py-1.5 text-right font-mono text-ink-2 tabular-nums">{frNumber(s.perf, 2, true)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <p className="text-[10px] text-slate-500 mt-2">Style : moyenne de ses périodes (matchs de championnat avec données avancées), pondérée par les matchs. À droite = plus que la moyenne de son championnat.</p>
+                    <p className="text-[10px] text-ink-3 mt-2">Style : moyenne de ses périodes (matchs de championnat avec données avancées), pondérée par les matchs. À droite = plus que la moyenne de son championnat.</p>
                   </div>
                 )}
               </div>
@@ -232,13 +232,13 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
             subtitle="Style attendu du club avec l'entraîneur choisi ci-dessus, d'après les poids mesurés sur les arrivées passées. Le style seulement : rien n'indique que les résultats suivent."
           >
             <div className="relative max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3" />
               <input value={teamQuery} onChange={e => setTeamQuery(e.target.value)} placeholder={team ? `Club : ${team.team}` : 'Chercher un club...'}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                className="w-full bg-raised border border-line-strong rounded-md pl-9 pr-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
               {matchesTeam.length > 0 && (
-                <div className="absolute z-20 mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                <div className="absolute z-20 mt-1 w-full bg-raised border border-line-strong rounded-md  overflow-hidden">
                   {matchesTeam.map(t => (
-                    <button key={t.team_id} onClick={() => { setTeamId(t.team_id); setTeamQuery(''); }} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+                    <button key={t.team_id} onClick={() => { setTeamId(t.team_id); setTeamQuery(''); }} className="w-full text-left px-3 py-2 text-sm text-ink-2 hover:bg-overlay flex items-center gap-2">
                       {t.team} <CompetitionBadge competition={t.comp} showName={false} />
                     </button>
                   ))}
@@ -247,11 +247,11 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
             </div>
             {team && current && predicted && (
               <div className="mt-5">
-                <div className="text-sm text-slate-400 mb-3">
-                  <span className="text-white font-semibold">{team.team}</span> sous {current.coach} ({current.start.slice(0, 7)} → {current.end.slice(0, 7)})
-                  {' '}avec <span className="text-white font-semibold">{selected}</span>
+                <div className="text-sm text-ink-3 mb-3">
+                  <span className="text-ink font-semibold">{team.team}</span> sous {current.coach} ({current.start.slice(0, 7)} → {current.end.slice(0, 7)})
+                  {' '}avec <span className="text-ink font-semibold">{selected}</span>
                 </div>
-                <div className="flex gap-5 text-[11px] text-slate-400 mb-3">
+                <div className="flex gap-5 text-[11px] text-ink-3 mb-3">
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> Style actuel</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SERIES[0] }} /> Style attendu avec {selected}</span>
                 </div>
@@ -261,20 +261,20 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                     const pos = (v: number) => `${50 + Math.max(-2, Math.min(2, v)) / 2 * 50}%`;
                     return (
                       <div key={d} className="grid grid-cols-[9rem_1fr_7rem] items-center gap-3 text-xs">
-                        <span className="text-slate-300">{DIM_LABELS[d]?.label ?? d}</span>
+                        <span className="text-ink-2">{DIM_LABELS[d]?.label ?? d}</span>
                         <div className="relative h-4">
-                          <div className="absolute top-1/2 inset-x-0 h-px bg-slate-800" />
-                          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-700" />
-                          <div className="absolute top-1/2 h-px bg-slate-500" style={{ left: `calc(${pos(Math.min(now, next))})`, width: `${Math.abs(next - now) / 4 * 100}%` }} />
-                          <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-slate-950" style={{ left: pos(now), backgroundColor: CONTEXT }} />
-                          <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-slate-950" style={{ left: pos(next), backgroundColor: SERIES[0] }} />
+                          <div className="absolute top-1/2 inset-x-0 h-px bg-overlay" />
+                          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-line-strong" />
+                          <div className="absolute top-1/2 h-px bg-ink-4" style={{ left: `calc(${pos(Math.min(now, next))})`, width: `${Math.abs(next - now) / 4 * 100}%` }} />
+                          <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-surface" style={{ left: pos(now), backgroundColor: CONTEXT }} />
+                          <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-surface" style={{ left: pos(next), backgroundColor: SERIES[0] }} />
                         </div>
-                        <span className="text-right font-mono text-slate-400 tabular-nums">{frNumber(now, 2, true)} → {frNumber(next, 2, true)}</span>
+                        <span className="text-right font-mono text-ink-3 tabular-nums">{frNumber(now, 2, true)} → {frNumber(next, 2, true)}</span>
                       </div>
                     );
                   })}
                 </div>
-                <p className="text-[10px] text-slate-500 mt-3">Écarts-types par rapport au championnat ; à droite = plus de possession, de domination, de pressing, de construction, de verticalité, un jeu plus haut.</p>
+                <p className="text-[10px] text-ink-3 mt-3">Écarts-types par rapport au championnat ; à droite = plus de possession, de domination, de pressing, de construction, de verticalité, un jeu plus haut.</p>
               </div>
             )}
           </Panel>

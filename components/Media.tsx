@@ -67,7 +67,7 @@ export const TeamLogo: React.FC<{
       alt={name}
       className={`${base} object-contain`}
       fallback={
-        <div className={`${base} flex items-center justify-center text-slate-500`} title={name}>
+        <div className={`${base} flex items-center justify-center text-ink-4`} title={name}>
           <Shield className="w-3/4 h-3/4" />
         </div>
       }
@@ -96,9 +96,9 @@ export const CountryFlag: React.FC<{
 };
 
 const CUP_COLORS: Record<string, string> = {
-  UCL: 'text-blue-400',
-  UEL: 'text-orange-400',
-  UECL: 'text-emerald-400',
+  UCL: 'text-ink-2',
+  UEL: 'text-ink-2',
+  UECL: 'text-ink-2',
 };
 
 /**
@@ -116,7 +116,7 @@ export const CompetitionBadge: React.FC<{
   return (
     <span className={`inline-flex items-center gap-1.5 min-w-0 ${className}`} title={name}>
       {isCup
-        ? <Trophy className={`w-3.5 h-3.5 shrink-0 ${CUP_COLORS[competition] ?? 'text-amber-400'}`} />
+        ? <Trophy className={`w-3.5 h-3.5 shrink-0 ${CUP_COLORS[competition] ?? 'text-ink-2'}`} />
         : <CountryFlag code={info?.country} className="w-4 h-3 shrink-0" />}
       {showName && <span className="truncate">{name}</span>}
     </span>
@@ -156,7 +156,51 @@ export const PhotoOverlay: React.FC<{
       loading="lazy"
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
-      className="absolute inset-0 w-full h-full object-cover object-top bg-slate-800"
+      className="absolute inset-0 w-full h-full object-cover object-top bg-raised"
     />
   );
 };
+
+const AVATAR_SIZES = {
+  xs: 'w-6 h-6 text-[9px]',
+  sm: 'w-7 h-7 text-[10px]',
+  md: 'w-9 h-9 text-xs',
+  lg: 'w-12 h-12 text-sm',
+  xl: 'w-[72px] h-[72px] text-xl',
+};
+
+/**
+ * Photo du joueur sur fond neutre, initiales en repli ; badge de saison facultatif
+ */
+export const PlayerAvatar: React.FC<{
+  player?: PlayerData;
+  name?: string;
+  size?: keyof typeof AVATAR_SIZES;
+  season?: string;              // libellé court affiché en badge (« 24-25 »)
+  className?: string;
+}> = ({ player, name, size = 'md', season, className = '' }) => {
+  const label = name ?? player?.Player ?? '?';
+  return (
+    <span className={`relative inline-block shrink-0 ${className}`}>
+      <span className={`relative overflow-hidden ${AVATAR_SIZES[size]} rounded-md bg-raised border border-line flex items-center justify-center font-semibold text-ink-3`}>
+        {label.substring(0, 2).toUpperCase()}
+        <PhotoOverlay src={player?.Image} alt={label} />
+      </span>
+      {season && (
+        <span className="absolute -bottom-1 -right-2 px-0.5 rounded-sm text-[8px] leading-[11px] font-semibold whitespace-nowrap bg-overlay text-ink-2 border border-line-strong">
+          {season}
+        </span>
+      )}
+    </span>
+  );
+};
+
+/**
+ * Marque ScoutVision (logo vectoriel, deux chevrons)
+ */
+export const BrandMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-6' }) => (
+  <svg viewBox="0 0 80 96" className={className} aria-hidden>
+    <polygon points="0,0 40,0 80,48 54,48 26,16 0,16" fill="#F8FAFC" />
+    <polygon points="80,96 40,96 0,48 26,48 54,80 80,80" fill="#00E5FF" />
+  </svg>
+);
