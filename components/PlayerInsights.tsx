@@ -75,7 +75,7 @@ export const ImpactPanel: React.FC<{ player: PlayerData }> = ({ player }) => {
                 </div>
               )}
             </>
-          ) : <Unavailable text="Indisponible : le RAPM couvre 2025-27 dans les championnats européens." />}
+          ) : <Unavailable text="Indisponible pour ce joueur : le RAPM ne couvre que les saisons récentes et les joueurs au temps de jeu suffisant." />}
         </Card>
 
         <Card icon={<Crosshair className="w-3.5 h-3.5" />} title="Talent de finition">
@@ -160,7 +160,7 @@ export const DevelopmentPanel: React.FC<{ player: PlayerData; metrics: string[] 
           <LineChart data={profile} margin={{ top: 18, right: 12, bottom: 0, left: -18 }}>
             <CartesianGrid {...gridProps} />
             <XAxis dataKey="age" {...axisProps} />
-            <YAxis {...axisProps} axisLine={false} />
+            <YAxis {...axisProps} axisLine={false} allowDecimals={false} />
             <ReferenceLine y={0} stroke={INK.axis} />
             <ReferenceLine x={Math.round(age)} stroke={INK.muted} strokeDasharray="3 3"
               label={{ value: `${Math.round(age)} ans`, fill: INK.secondary, fontSize: 11, position: 'top' }} />

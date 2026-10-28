@@ -20,6 +20,9 @@ const ShotPitch: React.FC<{ shots: ShotEvent[]; showPlayer?: boolean; className?
 }) => {
   const [hover, setHover] = useState<number | null>(null);
   const shot = hover !== null ? shots[hover] : undefined;
+  if (shots.length === 0) {
+    return <div className="rounded-md border border-dashed border-line px-4 py-6 text-center text-xs text-ink-4">{emptyText}</div>;
+  }
   return (
     <div className={`relative w-full aspect-[52.5/68] mx-auto bg-raised/60 rounded-md border border-line overflow-hidden ${className}`}>
       <svg viewBox={`${W / 2} 0 ${W / 2} ${H}`} className="absolute inset-0 w-full h-full" fill="none" stroke={LINE} strokeWidth="0.3"

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
 import { Star, Trash2, Eye, Download, Search, X, MessageSquare, Tag, Clock, Filter } from 'lucide-react';
 import { 
   getWatchlist, 
@@ -151,7 +151,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
                       <button onClick={() => onSelectPlayer(player)} className="flex items-center gap-2.5 text-left">
                         <PlayerAvatar player={player} size="sm" />
                         <span className="min-w-0">
-                          <span className="block text-[13px] font-medium text-ink hover:text-accent transition-colors">{player.Player}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span></span>
+                          <span className="block text-[13px] font-medium text-ink hover:text-accent transition-colors">{player.Player}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getPlayerSeasonTag(player)}</span></span>
                           <span className="block text-2xs text-ink-3 max-w-[14rem]"><TeamLine player={player} /></span>
                         </span>
                       </button>

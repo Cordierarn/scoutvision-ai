@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
 import { Search, X, Settings2, Plus, TrendingUp, Percent, Users, Trash2, ArrowLeftRight } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { queryService } from '../services/queryService';
@@ -88,10 +88,10 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
         // Normalize each player's value relative to the max in the entire dataset for that metric
         const max = Math.max(...data.map(d => Number(d[key]) || 0)) || 1;
 
-        selectedPlayers.forEach(p => {
+        selectedPlayers.forEach((p, idx) => {
              const val = Number(p[key]) || 0;
              // Store normalized value (0-100) for the Radar Chart
-             item[p.Player] = Math.round((val / max) * 100);
+             item[`p${idx}`] = Math.round((val / max) * 100);
         });
 
         return item;
@@ -139,7 +139,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="sv-tag">{positionLabel(player.Position)}</span>
                   <span className="sv-tag !font-normal">{player.Age ?? '?'} ans</span>
-                  <span className="sv-tag !font-normal">{getSeasonShortLabel(season)}</span>
+                  <span className="sv-tag !font-normal">{getPlayerSeasonTag(player)}</span>
                 </div>
               </div>
               <button onClick={() => removePlayer(idx)} className="sv-icon-btn self-start hover:!text-neg" title="Retirer">
@@ -175,7 +175,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                           <span className="block text-xs text-ink truncate">{p.Player || 'Inconnu'}</span>
                           <span className="block text-2xs text-ink-3 truncate"><TeamLine player={p} /></span>
                         </span>
-                        <span className="sv-tag">{getSeasonShortLabel(extractSeason(p.League))}</span>
+                        <span className="sv-tag">{getPlayerSeasonTag(p)}</span>
                       </button>
                     ))}
                     {searchTerm && searchResults.length === 0 && <div className="px-3 py-2 text-xs text-ink-4">Aucun résultat</div>}
@@ -222,7 +222,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                   <PolarAngleAxis dataKey="subject" tick={<PolarTick />} />
                   <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
                   {selectedPlayers.map((p, idx) => (
-                    <Radar key={getPlayerSeasonId(p)} name={p.Player} dataKey={p.Player}
+                    <Radar key={getPlayerSeasonId(p)} name={`${p.Player} · ${p.Team}`} dataKey={`p${idx}`}
                       stroke={SERIES[idx]} strokeWidth={2} fill={SERIES[idx]} fillOpacity={idx === 0 ? 0.12 : 0.05} isAnimationActive={false} />
                   ))}
                   <Tooltip {...tooltipProps} />
@@ -231,7 +231,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {selectedPlayers.map((p, idx) => (
-                <LegendItem key={getPlayerSeasonId(p)} color={SERIES[idx]} shape="line">{p.Player} · {getSeasonShortLabel(extractSeason(p.League))}</LegendItem>
+                <LegendItem key={getPlayerSeasonId(p)} color={SERIES[idx]} shape="line">{p.Player} · {p.Team} · {getPlayerSeasonTag(p)}</LegendItem>
               ))}
             </div>
           </Panel>
@@ -250,6 +250,7 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
                         <span className="inline-flex items-center gap-1.5 normal-case tracking-normal text-xs text-ink-2">
                           <span className="w-2 h-2 rounded-full" style={{ backgroundColor: SERIES[idx] }} />{lastName(p)}
                         </span>
+                        <span className="block normal-case tracking-normal font-normal text-2xs text-ink-4 truncate max-w-[9rem] ml-auto">{p.Team} · {getPlayerSeasonTag(p)}</span>
                       </th>
                     ))}
                     <th className="w-8 pr-4"><span className="sr-only">Retirer</span></th>

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
 import PlayerCard from './PlayerCard';
 import { Search, FileText, ArrowRight, TrendingUp, ClipboardList } from 'lucide-react';
 import { positionLabel } from '../utils/labels';
@@ -72,7 +72,7 @@ const ScoutReport: React.FC<ScoutReportProps> = ({ data }) => {
                       <span className="flex items-center gap-2.5">
                         <PlayerAvatar player={player} size="sm" />
                         <span className="min-w-0">
-                          <span className="block text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span></span>
+                          <span className="block text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getPlayerSeasonTag(player)}</span></span>
                           <span className="block text-2xs text-ink-3"><TeamLine player={player} /></span>
                         </span>
                       </span>

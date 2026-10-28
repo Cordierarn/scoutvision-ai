@@ -173,10 +173,10 @@ export const PercentileRow: React.FC<{
   percentile: number;
   title?: string;
 }> = ({ label, value, percentile, title }) => (
-  <div className="grid grid-cols-[minmax(0,1fr)_3.5rem_minmax(4rem,7rem)_2.75rem] items-center gap-2.5 h-6 text-xs" title={title}>
+  <div className="grid grid-cols-[minmax(0,1fr)_3rem_2.75rem] sm:grid-cols-[minmax(0,1fr)_3.5rem_minmax(4rem,7rem)_2.75rem] items-center gap-2 sm:gap-2.5 h-6 text-xs" title={title}>
     <span className="text-ink-2 truncate">{label}</span>
     <span className="text-right text-ink-3 num">{value}</span>
-    <PercentileBar value={percentile} />
+    <PercentileBar value={percentile} className="hidden sm:block" />
     <span className="text-right"><PercentileValue value={percentile} /></span>
   </div>
 );

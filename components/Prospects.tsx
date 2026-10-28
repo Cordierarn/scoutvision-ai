@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
 import { getAvailableLeagues } from '../utils/scoringUtils';
 import { RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, roleIndex } from '../utils/rolePresets';
 import { Filter, Gem, Sliders, ChevronRight, Trophy, Coins, TrendingUp, Eye, Minus, Plus, RefreshCw, AlertCircle, Save, Trash2, X, Check, Download, Star, Hand, Shield, MoveHorizontal, Anchor, Repeat, Wand2, Zap, Crosshair, Flag, Scale, Wrench } from 'lucide-react';
@@ -515,7 +515,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                         <div className="flex items-center gap-2.5">
                           <PlayerAvatar player={player} size="sm" />
                           <div className="min-w-0">
-                            <div className="text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}{multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span>}</div>
+                            <div className="text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}{multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getPlayerSeasonTag(player)}</span>}</div>
                             <div className="text-2xs text-ink-3 max-w-[14rem]"><TeamLine player={player} /></div>
                           </div>
                         </div>

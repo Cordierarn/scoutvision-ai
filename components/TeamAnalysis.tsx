@@ -10,6 +10,7 @@ import { getAvailableTeams } from '../utils/scoringUtils';
 import { Users, Shield, Target, Activity, BarChart3, Trophy, ChevronRight, Search, X, UserSearch } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { queryService } from '../services/queryService';
+import { dataLoader } from '../services/dataLoader';
 import { TeamLogo, CompetitionBadge, PlayerAvatar } from './Media';
 import ShotPitch, { ShotLegend } from './ShotPitch';
 import { EmptyState, LegendItem, Panel, PercentileLegend, PercentileRow, PercentileValue, PolarTick, Stat } from './ui';
@@ -56,7 +57,9 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
 
   // Filtered teams for search
   const filteredTeams = useMemo(() => {
-    return queryService.searchTeams(teamSearchTerm, 15);
+    // Championnat d'abord, coupes ensuite (ordre d'affichage seulement)
+    const isCup = (key: string) => (dataLoader.getCompetition(queryService.getTeamInfo(key).competition)?.type ?? 'league') !== 'league';
+    return [...queryService.searchTeams(teamSearchTerm, 15)].sort((a, b) => Number(isCup(a)) - Number(isCup(b)));
   }, [teamSearchTerm]);
 
   useEffect(() => {
@@ -161,7 +164,8 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
   const selectedTeamInfo = useMemo(() => {
       const first = selectedTeam ? queryService.getTeamPlayers(selectedTeam)[0] : undefined;
       return first
-        ? { name: first.Team, teamId: first['Team ID'], season: getPlayerSeason(first), competition: first.Competition }
+        ? { name: first.Team, teamId: first['Team ID'], season: getPlayerSeason(first), competition: first.Competition,
+            seasonLabel: /^\d{4}$/.test(String(first.Season ?? '')) ? String(first.Season) : getSeasonLabel(getPlayerSeason(first)) }
         : null;
   }, [selectedTeam]);
   const { shots: competitionShots } = useShots(selectedTeamInfo?.season, selectedTeamInfo?.competition);
@@ -274,7 +278,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                 <div className="text-base font-semibold text-ink truncate">{teamInfo.name}</div>
                 <div className="text-2xs text-ink-3 flex items-center gap-1.5">
                   <CompetitionBadge competition={teamInfo.competition} />
-                  {selectedTeamInfo && <span>· {getSeasonLabel(selectedTeamInfo.season)}</span>}
+                  {selectedTeamInfo && <span>· {selectedTeamInfo.seasonLabel}</span>}
                 </div>
               </div>
             </div>

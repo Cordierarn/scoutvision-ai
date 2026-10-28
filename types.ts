@@ -331,3 +331,12 @@ export interface MetricBounds {
   stdDev: number;
 }
 
+
+/**
+ * Saison affichée pour une ligne joueur : la saison réelle quand la compétition se joue
+ * en année civile (« 2026 »), sinon le libellé court (« 25-26 »)
+ */
+export function getPlayerSeasonTag(player: PlayerData): string {
+  const raw = String(player.Season ?? '');
+  return /^\d{4}$/.test(raw) ? raw : getSeasonShortLabel(getPlayerSeason(player));
+}

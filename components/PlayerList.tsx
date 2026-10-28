@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getPlayerSeasonTag } from '../types';
 import { Search, ChevronDown, ChevronUp, Eye, SlidersHorizontal, Plus, X, Download, Star } from 'lucide-react';
 import { exportToCSV } from '../utils/exportUtils';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
@@ -339,7 +339,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                     <div className="flex items-center gap-2.5 min-w-[13rem]">
                       <PlayerAvatar player={player} size="sm" />
                       <div className="min-w-0">
-                        <div className="text-[13px] font-medium text-ink truncate group-hover:text-accent transition-colors">{player.Player}{multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(season)}</span>}</div>
+                        <div className="text-[13px] font-medium text-ink truncate group-hover:text-accent transition-colors">{player.Player}{multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getPlayerSeasonTag(player)}</span>}</div>
                         {player['Passport country'] && (
                           <div className="flex items-center gap-1 text-2xs text-ink-4">
                             <CountryFlag code={String(player['Passport country'])} className="w-3 h-2" />

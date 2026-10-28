@@ -82,14 +82,20 @@ export const CountryFlag: React.FC<{
   code?: string;
   className?: string;
 }> = ({ code, className = 'w-5 h-3.5' }) => {
+  const [failed, setFailed] = useState(false);
   const url = getFlagUrl(code);
   if (!url) return null;
+  // Drapeau indisponible : le code pays reste lisible (distingue Serie A italienne et brésilienne)
+  if (failed) {
+    return <span title={code} className="inline-flex items-center h-3 px-0.5 rounded-sm border border-line-strong text-[8px] leading-none font-semibold text-ink-3 shrink-0">{code}</span>;
+  }
   return (
     <img
       src={url}
       alt={code}
       title={code}
       loading="lazy"
+      onError={() => setFailed(true)}
       className={`${className} inline-block object-cover rounded-[2px] shrink-0`}
     />
   );
@@ -180,10 +186,13 @@ export const PlayerAvatar: React.FC<{
   className?: string;
 }> = ({ player, name, size = 'md', season, className = '' }) => {
   const label = name ?? player?.Player ?? '?';
+  // Initiales : premier et dernier mot (« Santiago Beltrán » -> SB)
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  const initials = (words.length > 1 ? words[0][0] + words[words.length - 1][0] : label.slice(0, 2)).toUpperCase();
   return (
     <span className={`relative inline-block shrink-0 ${className}`}>
       <span className={`relative overflow-hidden ${AVATAR_SIZES[size]} rounded-md bg-raised border border-line flex items-center justify-center font-semibold text-ink-3`}>
-        {label.substring(0, 2).toUpperCase()}
+        {initials}
         <PhotoOverlay src={player?.Image} alt={label} />
       </span>
       {season && (

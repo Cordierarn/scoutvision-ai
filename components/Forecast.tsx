@@ -92,7 +92,7 @@ const LeverageBadge: React.FC<{ item?: { objective: string; delta: number }; sid
   if (!item || item.delta < 0.05) return null;
   return (
     <span title="Variation de la probabilité d'atteindre l'objectif entre une victoire et une défaite">
-      Enjeu {side} ({item.objective}) : <span className="text-ink-2 font-semibold">{Math.round(item.delta * 100)} pts</span>
+      Enjeu {side} · {item.objective} : <span className="text-ink-2 font-semibold">{Math.round(item.delta * 100)} pts</span>
     </span>
   );
 };

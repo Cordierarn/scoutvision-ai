@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
 import { Search, GitCompare, ArrowRight, User, Check, X } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend } from 'recharts';
 import { queryService } from '../services/queryService';
@@ -191,7 +191,7 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                   <span className="block text-2xs text-ink-3 truncate"><TeamLine player={p} /></span>
                 </span>
                 <span className="sv-tag">{positionLabel(p.Position) || 'N/D'}</span>
-                <span className="sv-tag !font-normal">{getSeasonShortLabel(extractSeason(p.League))}</span>
+                <span className="sv-tag !font-normal">{getPlayerSeasonTag(p)}</span>
               </button>
             ))}
             {filteredSearch.length === 0 && <div className="px-3 py-2 text-xs text-ink-4">Aucun joueur trouvé</div>}
@@ -219,7 +219,7 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
               <div className="flex flex-wrap items-center gap-1.5 mt-3">
                 <span className="sv-tag">{positionLabel(referencePlayer.Position)}</span>
                 <span className="sv-tag !font-normal">{referencePlayer.Age ?? '–'} ans</span>
-                <span className="sv-tag !font-normal">{getSeasonShortLabel(extractSeason(referencePlayer.League))}</span>
+                <span className="sv-tag !font-normal">{getPlayerSeasonTag(referencePlayer)}</span>
                 <span className="sv-tag !font-normal">{typeof referencePlayer['Market value'] === 'number' ? `€${(referencePlayer['Market value'] / 1e6).toFixed(1)}M` : '–'}</span>
               </div>
             </Panel>
@@ -266,7 +266,7 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
                       <span className="text-2xs text-ink-4 num w-4">{idx + 1}</span>
                       <PlayerAvatar player={player} size="sm" />
                       <div className="min-w-0">
-                        <div className="text-[13px] font-medium text-ink truncate">{player.Player || 'Inconnu'}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span></div>
+                        <div className="text-[13px] font-medium text-ink truncate">{player.Player || 'Inconnu'}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getPlayerSeasonTag(player)}</span></div>
                         <div className="text-2xs text-ink-3 truncate max-w-[12rem]"><TeamLine player={player} /></div>
                       </div>
                     </div>

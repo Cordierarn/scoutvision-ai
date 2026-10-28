@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PlayerData, extractSeason, getPlayerSeason, getSeasonShortLabel, getSeasonLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeason, getSeasonShortLabel, getSeasonLabel, getPlayerSeasonTag } from '../types';
 import { useShots } from '../hooks/useShots';
 import PlayerHeatmap from './PlayerHeatmap';
 import { metricLabel, positionName, roleLabel, styleLabel, footLabel } from '../utils/labels';
@@ -208,15 +208,17 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   // Cohort description for display
   const cohortDescription = useMemo(() => {
     const count = cohort.length;
+    // Poste absent des données : pas de « postes inconnus » au pluriel
+    const role = player.Position ? `${positionName(player.Position).toLowerCase()}s` : 'joueurs sans poste';
     switch (comparisonMode) {
       case 'position':
-        return `${count} ${positionName(player.Position).toLowerCase()}s, toutes compétitions`;
+        return `${count} ${role}, toutes compétitions`;
       case 'league':
         const leagueName = player.League?.split(' ').slice(0, -1).join(' ') || 'la compétition';
         return `${count} joueurs en ${leagueName}`;
       case 'position_league':
         const league = player.League?.split(' ').slice(0, -1).join(' ') || 'la compétition';
-        return `${count} ${positionName(player.Position).toLowerCase()}s en ${league}`;
+        return `${count} ${role} en ${league}`;
       default:
         return `${count} joueurs au total`;
     }
@@ -363,6 +365,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   const market = typeof player['Market value'] === 'number' ? player['Market value'] : undefined;
   const estimate = typeof player['Estimated value'] === 'number' ? player['Estimated value'] : undefined;
   const contract = player['Contract expires'] ? String(player['Contract expires']) : undefined;
+  const loadedSeasons = dataLoader.getCachedIndex()?.seasons ?? [];
+  const isCurrentSeason = loadedSeasons[loadedSeasons.length - 1]?.id === playerSeason;
   const contractMonths = contract ? Math.round((new Date(contract).getTime() - Date.now()) / (30.44 * 86400000)) : undefined;
 
   // Radar : percentile du joueur et repère de la médiane du groupe (50)
@@ -393,7 +397,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-semibold text-ink tracking-tight">{player.Player}</h1>
-                <span className="sv-tag" title="Saison">{getSeasonShortLabel(playerSeason)}</span>
+                <span className="sv-tag" title="Saison">{getPlayerSeasonTag(player)}</span>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[13px] text-ink-2">
                 <span className="flex items-center gap-1.5"><TeamLogo src={player['Team logo']} name={player.Team} size="xs" /> {player.Team}</span>
@@ -407,7 +411,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-                <span className="sv-tag !border-accent/50 !text-accent !bg-accent/10" title={positionCategory}>{positionName(player.Position)}</span>
+                {player.Position
+                  ? <span className="sv-tag !border-accent/50 !text-accent !bg-accent/10" title={positionCategory}>{positionName(player.Position)}</span>
+                  : <span className="sv-tag !font-normal text-ink-3">Poste inconnu</span>}
                 {bestRoles[0] && <span className="sv-tag" title="Meilleur rôle (indice de rôle)">{roleLabel(bestRoles[0].role)} · {bestRoles[0].normalizedScore}</span>}
                 {player['Team style'] && (
                   <span className="sv-tag" title="Style de jeu de l'équipe cette saison (ACP + k-means sur les indicateurs d'équipe)">Équipe : {styleLabel(player['Team style'])}</span>
@@ -421,10 +427,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           {/* Valeur et contrat */}
           <div className="grid grid-cols-3 lg:w-[26rem] shrink-0 border border-line rounded-md divide-x divide-line">
             <Stat className="px-3 py-2.5" label="Valeur marché" value={market !== undefined ? formatCurrency(market) : 'N/D'}
-              sub={market !== undefined ? 'Transfermarkt, actuelle' : 'Saison en cours seulement'} />
+              sub={market !== undefined ? 'Transfermarkt, actuelle' : isCurrentSeason ? 'Hors Transfermarkt' : 'Saison en cours seulement'} />
             <Stat className="px-3 py-2.5" label="Valeur modèle" value={estimate !== undefined ? formatCurrency(estimate) : 'N/D'}
               tone={market && estimate ? (estimate >= 1.5 * market ? 'pos' : estimate <= 0.67 * market ? 'neg' : 'default') : 'default'}
-              sub={market && estimate ? `×${(estimate / market).toFixed(1)} vs marché` : 'Estimée par la performance'}
+              sub={market && estimate ? `×${(estimate / market).toFixed(1)} vs marché` : estimate !== undefined ? 'Estimée par la performance' : isCurrentSeason ? 'Sans valeur de marché' : 'Saison en cours seulement'}
               title="Valeur attendue d'après la performance (modèle ridge) : une indication, pas un prix" />
             <Stat className="px-3 py-2.5" label="Contrat" value={contract ? contract.slice(0, 7).split('-').reverse().join('/') : 'N/D'}
               tone={contractMonths !== undefined && contractMonths <= 12 ? 'neg' : 'default'}
@@ -495,6 +501,12 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
             ))}
           </div>
 
+          {/* Un radar n'a de sens qu'à partir de trois axes */}
+          {radarData.length < 3 ? (
+            <EmptyState icon={Settings2} title="Pas assez de métriques pour un radar" className="!py-16">
+              {radarData.length === 0 ? 'Aucune métrique disponible pour ce joueur.' : 'Les percentiles disponibles sont listés dans le panneau Percentiles ; ajoutez des métriques avec le bouton de réglage.'}
+            </EmptyState>
+          ) : (
           <div className="h-[300px] -mx-2 mt-1">
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart cx="50%" cy="50%" outerRadius="66%" data={radarData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}>
@@ -521,6 +533,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
               </RadarChart>
             </ResponsiveContainer>
           </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <div className="flex gap-3">
               <LegendItem color={BRAND} shape="line">{player.Player.split(' ').pop()}</LegendItem>
@@ -614,10 +627,13 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                     <td className="text-ink-2 truncate max-w-[10rem]" title={item.metric}>{item.shortMetric}</td>
                     <td className="text-right text-ink-3 num">{formatRaw(Number(item.previous.toFixed(2)))}</td>
                     <td className="text-right text-ink num font-medium">{formatRaw(Number(item.current.toFixed(2)))}</td>
-                    <td className="text-right w-16">
+                    <td className="text-right w-20">
                       <span className="inline-flex items-center gap-1 justify-end">
                         {item.trend === 'up' ? <TrendingUp className="w-3 h-3 text-pos" /> : item.trend === 'down' ? <TrendingDown className="w-3 h-3 text-neg" /> : <Minus className="w-3 h-3 text-ink-4" />}
-                        <Delta value={item.percentChange} suffix=" %" />
+                        {/* Écart relatif peu parlant depuis une valeur nulle ou minuscule : écart absolu */}
+                        {Math.abs(item.previous) < 0.05 || Math.abs(item.percentChange) > 300
+                          ? <Delta value={item.diff} digits={2} className="whitespace-nowrap" />
+                          : <Delta value={item.percentChange} suffix=" %" className="whitespace-nowrap" />}
                       </span>
                     </td>
                   </tr>
@@ -625,7 +641,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
               </tbody>
             </table>
           ) : (
-            <EmptyState icon={TrendingUp} title="Évolution indisponible" className="!py-6">Une seule saison disponible pour ce joueur.</EmptyState>
+            <EmptyState icon={TrendingUp} title="Évolution indisponible" className="!py-6">Aucune saison précédente de ce joueur dans les données.</EmptyState>
           )}
         </Panel>
 
