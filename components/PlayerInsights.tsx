@@ -255,6 +255,7 @@ export const DevelopmentPanel: React.FC<{ player: PlayerData; metrics: string[] 
 
 /**
  * Indicateurs avancés formulés pour le rapport IA, avec leurs limites
+ * (valeur Transfermarkt, estimation ScoutVision et contrat sont envoyés à part, sans ambiguïté)
  */
 export function buildReportInsights(player: PlayerData, curves: AgeCurves | null, metrics: string[]): string[] {
   const lines: string[] = [];
@@ -279,19 +280,11 @@ export function buildReportInsights(player: PlayerData, curves: AgeCurves | null
   if (player['Team style']) {
     lines.push(`Team playing style this season: ${player['Team style']} (the player's numbers are produced in this context)`);
   }
-  const market = player['Market value'];
-  const estimate = player['Estimated value'];
-  if (typeof market === 'number' && typeof estimate === 'number' && market > 0) {
-    lines.push(`Transfermarkt value ${formatEuro(market)}; performance-based model estimate ${formatEuro(estimate)} `
-      + `(×${(estimate / market).toFixed(1)}; the model has a typical error of ×1.7)`);
-  }
-  if (player['Contract expires']) {
-    lines.push(`Contract until ${player['Contract expires']}`);
-  }
+  // Valeur Transfermarkt, estimation ScoutVision et contrat : champs structurés construits par le serveur
   if (curves) {
     const proj = projectPlayer(player, curves, metrics);
     if (proj.length > 0) {
-      lines.push('Expected next season (role percentile, regression to the mean and age effect included): '
+      lines.push('ScoutVision statistical projection for next season (age curves; role percentile, regression to the mean and age effect included; not a forecast of level): '
         + proj.slice(0, 6).map(p => `${p.metric} P${p.current}→P${p.projected}`).join(', '));
     }
   }
