@@ -153,11 +153,18 @@ export const PercentileBar: React.FC<{ value: number; className?: string; height
 /**
  * Valeur de percentile (P92) avec pastille de palier
  */
-export const PercentileValue: React.FC<{ value: number | undefined; className?: string }> = ({ value, className = '' }) => {
+export const PercentileValue: React.FC<{ value: number | undefined; className?: string; tip?: string }> = ({ value, className = '', tip }) => {
   if (value === undefined || Number.isNaN(value)) return <span className={`text-ink-4 ${className}`}>–</span>;
   const tier = PERCENTILE_TIERS[percentileTier(value)];
+  // tip : infobulle d'interface détaillée à la place de l'info-bulle native
   return (
-    <span className={`inline-flex items-center gap-1 num font-semibold ${tier.text} ${className}`} title={`${tier.label} (percentile ${Math.round(value)})`}>
+    <span
+      className={`inline-flex items-center gap-1 num font-semibold ${tier.text} ${className}`}
+      title={tip ? undefined : `${tier.label} (percentile ${Math.round(value)})`}
+      data-tip={tip}
+      data-tip-pos={tip ? 'left' : undefined}
+      data-tip-wide={tip ? '' : undefined}
+    >
       <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: tier.color }} aria-hidden />
       P{Math.round(value)}
     </span>

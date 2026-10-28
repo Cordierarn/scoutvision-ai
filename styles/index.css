@@ -174,7 +174,8 @@
 
 /*
  * Infobulle d'interface : data-tip="texte" sur un bouton ou un lien (survol et focus clavier).
- * Au-dessus par défaut ; data-tip-pos="left" | "bottom" pour les bords d'écran et les tableaux.
+ * Au-dessus par défaut ; data-tip-pos="left" | "bottom" pour les bords d'écran et les tableaux,
+ * data-tip-align="end" pour l'aligner à droite, data-tip-wide pour un texte sur plusieurs lignes.
  */
 [data-tip] { position: relative; }
 [data-tip]::after {
@@ -203,6 +204,9 @@
 [data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transition-delay: 0.25s; }
 [data-tip-pos="left"]::after { bottom: auto; top: 50%; left: auto; right: calc(100% + 6px); transform: translateY(-50%); }
 [data-tip-pos="bottom"]::after { bottom: auto; top: calc(100% + 6px); }
+[data-tip-align="end"]::after { left: auto; right: 0; transform: none; }
+/* Texte long : retour à la ligne, sauts de ligne du texte conservés */
+[data-tip-wide]::after { white-space: pre-line; width: max-content; max-width: 300px; text-align: left; font-weight: 400; padding: 6px 9px; }
 
 @layer utilities {
   .num { font-variant-numeric: tabular-nums; }

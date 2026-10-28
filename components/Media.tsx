@@ -4,7 +4,7 @@
  * Chaque image a un repli (initiales, icône) si l'URL manque ou ne charge pas.
  */
 
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Shield, Trophy } from 'lucide-react';
 import { PlayerData } from '../types';
 import { getFlagUrl } from '../utils/flags';
@@ -29,30 +29,24 @@ const SIZES = {
 type Size = keyof typeof SIZES;
 
 /**
- * Image avec repli : le repli s'affiche si src est vide ou en erreur
+ * Suivi du chargement d'une image : vrai dès le rendu si elle est déjà en cache
+ * (vérifié avant affichage), pour ne jamais montrer le repli puis l'image à tort.
  */
-const ImageWithFallback: React.FC<{
-  src?: string | null;
-  alt: string;
-  className: string;
-  fallback: React.ReactNode;
-}> = ({ src, alt, className, fallback }) => {
+function useImageLoad(src?: string) {
+  const ref = useRef<HTMLImageElement>(null);
   const [failed, setFailed] = useState(false);
-  if (!src || failed) return <>{fallback}</>;
-  return (
-    <img
-      src={imageUrl(src)}
-      alt={alt}
-      loading="lazy"
-      referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
-      className={className}
-    />
-  );
-};
+  const [loaded, setLoaded] = useState(false);
+  useLayoutEffect(() => {
+    setFailed(false);
+    const img = ref.current;
+    setLoaded(!!img && img.complete && img.naturalWidth > 0);
+  }, [src]);
+  return { ref, failed, loaded, onLoad: () => setLoaded(true), onError: () => setFailed(true) };
+}
 
 /**
- * Logo du club (repli : bouclier)
+ * Logo du club : le repli (bouclier) reste affiché pendant le chargement et en cas d'erreur,
+ * puis il est remplacé d'un coup par le logo chargé
  */
 export const TeamLogo: React.FC<{
   src?: string | null;
@@ -60,18 +54,25 @@ export const TeamLogo: React.FC<{
   size?: Size;
   className?: string;
 }> = ({ src, name = '', size = 'sm', className = '' }) => {
-  const base = `${SIZES[size]} shrink-0 ${className}`;
+  const url = imageUrl(src);
+  const { ref, failed, loaded, onLoad, onError } = useImageLoad(url);
+  const showImage = !!url && !failed;
   return (
-    <ImageWithFallback
-      src={src}
-      alt={name}
-      className={`${base} object-contain`}
-      fallback={
-        <div className={`${base} flex items-center justify-center text-ink-4`} title={name}>
-          <Shield className="w-3/4 h-3/4" />
-        </div>
-      }
-    />
+    <span className={`relative inline-flex items-center justify-center ${SIZES[size]} shrink-0 ${className}`} title={showImage ? undefined : name}>
+      {!(showImage && loaded) && <Shield className="w-3/4 h-3/4 text-ink-4" aria-hidden={showImage} />}
+      {showImage && (
+        <img
+          ref={ref}
+          src={url}
+          alt={name}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onLoad={onLoad}
+          onError={onError}
+          className={`absolute inset-0 w-full h-full object-contain ${loaded ? '' : 'opacity-0'}`}
+        />
+      )}
+    </span>
   );
 };
 
@@ -153,19 +154,20 @@ export const PhotoOverlay: React.FC<{
   src?: string | number;
   alt?: string;
 }> = ({ src, alt = '' }) => {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  if (typeof src !== 'string' || !src || failed) return null;
-  // Invisible tant qu'elle charge : les initiales restent lisibles sur un réseau lent
+  const url = typeof src === 'string' ? imageUrl(src) : undefined;
+  const { ref, failed, loaded, onLoad, onError } = useImageLoad(url);
+  if (!url || failed) return null;
+  // Invisible tant qu'elle charge : les initiales restent affichées, puis la photo les recouvre d'un coup
   return (
     <img
-      src={imageUrl(src)}
+      ref={ref}
+      src={url}
       alt={alt}
       loading="lazy"
       referrerPolicy="no-referrer"
-      onLoad={() => setLoaded(true)}
-      onError={() => setFailed(true)}
-      className={`absolute inset-0 w-full h-full object-cover object-top bg-raised transition-opacity duration-150 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+      onLoad={onLoad}
+      onError={onError}
+      className={`absolute inset-0 w-full h-full object-cover object-top bg-raised ${loaded ? '' : 'opacity-0'}`}
     />
   );
 };

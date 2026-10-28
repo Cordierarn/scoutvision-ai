@@ -24,11 +24,15 @@ interface FilterCondition {
   max: number | string;
 }
 
-// Colonnes statistiques : xG et xA toujours visibles, les autres au choix parmi les métriques des données
+// Colonnes facultatives : contexte (minutes, contrat) puis métriques des données ; xG et xA toujours visibles.
+// Défaut : Joueur | Âge | Poste | Club | Valeur | Min | xG | xA | Note
 const LOCKED_STATS = ['xG', 'xA'];
-const DEFAULT_EXTRA_STATS = ['Goals', 'Assists', 'Rating'];
+const CONTEXT_COLUMNS = ['Contract expires', 'Minutes played'];
+const DEFAULT_COLUMNS = ['Minutes played', 'Rating'];
 const MAX_EXTRA_STATS = 8;
-const COLUMNS_KEY = 'scoutvision_db_columns_v1';
+// Préférences versionnées : une version précédente ou illisible revient aux colonnes par défaut
+const COLUMNS_KEY = 'scoutvision_db_columns';
+const COLUMNS_VERSION = 2;
 
 // Recherche, filtres, tri et défilement retrouvés au retour d'une fiche joueur
 const memory = {
@@ -46,14 +50,26 @@ const memory = {
 function loadExtraStats(): string[] {
   try {
     const saved = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? 'null');
-    if (Array.isArray(saved) && saved.every(k => typeof k === 'string')) return saved.slice(0, MAX_EXTRA_STATS);
-  } catch { /* stockage indisponible : colonnes par défaut */ }
-  return DEFAULT_EXTRA_STATS;
+    if (saved?.version === COLUMNS_VERSION && Array.isArray(saved.columns)) {
+      const keys: string[] = saved.columns.filter((k: unknown): k is string => typeof k === 'string' && !LOCKED_STATS.includes(k));
+      return Array.from(new Set(keys)).slice(0, MAX_EXTRA_STATS);
+    }
+  } catch { /* stockage indisponible ou illisible : colonnes par défaut */ }
+  return DEFAULT_COLUMNS;
 }
 
 function saveExtraStats(keys: string[]) {
-  try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(keys)); } catch { /* non bloquant */ }
+  try { localStorage.setItem(COLUMNS_KEY, JSON.stringify({ version: COLUMNS_VERSION, columns: keys })); } catch { /* non bloquant */ }
 }
+
+// Infobulles d'en-tête, d'après le pipeline (scripts/prepare_data.py, README) : xG et xA sont des totaux de saison
+const HEADER_TIPS: Record<string, string> = {
+  xG: 'Expected goals cumulés sur la saison sélectionnée',
+  xA: 'Expected assists cumulées sur la saison sélectionnée',
+};
+
+// Percentiles PitchAPI (« X pct ») : même rôle, même niveau de compétition, même saison
+const PERCENTILE_TIP = 'Percentile de la note (0-100) parmi les joueurs du même rôle (GK, CB, FB, WB, DM, CM, AM, W, ST) et du même niveau de compétition, sur la même saison.\nComparaison par rôle et par niveau, pas par compétition.';
 
 // Libellé court d'en-tête (« Actions défensives réussies par 90 » -> « Actions défensives réussies /90 »)
 const SHORT_LABELS: Record<string, string> = { Goals: 'Buts', Assists: 'PD', Rating: 'Note', 'Minutes played': 'Min' };
@@ -129,11 +145,24 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
     return getMetricKeys(data);
   }, [data]);
 
-  // Colonnes affichées : seulement des métriques présentes dans les données chargées
-  const statColumns = useMemo(() => {
-    const available = new Set(numericKeys);
-    return [...LOCKED_STATS, ...extraStats.filter(k => !LOCKED_STATS.includes(k))].filter(k => available.has(k));
+  // Colonnes choisies encore valides : une colonne mémorisée absente des données est ignorée
+  const validExtras = useMemo(() => {
+    const available = new Set([...CONTEXT_COLUMNS, ...numericKeys]);
+    return extraStats.filter(k => available.has(k));
   }, [numericKeys, extraStats]);
+  const contextColumns = CONTEXT_COLUMNS.filter(k => validExtras.includes(k));
+  const statColumns = useMemo(() => [
+    ...LOCKED_STATS.filter(k => numericKeys.includes(k)),
+    ...validExtras.filter(k => !CONTEXT_COLUMNS.includes(k)),
+  ], [numericKeys, validExtras]);
+
+  // Note : signification et plage observée dans les données chargées (l'échelle n'est pas documentée par la source)
+  const ratingTip = useMemo(() => {
+    let min = Infinity, max = -Infinity;
+    for (const p of data) if (typeof p.Rating === 'number') { min = Math.min(min, p.Rating); max = Math.max(max, p.Rating); }
+    const range = min <= max ? `\nÉchelle non précisée par la source ; valeurs observées : ${min.toFixed(2).replace('.', ',')} à ${max.toFixed(2).replace('.', ',')}.` : '';
+    return `Note : moyenne des notes de match de la saison (PitchAPI), qui surpondère les actions offensives.${range}\n\nPxx : ${PERCENTILE_TIP}`;
+  }, [data]);
 
   // Entiers (minutes, buts...) affichés sans décimale
   const integerColumns = useMemo(() => {
@@ -148,9 +177,9 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
 
   const toggleExtraStat = (key: string) => {
     if (LOCKED_STATS.includes(key)) return;
-    updateExtraStats(extraStats.includes(key)
-      ? extraStats.filter(k => k !== key)
-      : extraStats.length < MAX_EXTRA_STATS ? [...extraStats, key] : extraStats);
+    updateExtraStats(validExtras.includes(key)
+      ? validExtras.filter(k => k !== key)
+      : validExtras.length < MAX_EXTRA_STATS ? [...validExtras, key] : validExtras);
   };
 
   // Fermer le sélecteur de colonnes au clic extérieur ou sur Échap
@@ -282,17 +311,21 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   };
 
   // En-tête de colonne triable (aria-sort pour les lecteurs d'écran)
-  const SortHeader: React.FC<{ field: SortField; label: string; align?: 'left' | 'right'; title?: string; className?: string }> = ({ field, label, align = 'left', title, className = '' }) => {
+  const SortHeader: React.FC<{ field: SortField; label: string; align?: 'left' | 'right'; title?: string; tip?: string; className?: string }> = ({ field, label, align = 'left', title, tip, className = '' }) => {
     const active = sortField === field;
     const Icon = !active ? ChevronsUpDown : sortOrder === 'asc' ? ChevronUp : ChevronDown;
     return (
       <th
         aria-sort={active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
         className={`${align === 'right' ? 'text-right' : ''} ${active ? '!text-ink' : ''} ${className}`}
-        title={title ?? label}
+        title={tip ? undefined : title ?? label}
       >
         <button
           onClick={() => handleSort(field)}
+          data-tip={tip}
+          data-tip-pos={tip ? 'bottom' : undefined}
+          data-tip-align={tip ? 'end' : undefined}
+          data-tip-wide={tip && tip.length > 60 ? '' : undefined}
           className={`group/sort inline-flex items-center gap-1 max-w-[9rem] uppercase tracking-[0.08em] hover:text-ink transition-colors ${align === 'right' ? 'flex-row-reverse' : ''}`}
         >
           <span className="truncate">{label}</span>
@@ -307,8 +340,9 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
 
   const seasonText = seasons.length === 1 ? getSeasonLabel(seasons[0]) : 'Toutes les saisons';
   const filterCount = activeFilters.length + (positionFilter !== 'All' ? 1 : 0) + (searchTerm ? 1 : 0);
-  const pickable = numericKeys.filter(k => !LOCKED_STATS.includes(k)
-    && (!columnSearch || k.toLowerCase().includes(columnSearch.toLowerCase()) || metricLabel(k).toLowerCase().includes(columnSearch.toLowerCase())));
+  const columnLabel = (k: string) => k === 'Contract expires' ? 'Fin de contrat' : metricLabel(k);
+  const pickable = [...CONTEXT_COLUMNS.slice().reverse(), ...numericKeys].filter(k => !LOCKED_STATS.includes(k)
+    && (!columnSearch || k.toLowerCase().includes(columnSearch.toLowerCase()) || columnLabel(k).toLowerCase().includes(columnSearch.toLowerCase())));
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -371,13 +405,13 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
               className={`sv-btn sv-btn-secondary ${showColumns ? '!border-accent/60 !text-accent' : ''}`}
             >
               <Columns3 className="w-3.5 h-3.5" /> Colonnes
-              <span className="text-2xs text-ink-4 num">{statColumns.length}</span>
+              <span className="text-2xs text-ink-4 num">{statColumns.length + contextColumns.length}</span>
             </button>
             {showColumns && (
-              <div role="dialog" aria-label="Colonnes statistiques" className="sv-menu absolute z-40 left-0 sm:left-auto sm:right-0 mt-1 w-72 p-2 animate-fade-in">
+              <div role="dialog" aria-label="Colonnes du tableau" className="sv-menu absolute z-40 left-0 sm:left-auto sm:right-0 mt-1 w-72 p-2 animate-fade-in">
                 <div className="flex items-center justify-between px-1 pb-2">
-                  <span className="sv-label">Colonnes statistiques</span>
-                  <button onClick={() => updateExtraStats(DEFAULT_EXTRA_STATS)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6 !px-1.5" data-tip="Colonnes par défaut" data-tip-pos="left">
+                  <span className="sv-label">Colonnes du tableau</span>
+                  <button onClick={() => updateExtraStats(DEFAULT_COLUMNS)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6 !px-1.5" data-tip="Colonnes par défaut" data-tip-pos="left">
                     <RotateCcw className="w-3 h-3" /> Réinitialiser
                   </button>
                 </div>
@@ -393,18 +427,18 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                     </div>
                   ))}
                   {pickable.map(k => {
-                    const on = extraStats.includes(k);
-                    const full = !on && extraStats.length >= MAX_EXTRA_STATS;
+                    const on = validExtras.includes(k);
+                    const full = !on && validExtras.length >= MAX_EXTRA_STATS;
                     return (
                       <label key={k} className={`flex items-center gap-2 h-7 px-1.5 rounded text-xs cursor-pointer hover:bg-line-strong/50 ${on ? 'text-ink' : 'text-ink-2'} ${full ? 'opacity-40 cursor-not-allowed' : ''}`}>
                         <input type="checkbox" checked={on} disabled={full} onChange={() => toggleExtraStat(k)} />
-                        <span className="truncate" title={metricLabel(k)}>{metricLabel(k)}</span>
+                        <span className="truncate" title={columnLabel(k)}>{columnLabel(k)}</span>
                       </label>
                     );
                   })}
                   {pickable.length === 0 && <p className="px-1.5 py-2 text-xs text-ink-4">Aucune métrique.</p>}
                 </div>
-                <p className="px-1 pt-2 mt-1 border-t border-line text-2xs text-ink-4">{extraStats.length}/{MAX_EXTRA_STATS} colonnes en plus de xG et xA · choix mémorisé sur cet appareil</p>
+                <p className="px-1 pt-2 mt-1 border-t border-line text-2xs text-ink-4">{validExtras.length}/{MAX_EXTRA_STATS} colonnes en plus de xG et xA · choix mémorisé sur cet appareil</p>
               </div>
             )}
           </div>
@@ -510,10 +544,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
               <SortHeader field="Position" label="Poste" />
               <SortHeader field="Team" label="Club" />
               <SortHeader field="Market value" label="Valeur" align="right" title="Valeur Transfermarkt" />
-              <SortHeader field="Contract expires" label="Contrat" align="right" title="Fin de contrat" />
-              <SortHeader field="Minutes played" label="Min" align="right" title="Minutes jouées" />
+              {contextColumns.includes('Contract expires') && <SortHeader field="Contract expires" label="Contrat" align="right" title="Fin de contrat" />}
+              {contextColumns.includes('Minutes played') && <SortHeader field="Minutes played" label="Min" align="right" title="Minutes jouées" />}
               {statColumns.map(k => (
-                <SortHeader key={k} field={k} label={shortLabel(k)} align="right" title={metricLabel(k)} />
+                <SortHeader key={k} field={k} label={shortLabel(k)} align="right" title={metricLabel(k)} tip={k === 'Rating' ? ratingTip : HEADER_TIPS[k]} />
               ))}
               <th className="w-[76px] !pr-4 sm:!pr-5"><span className="sr-only">Actions</span></th>
             </tr>
@@ -557,18 +591,25 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                   <td className={`text-right font-semibold whitespace-nowrap ${typeof player['Market value'] === 'number' ? 'text-accent' : 'text-ink-4 font-normal'} ${sortedCell('Market value')}`}>
                     {formatValue(Number(player['Market value']) || 0)}
                   </td>
-                  <td className={`text-right text-ink-3 text-xs whitespace-nowrap ${sortedCell('Contract expires')}`}>
-                    {player['Contract expires'] ? String(player['Contract expires']).slice(0, 7).split('-').reverse().join('/') : <span className="text-ink-4">–</span>}
-                  </td>
-                  <td className={`text-right text-ink-3 whitespace-nowrap ${sortedCell('Minutes played')}`}>
-                    {typeof player['Minutes played'] === 'number' ? player['Minutes played'].toLocaleString('fr-FR') : <span className="text-ink-4">–</span>}
-                  </td>
+                  {contextColumns.includes('Contract expires') && (
+                    <td className={`text-right text-ink-3 text-xs whitespace-nowrap ${sortedCell('Contract expires')}`}>
+                      {player['Contract expires'] ? String(player['Contract expires']).slice(0, 7).split('-').reverse().join('/') : <span className="text-ink-4">–</span>}
+                    </td>
+                  )}
+                  {contextColumns.includes('Minutes played') && (
+                    <td className={`text-right text-ink-3 whitespace-nowrap ${sortedCell('Minutes played')}`}>
+                      {typeof player['Minutes played'] === 'number' ? player['Minutes played'].toLocaleString('fr-FR') : <span className="text-ink-4">–</span>}
+                    </td>
+                  )}
                   {statColumns.map(k => (
                     <td key={k} className={`text-right whitespace-nowrap ${k === 'xG' || k === 'xA' ? 'text-ink' : 'text-ink-2'} ${sortedCell(k)}`}>
                       {k === 'Rating' && typeof player.Rating === 'number' ? (
                         <span className="inline-flex items-center justify-end gap-2">
-                          {player.Rating.toFixed(2)}
-                          {typeof player['Rating pct'] === 'number' && <PercentileValue value={player['Rating pct'] as number} className="text-2xs w-9 justify-end" />}
+                          {player.Rating.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {typeof player['Rating pct'] === 'number' && (
+                            <PercentileValue value={player['Rating pct'] as number} className="text-2xs w-9 justify-end"
+                              tip={`P${Math.round(player['Rating pct'] as number)} · ${PERCENTILE_TIP}`} />
+                          )}
                         </span>
                       ) : formatStat(k, player[k])}
                     </td>
@@ -577,13 +618,13 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                     <div className="flex justify-end gap-0.5">
                       <button
                         onClick={(e) => toggleWatchlist(player, e)}
-                        className={`sv-icon-btn ${watched ? '!text-warn' : 'opacity-50 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                        className={`sv-icon-btn ${watched ? '!text-accent' : 'opacity-50 group-hover:opacity-100 focus-visible:opacity-100'}`}
                         data-tip={watched ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
                         data-tip-pos="left"
                         aria-label={watched ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
                         aria-pressed={watched}
                       >
-                        <Star className={`w-3.5 h-3.5 ${watched ? 'fill-warn' : ''}`} />
+                        <Star className={`w-3.5 h-3.5 ${watched ? 'fill-accent' : ''}`} />
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); onSelectPlayer(player); }}
