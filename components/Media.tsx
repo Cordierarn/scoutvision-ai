@@ -209,12 +209,41 @@ export const PlayerAvatar: React.FC<{
   );
 };
 
+type MarkSize = 16 | 24 | 40;
+type Rect = [number, number, number, number];   // x0, y0, x1, y1
+
 /**
- * Marque ScoutVision (logo vectoriel, deux chevrons)
+ * Géométrie du symbole Tessera (« Assemblage », version 1b) dessinée pour une taille :
+ * quatre tesselles en moulinet autour d'une pièce centrale cyan égale à 1/4 du côté,
+ * gouttières de 1, 2 ou 3 px (16, 24, 40 px) posées sur des pixels entiers.
  */
-export const BrandMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-6' }) => (
-  <svg viewBox="0 0 80 96" className={className} aria-hidden>
-    <polygon points="0,0 40,0 80,48 54,48 26,16 0,16" fill="#F8FAFC" />
-    <polygon points="80,96 40,96 0,48 26,48 54,80 80,80" fill="#00E5FF" />
-  </svg>
-);
+function tesseraGeometry(size: MarkSize): { tiles: Rect[]; center: Rect } {
+  const gutter = size === 16 ? 1 : size === 24 ? 2 : 3;
+  const a = (size - size / 4) / 2;                // petit côté d'une tesselle
+  const b = (size + size / 4) / 2;                // grand côté
+  const lo = Math.ceil(gutter / 2), hi = Math.floor(gutter / 2);
+  // Les bords intérieurs reculent de la gouttière, les bords extérieurs restent au bord du carré
+  const inset = ([x0, y0, x1, y1]: Rect): Rect => [
+    x0 > 0 ? x0 + lo : 0, y0 > 0 ? y0 + lo : 0, x1 < size ? x1 - hi : size, y1 < size ? y1 - hi : size,
+  ];
+  return {
+    tiles: ([[0, 0, b, a], [b, 0, size, b], [a, b, size, size], [0, a, a, size]] as Rect[]).map(inset),
+    center: inset([a, a, b, b]),
+  };
+}
+
+/**
+ * Marque Tessera : symbole dessiné au pixel pour 16, 24 ou 40 px (encre et pièce centrale cyan)
+ */
+export const BrandMark: React.FC<{ size?: MarkSize; className?: string }> = ({ size = 24, className }) => {
+  const { tiles, center } = tesseraGeometry(size);
+  const rect = ([x0, y0, x1, y1]: Rect, fill: string) => (
+    <rect key={`${x0}-${y0}`} x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={fill} />
+  );
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className={className} shapeRendering="crispEdges" aria-hidden>
+      {tiles.map(t => rect(t, '#F8FAFC'))}
+      {rect(center, '#00E5FF')}
+    </svg>
+  );
+};

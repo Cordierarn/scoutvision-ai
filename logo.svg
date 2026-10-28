@@ -1,7 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="100%" height="100%">
+  <!-- Tessera : symbole « Assemblage » (version 1b, dessin 40 px), tuile d'application -->
   <rect width="128" height="128" rx="28" fill="#0B111A" />
-  <g transform="translate(24, 16)">
-    <polygon points="0,0 40,0 80,48 54,48 26,16 0,16" fill="#F8FAFC" />
-    <polygon points="80,96 40,96 0,48 26,48 54,80 80,80" fill="#00E5FF" />
+  <g transform="translate(28 28) scale(1.8)" shape-rendering="crispEdges">
+    <rect x="0" y="0" width="24" height="14" fill="#F8FAFC" />
+    <rect x="27" y="0" width="13" height="24" fill="#F8FAFC" />
+    <rect x="17" y="27" width="23" height="13" fill="#F8FAFC" />
+    <rect x="0" y="17" width="14" height="23" fill="#F8FAFC" />
+    <rect x="17" y="17" width="7" height="7" fill="#00E5FF" />
   </g>
 </svg>

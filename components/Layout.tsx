@@ -93,10 +93,8 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
       {/* Barre latérale : icônes seules sous 1024 px */}
       <aside className="w-14 lg:w-56 shrink-0 bg-surface border-r border-line flex flex-col">
         <div className="h-12 flex items-center justify-center lg:justify-start lg:px-4 gap-2.5 border-b border-line">
-          <BrandMark className="w-[18px] h-[22px] shrink-0" />
-          <span className="hidden lg:block text-[15px] font-semibold tracking-tight text-ink">
-            Scout<span className="text-accent">Vision</span>
-          </span>
+          <BrandMark size={24} className="shrink-0" />
+          <span className="hidden lg:block text-[15px] font-semibold tracking-tight text-ink">Tessera</span>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4" aria-label="Navigation principale">
@@ -150,7 +148,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
       <main className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative">
          <header className="h-12 shrink-0 bg-canvas border-b border-line flex items-center justify-between gap-4 px-5 z-10">
             <nav className="flex items-center gap-1.5 text-[13px] min-w-0" aria-label="Fil d'Ariane">
-              <span className="text-ink-4">ScoutVision</span>
+              <span className="text-ink-4">Tessera</span>
               <ChevronRight className="w-3.5 h-3.5 text-ink-4 shrink-0" />
               <span className="text-ink font-medium truncate">{VIEW_LABELS[currentView] ?? currentView}</span>
             </nav>

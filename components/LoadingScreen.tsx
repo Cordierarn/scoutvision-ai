@@ -20,12 +20,10 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, currentStep, st
   return (
     <div className="h-screen bg-canvas flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-xs">
-        <div className="flex items-center gap-3 mb-8">
-          <BrandMark className="w-6 h-7" />
-          <div>
-            <div className="text-base font-semibold text-ink tracking-tight">Scout<span className="text-accent">Vision</span></div>
-            <div className="text-2xs text-ink-3">Football data · modèles statistiques · recrutement</div>
-          </div>
+        <div className="flex flex-col items-center text-center mb-8">
+          <BrandMark size={40} />
+          <div className="mt-4 text-xl font-semibold text-ink tracking-[0.18em]">TESSERA</div>
+          <div className="mt-1 text-xs text-ink-3">Football scouting, measured.</div>
         </div>
 
         <div className="h-0.5 bg-raised overflow-hidden">
