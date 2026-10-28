@@ -154,15 +154,18 @@ export const PhotoOverlay: React.FC<{
   alt?: string;
 }> = ({ src, alt = '' }) => {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   if (typeof src !== 'string' || !src || failed) return null;
+  // Invisible tant qu'elle charge : les initiales restent lisibles sur un réseau lent
   return (
     <img
       src={imageUrl(src)}
       alt={alt}
       loading="lazy"
       referrerPolicy="no-referrer"
+      onLoad={() => setLoaded(true)}
       onError={() => setFailed(true)}
-      className="absolute inset-0 w-full h-full object-cover object-top bg-raised"
+      className={`absolute inset-0 w-full h-full object-cover object-top bg-raised transition-opacity duration-150 ${loaded ? 'opacity-100' : 'opacity-0'}`}
     />
   );
 };
