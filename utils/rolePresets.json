@@ -26,7 +26,7 @@
       ],
       "description": "Couvre la profondeur et sort de sa surface, sans renoncer à la relance.",
       "metrics": {
-        "Exits per 90": 65,
+        "Exits per 90": 60,
         "Accurate long passes, %": 55,
         "Prevented goals per 90": 45
       },
@@ -34,7 +34,8 @@
         "Passes per 90": 1,
         "Accurate passes, %": 1,
         "High claims per 90": 0.5,
-        "Launch rate, %": -0.5
+        "Launch rate, %": -0.5,
+        "Prevented goals per 90": 0.5
       }
     },
     "Gardien relanceur": {
@@ -45,11 +46,10 @@
       "description": "Premier relanceur : beaucoup de passes, courtes et précises.",
       "metrics": {
         "Accurate passes, %": 65,
-        "Passes per 90": 65
+        "Passes per 90": 70
       },
       "weights": {
-        "Launch rate, %": -1.5,
-        "Distribution accuracy, %": 1,
+        "Launch rate, %": -1,
         "xG buildup per 90": 1,
         "Prevented goals per 90": 0.5
       }
@@ -117,7 +117,8 @@
       "description": "Casse les lignes balle au pied ; utile en défense à trois.",
       "metrics": {
         "Progressive runs per 90": 70,
-        "Progressive carry distance per 90": 65
+        "Progressive carry distance per 90": 65,
+        "Ground duels won, %": 30
       },
       "weights": {
         "Carries into final third per 90": 1,
@@ -282,7 +283,7 @@
       "metrics": {
         "Dribbles per 90": 70,
         "Progressive runs per 90": 70,
-        "Successful dribbles, %": 55
+        "Successful dribbles, %": 45
       },
       "weights": {
         "Carries into final third per 90": 1,
@@ -323,13 +324,13 @@
       "metrics": {
         "Key passes per 90": 70,
         "xA per 90": 70,
-        "Shot-creating actions per 90": 65
+        "xT per 90": 60
       },
       "weights": {
         "Through passes per 90": 1,
         "Passes to penalty area per 90": 1,
-        "xT per 90": 1.5,
-        "Big chances created per 90": 1
+        "Big chances created per 90": 1,
+        "Shot-creating actions per 90": 1
       }
     },
     "Neuf et demi": {
@@ -342,13 +343,15 @@
       "metrics": {
         "xG per 90": 70,
         "Touches in box per 90": 65,
-        "Shots per 90": 60
+        "Shots per 90": 60,
+        "Key passes per 90": 40
       },
       "weights": {
         "Goals per 90": 1,
         "npxG per 90": 1,
         "Carries into box per 90": 0.5,
-        "xA per 90": 0.5
+        "xA per 90": 0.5,
+        "Key passes per 90": 0.5
       }
     },
     "Ailier de débordement": {
@@ -391,13 +394,12 @@
     "Créateur excentré": {
       "category": "w",
       "positions": [
-        "W",
-        "AM"
+        "W"
       ],
       "description": "Ailier passeur qui crée depuis le côté.",
       "metrics": {
         "Key passes per 90": 70,
-        "xA per 90": 65,
+        "xA per 90": 70,
         "Passes to penalty area per 90": 60
       },
       "weights": {
@@ -445,14 +447,13 @@
     "Faux neuf": {
       "category": "st",
       "positions": [
-        "ST",
-        "AM"
+        "ST"
       ],
       "description": "Décroche pour participer au jeu et créer.",
       "metrics": {
         "Key passes per 90": 65,
         "Shot-creating actions per 90": 65,
-        "Passes per 90": 60
+        "Passes per 90": 70
       },
       "weights": {
         "xA per 90": 1,
@@ -466,7 +467,7 @@
       "positions": [
         "ST"
       ],
-      "description": "Attaque l'espace et porte le ballon vers la surface.",
+      "description": "Porte le ballon vers la surface et menace le but. Les courses sans ballon ne sont pas mesurées.",
       "metrics": {
         "Progressive runs per 90": 70,
         "Carries into box per 90": 65,
@@ -487,8 +488,8 @@
       "description": "Premier défenseur : presse et récupère haut sans perdre la menace.",
       "metrics": {
         "PAdj Recoveries": 60,
-        "Successful defensive actions per 90": 65,
-        "xG per 90": 55
+        "Successful defensive actions per 90": 60,
+        "xG per 90": 45
       },
       "weights": {
         "Duels won per 90": 1,
@@ -506,7 +507,7 @@
         "FB",
         "WB"
       ],
-      "description": "Crée des occasions franches, notamment sur centres et balles arrêtées.",
+      "description": "Crée des occasions, notamment par la qualité de ses centres. Les coups de pied arrêtés ne sont pas isolés dans les données.",
       "metrics": {
         "Big chances created per 90": 70,
         "Key passes per 90": 65,

@@ -291,6 +291,21 @@ eliminatory criteria (minimum role percentile, weight 1.5 in the index) and rank
 | Striker | Renard des surfaces, Pivot, Faux neuf, Attaquant de profondeur, Attaquant presseur |
 | Specialist | Créateur sur coups de pied arrêtés |
 
+A low "floor" criterion (e.g. *Neuf et demi*: key passes ≥ P40) is eliminatory but carries its
+own small ranking weight (0.5), so it does not count 1.5 like a defining criterion. The player
+card (best roles, header), the Gem Hunter, recruitment and the AI report all use these presets and
+the same index (`roleIndex`, explained by `roleIndexBreakdown`). The former `ROLE_DEFINITIONS`
+(`utils/scoringUtils.ts`) are deprecated and no longer displayed.
+
+**Calibration of Oct. 2026** (audit of the 27 roles on 2025-26 and 2026-27): *Gardien libéro*,
+*Gardien relanceur*, *Défenseur porteur*, *Milieu percuteur*, *Numéro 10*, *Neuf et demi*,
+*Créateur excentré* (wingers only), *Faux neuf* (strikers only) and *Attaquant presseur* were
+recalibrated; *Attaquant de profondeur* and *Créateur sur coups de pied arrêtés* only changed
+description (off-ball runs and set pieces are not in the data). **Pending:** `models/transfer.json`
+and the recruitment validation figures above were computed with the previous presets. Run the full
+pipeline (`npm run data:prepare`) to rebuild and revalidate them before treating this calibration
+as validated for recruitment.
+
 ## 🧪 Tests
 
 ```bash
