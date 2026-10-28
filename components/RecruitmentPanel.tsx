@@ -23,16 +23,17 @@ import {
   slotNeeds, slotPartner, squadProfile, teamRank, AGE_RANGE, COMPLEMENT_THRESHOLD, CONTRACT_MONTHS, FEW_MINUTES,
 } from '../utils/recruitment';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
-import { CompetitionBadge, PhotoOverlay, TeamLine, TeamLogo } from './Media';
+import { CompetitionBadge, PlayerAvatar, TeamLine } from './Media';
+import { Delta, EmptyState, LegendItem, Panel, PercentileValue, Skeleton, Stat } from './ui';
+import { BRAND, CONTEXT, DIVERGING, INK, STATUS as STATUS_COLORS } from '../theme/charts';
 
-// Couleurs des graphiques (référence dataviz, validées sur le fond de l'app) :
-// paire divergente bleu / rouge autour de la médiane, gris de contexte pour la forme
-// « emphase », palette de statut réservée aux niveaux de besoin (toujours avec icône et libellé)
-const BLUE = '#3987e5';
-const RED = '#e66767';
-const CONTEXT = '#78716c';
+// Couleurs des graphiques (theme/charts) : le candidat en cyan, le titulaire et les autres en gris
+// de contexte, paire divergente cyan / rouge autour de la médiane ; palette de statut réservée aux
+// niveaux de besoin (toujours avec icône et libellé)
+const BLUE = BRAND;
+const RED = DIVERGING.below;
 // « À évaluer » n'est pas un statut : icône neutre
-const STATUS: Record<NeedLevel, string> = { high: '#d03b3b', unknown: '#94a3b8', medium: '#fab219', low: '#0ca30c' };
+const STATUS: Record<NeedLevel, string> = { high: STATUS_COLORS.critical, unknown: STATUS_COLORS.neutral, medium: STATUS_COLORS.warning, low: STATUS_COLORS.good };
 
 const NEED_LABELS: Record<NeedLevel, { label: string; icon: React.ElementType }> = {
   high: { label: 'Prioritaire', icon: TriangleAlert },
@@ -143,36 +144,29 @@ function isSeasonInProgress(season: string | undefined): boolean {
 // PETITS COMPOSANTS
 // ============================================
 
-const Card: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
-  <section className={`bg-surface border border-line rounded-lg p-5 ${className}`}>
-    <h3 className="text-sm font-bold text-ink uppercase tracking-wider">{title}</h3>
-    {subtitle && <p className="text-xs text-ink-3 mt-1">{subtitle}</p>}
-    <div className="mt-4">{children}</div>
-  </section>
+const Card: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNode; className?: string; right?: React.ReactNode; children: React.ReactNode }> = ({ title, subtitle, className = '', right, children }) => (
+  <Panel title={title} subtitle={subtitle} className={className} right={right}>{children}</Panel>
 );
 
 const NeedChip: React.FC<{ level: NeedLevel }> = ({ level }) => {
   const { label, icon: Icon } = NEED_LABELS[level];
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-line-strong bg-raised text-[11px] font-semibold text-ink whitespace-nowrap">
-      <Icon className="w-3.5 h-3.5" style={{ color: STATUS[level] }} aria-hidden />
+    <span className="inline-flex items-center gap-1 h-5 px-1.5 rounded border border-line-strong bg-raised text-2xs font-semibold text-ink whitespace-nowrap">
+      <Icon className="w-3 h-3" style={{ color: STATUS[level] }} aria-hidden />
       {label}
     </span>
   );
 };
 
-const FlagChip: React.FC<{ label: string; title: string; icon: React.ElementType }> = ({ label, title, icon: Icon }) => (
-  <span title={title} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-line-strong/70 text-[10px] text-ink-2 whitespace-nowrap">
-    <Icon className="w-3 h-3 text-ink-3" aria-hidden />
+const FlagChip: React.FC<{ label: string; title: string; icon: React.ElementType; tone?: 'default' | 'pos' }> = ({ label, title, icon: Icon, tone = 'default' }) => (
+  <span title={title} className={`inline-flex items-center gap-1 h-5 px-1.5 rounded border text-2xs whitespace-nowrap ${tone === 'pos' ? 'border-accent/40 text-accent' : 'border-line-strong text-ink-2'}`}>
+    <Icon className={`w-3 h-3 ${tone === 'pos' ? '' : 'text-ink-3'}`} aria-hidden />
     {label}
   </span>
 );
 
-const Avatar: React.FC<{ player?: PlayerData; name: string; size?: string }> = ({ player, name, size = 'w-9 h-9' }) => (
-  <div className={`relative overflow-hidden ${size} rounded-full bg-overlay flex items-center justify-center text-[10px] font-bold text-ink-3 shrink-0`}>
-    {name.substring(0, 2).toUpperCase()}
-    <PhotoOverlay src={player?.Image} alt={name} />
-  </div>
+const Avatar: React.FC<{ player?: PlayerData; name: string; size?: 'xs' | 'sm' | 'md' }> = ({ player, name, size = 'md' }) => (
+  <PlayerAvatar player={player} name={name} size={size} />
 );
 
 // ============================================
@@ -186,15 +180,16 @@ const NeedRow: React.FC<{ need: SlotNeed; matches: number; selected: boolean; on
     <button
       onClick={onSelect}
       aria-pressed={selected}
-      className={`w-full text-left grid grid-cols-[6.5rem_2.5rem_1fr_auto] items-center gap-3 px-3 py-2.5 rounded-md border transition-colors ${selected ? 'border-accent/50 bg-accent/5' : 'border-transparent hover:bg-raised'}`}
+      className={`relative w-full text-left grid grid-cols-[6rem_2.25rem_1fr_auto] items-center gap-3 px-3 py-1.5 rounded-md transition-colors ${selected ? 'bg-raised' : 'hover:bg-raised/60'}`}
     >
+      {selected && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-accent" aria-hidden />}
       <NeedChip level={need.level} />
-      <span className="text-xs font-bold text-ink-3 text-center">{positionLabel(need.position)}</span>
+      <span className="sv-tag justify-center">{positionLabel(need.position)}</span>
       <span className="flex items-center gap-2.5 min-w-0">
-        <Avatar player={need.starter} name={name} size="w-8 h-8" />
+        <Avatar player={need.starter} name={name} size="sm" />
         <span className="min-w-0">
-          <span className="block text-sm text-ink font-medium truncate">{name}</span>
-          <span className="block text-[11px] text-ink-3 truncate">
+          <span className="block text-[13px] text-ink font-medium truncate">{name}</span>
+          <span className="block text-2xs text-ink-3 truncate">
             {need.presetName ?? positionName(need.position)}
             {need.flags.length > 0 && ' · '}
             {need.flags.map(f => NEED_FLAGS[f].label).join(' · ')}
@@ -205,13 +200,13 @@ const NeedRow: React.FC<{ need: SlotNeed; matches: number; selected: boolean; on
       <span className="text-right">
         {need.forecast ? (
           <>
-            <span className="block text-sm font-mono text-ink tabular-nums">
-              {round(need.forecast.now)} <span className="text-ink-3">→</span> {round(need.forecast.next)}
+            <span className="block text-[13px] text-ink num">
+              <span className="text-ink-3">{round(need.forecast.now)} →</span> <span className="font-semibold">{round(need.forecast.next)}</span>
             </span>
-            <span className="block text-[11px] text-ink-3">{ordinal(need.rank ?? 50)} percentile</span>
+            <span className="block text-2xs text-ink-3">rang {ordinal(need.rank ?? 50)} pct</span>
           </>
         ) : (
-          <span className="text-[11px] text-ink-3">non mesurable</span>
+          <span className="text-2xs text-ink-4">non mesurable</span>
         )}
       </span>
     </button>
@@ -224,14 +219,14 @@ const DivergingRow: React.FC<{ label: string; rank: number; detail: string }> = 
   return (
     <div className="grid grid-cols-[7.5rem_1fr_3rem] items-center gap-3" title={detail}>
       <span className="text-xs text-ink-2 truncate">{label}</span>
-      <div className="relative h-2.5">
-        <div className="absolute inset-y-0 left-1/2 w-px bg-ink-4" />
+      <div className="relative h-2 bg-raised rounded-sm">
+        <div className="absolute -inset-y-0.5 left-1/2 w-px bg-ink-4" />
         <div
-          className={`absolute inset-y-0 ${above ? 'left-1/2 rounded-r' : 'right-1/2 rounded-l'}`}
+          className={`absolute inset-y-0 ${above ? 'left-1/2 rounded-r-sm' : 'right-1/2 rounded-l-sm'}`}
           style={{ width: `${width}%`, backgroundColor: above ? BLUE : RED }}
         />
       </div>
-      <span className="text-xs font-mono text-ink-2 text-right tabular-nums">{ordinal(rank)}</span>
+      <span className="text-xs text-ink-2 text-right num">{ordinal(rank)}</span>
     </div>
   );
 };
@@ -272,36 +267,36 @@ const CandidateScatter: React.FC<{ candidates: Candidate[]; baseline?: number; b
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-ink-3 mb-2">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-2xs text-ink-3 mb-2">
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BLUE }} /> Meilleur rapport qualité-prix (personne n'est meilleur pour moins cher)</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> Autres candidats</span>
         {baseline !== undefined && (
-          <span className="inline-flex items-center gap-1.5"><span className="w-4 h-px bg-ink-3" /> {baselineName ?? 'Titulaire'}, projeté</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-4 border-t border-dashed border-ink-3" /> {baselineName ?? 'Titulaire'}, projeté</span>
         )}
       </div>
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 10, right: 20, bottom: 24, left: 0 }}>
-            <CartesianGrid stroke="#1e293b" />
+            <CartesianGrid stroke={INK.grid} />
             <XAxis
               type="number" dataKey="x" scale="log" domain={[lo, hi]} ticks={ticks} allowDataOverflow
               tickFormatter={(v: number) => `€${v < 1 ? `${Math.round(v * 1000)}K` : `${v}M`}`}
-              stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }}
-              label={{ value: 'Valeur Transfermarkt (échelle logarithmique)', position: 'insideBottom', offset: -14, fill: '#64748b', fontSize: 11 }}
+              stroke={INK.axis} tick={{ fill: INK.muted, fontSize: 11 }}
+              label={{ value: 'Valeur Transfermarkt (échelle logarithmique)', position: 'insideBottom', offset: -14, fill: INK.muted, fontSize: 11 }}
             />
             <YAxis
               type="number" dataKey="y" domain={[yLo, yHi]} ticks={yTicks}
-              stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} width={36}
+              stroke={INK.axis} tick={{ fill: INK.muted, fontSize: 11 }} width={36}
             />
-            {baseline !== undefined && <ReferenceLine y={baseline} stroke="#94a3b8" strokeWidth={1} />}
+            {baseline !== undefined && <ReferenceLine y={baseline} stroke={INK.muted} strokeDasharray="4 3" strokeWidth={1} />}
             <Tooltip
               cursor={false}
               content={({ payload }) => {
                 const p = payload?.[0]?.payload as ScatterPoint | undefined;
                 if (!p) return null;
                 return (
-                  <div className="bg-raised border border-line-strong rounded-md px-3 py-2 text-xs">
-                    <div className="text-ink font-bold text-sm">{round(p.y)}</div>
+                  <div className="sv-tooltip">
+                    <div className="text-ink font-semibold text-sm num">{round(p.y)} <span className="text-2xs text-ink-3 font-normal">indice projeté</span></div>
                     <div className="text-ink-2">{p.name}</div>
                     <div className="text-ink-3">{p.team} · {formatEuros(p.x * 1e6)}</div>
                   </div>
@@ -309,7 +304,7 @@ const CandidateScatter: React.FC<{ candidates: Candidate[]; baseline?: number; b
               }}
             />
             <Scatter
-              data={others} fill={CONTEXT} stroke="#020617" strokeWidth={2} isAnimationActive={false}
+              data={others} fill={CONTEXT} stroke={INK.surface} strokeWidth={2} isAnimationActive={false}
               onClick={(d: unknown) => onPick((d as { payload?: ScatterPoint }).payload?.id ?? '')}
               shape={(props: unknown) => <Dot {...(props as DotProps)} color={CONTEXT} />}
             />
@@ -322,7 +317,7 @@ const CandidateScatter: React.FC<{ candidates: Candidate[]; baseline?: number; b
         </ResponsiveContainer>
       </div>
       {unpriced > 0 && (
-        <p className="text-[11px] text-ink-3 mt-1">{unpriced} candidat{unpriced > 1 ? 's' : ''} sans valeur Transfermarkt connue, absent{unpriced > 1 ? 's' : ''} du graphique (présent{unpriced > 1 ? 's' : ''} dans la liste).</p>
+        <p className="text-2xs text-ink-4 mt-1">{unpriced} candidat{unpriced > 1 ? 's' : ''} sans valeur Transfermarkt connue, absent{unpriced > 1 ? 's' : ''} du graphique (présent{unpriced > 1 ? 's' : ''} dans la liste).</p>
       )}
     </div>
   );
@@ -336,7 +331,7 @@ const Dot: React.FC<DotProps> = ({ cx, cy, color }) => {
   return (
     <g style={{ cursor: 'pointer' }}>
       <circle cx={cx} cy={cy} r={12} fill="transparent" />
-      <circle cx={cx} cy={cy} r={5} fill={color} stroke="#020617" strokeWidth={2} />
+      <circle cx={cx} cy={cy} r={5} fill={color} stroke={INK.surface} strokeWidth={2} />
     </g>
   );
 };
@@ -352,7 +347,7 @@ const MetricDumbbells: React.FC<{ candidate: Candidate; preset: RolePreset; extr
   const good = (v: number | undefined, w: number) => (v === undefined ? undefined : w < 0 ? 100 - v : v);
   return (
     <div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-3 mb-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-2xs text-ink-3 mb-2">
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BLUE }} /> {candidate.player.Player}, projeté chez nous</span>
         {incumbent && <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> {incumbentName}, projeté</span>}
       </div>
@@ -366,27 +361,31 @@ const MetricDumbbells: React.FC<{ candidate: Candidate; preset: RolePreset; extr
                 {metricLabel(metric)}{w < 0 && <span className="text-ink-3"> (inversé)</span>}
               </span>
               <div className="relative h-3">
-                <div className="absolute top-1/2 inset-x-0 h-px bg-overlay" />
+                <div className="absolute top-1/2 inset-x-0 h-px bg-line-strong" /><div className="absolute top-0 bottom-0 left-1/2 w-px bg-line-strong" />
                 {c !== undefined && i !== undefined && (
                   <div className="absolute top-1/2 h-px bg-ink-4" style={{ left: `${Math.min(c, i)}%`, width: `${Math.abs(c - i)}%` }} />
                 )}
                 {i !== undefined && <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-surface" style={{ left: `${i}%`, backgroundColor: CONTEXT }} />}
                 {c !== undefined && <span className="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-2 ring-surface" style={{ left: `${c}%`, backgroundColor: BLUE }} />}
               </div>
-              <span className="text-right font-mono text-ink-3 tabular-nums">
+              <span className="text-right text-ink-3 num">
                 {c === undefined ? '–' : round(c)}{incumbent && <> / {i === undefined ? '–' : round(i)}</>}
               </span>
             </div>
           );
         })}
       </div>
-      <p className="text-[10px] text-ink-3 mt-2">Percentiles projetés la saison prochaine dans l'équipe (0-100, à droite = mieux). « Inversé » : moins c'est mieux, l'échelle est retournée.</p>
+      <p className="text-2xs text-ink-4 mt-2">Percentiles projetés la saison prochaine dans l'équipe (0-100, à droite = mieux). « Inversé » : moins c'est mieux, l'échelle est retournée.</p>
     </div>
   );
 };
 
-const PartsLine: React.FC<{ candidate: Candidate }> = ({ candidate }) => {
-  const { parts } = candidate.forecast;
+/**
+ * Pourquoi cet indice : de l'indice actuel à l'indice projeté chez nous, étape par étape
+ * (les parts s'additionnent, hors plafond de 100)
+ */
+const ProjectionWaterfall: React.FC<{ candidate: Candidate }> = ({ candidate }) => {
+  const { parts, now, next } = candidate.forecast;
   const items: [string, number, string][] = [
     ['Retour vers la moyenne', parts.regression, 'Un percentile extrême redescend en partie la saison suivante, quel que soit l\'âge'],
     ['Âge', parts.age, 'Progression ou déclin moyen à cet âge et à ce poste (courbes d\'âge)'],
@@ -394,13 +393,114 @@ const PartsLine: React.FC<{ candidate: Candidate }> = ({ candidate }) => {
     ['Domination de l\'équipe', parts.context, 'Domination territoriale (field tilt) de notre équipe par rapport à la sienne'],
     ['Adaptation', parts.adaptation, 'Coût moyen d\'un changement de championnat ou de club'],
   ];
+  let running = now;
+  const rows = items.map(([label, v, title]) => {
+    const from = running;
+    running += v;
+    return { label, v, title, lo: Math.min(from, running), hi: Math.max(from, running) };
+  });
+  const Row: React.FC<{ label: string; title?: string; children: React.ReactNode; value: React.ReactNode; strong?: boolean }> = ({ label, title, children, value, strong }) => (
+    <div className="grid grid-cols-[10.5rem_1fr_3rem] items-center gap-3 h-6 text-xs" title={title}>
+      <span className={strong ? 'text-ink font-medium' : 'text-ink-2'}>{label}</span>
+      <div className="relative h-3 bg-raised/60 rounded-sm">
+        <div className="absolute inset-y-0 left-1/2 w-px bg-line-strong" aria-hidden />
+        {children}
+      </div>
+      <span className="text-right num">{value}</span>
+    </div>
+  );
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-3">
-      <span>Indice actuel <span className="font-mono text-ink">{round(candidate.forecast.now)}</span></span>
-      {items.map(([label, v, title]) => (
-        <span key={label} title={title}>{label} <span className="font-mono text-ink">{signed(v)}</span></span>
+    <div>
+      <div className="sv-label mb-1.5">Pourquoi cet indice projeté</div>
+      <Row label="Indice actuel" value={<span className="text-ink-2">{round(now)}</span>}>
+        <div className="absolute inset-y-0 left-0 rounded-sm" style={{ width: `${now}%`, backgroundColor: CONTEXT }} />
+      </Row>
+      {rows.map(r => (
+        <Row key={r.label} label={r.label} title={r.title} value={<Delta value={r.v} />}>
+          <div className="absolute inset-y-0.5 rounded-sm" style={{ left: `${r.lo}%`, width: `${Math.max(r.hi - r.lo, 0.6)}%`, backgroundColor: r.v >= 0 ? DIVERGING.above : DIVERGING.below }} />
+        </Row>
       ))}
-      <span>= projeté <span className="font-mono text-ink font-bold">{round(candidate.forecast.next)}</span></span>
+      <Row label="Indice projeté chez nous" strong value={<span className="text-ink font-semibold">{round(next)}</span>}>
+        <div className="absolute inset-y-0 left-0 rounded-sm" style={{ width: `${next}%`, backgroundColor: BRAND }} />
+      </Row>
+    </div>
+  );
+};
+
+/**
+ * Chaîne de décision : besoin, titulaire, candidat, projection, adéquation, valeur
+ */
+const DecisionChain: React.FC<{
+  need?: SlotNeed;
+  position?: string;
+  incumbent?: ReturnType<typeof forecastRole>;
+  incumbentName?: string;
+  incumbentPlayer?: PlayerData;
+  candidate: Candidate;
+  roleName?: string;
+  leagueName: string;
+  complements: number;
+  useComplements: boolean;
+}> = ({ need, position, incumbent, incumbentName, incumbentPlayer, candidate: c, roleName, leagueName, complements, useComplements }) => {
+  const Step: React.FC<{ n: number; label: string; children: React.ReactNode; accent?: boolean }> = ({ n, label, children, accent }) => (
+    <div className={`relative min-w-0 px-3 py-2.5 ${accent ? 'bg-accent/[0.06]' : ''}`}>
+      <div className="sv-label flex items-center gap-1.5 mb-1.5">
+        <span className={`w-4 h-4 rounded-sm flex items-center justify-center text-[9px] font-bold ${accent ? 'bg-accent text-accent-ink' : 'bg-overlay text-ink-2'}`}>{n}</span>
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 border border-line rounded-md divide-x divide-line overflow-hidden [&>*]:border-line max-2xl:[&>*:nth-child(n+4)]:border-t md:max-2xl:[&>*:nth-child(4)]:border-l-0 max-md:[&>*:nth-child(n+3)]:border-t">
+      <Step n={1} label="Besoin">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {need ? <NeedChip level={need.level} /> : <span className="sv-tag">Poste choisi</span>}
+          {position && <span className="text-[13px] text-ink">{positionName(position)}</span>}
+        </div>
+        <div className="text-2xs text-ink-3 mt-1 truncate">{roleName ?? '—'}{need?.rank !== undefined ? ` · titulaire au ${ordinal(need.rank)} pct` : ''}</div>
+      </Step>
+      <Step n={2} label="Titulaire actuel">
+        {incumbent && incumbentName ? (
+          <>
+            <div className="flex items-center gap-2 min-w-0">
+              <Avatar player={incumbentPlayer} name={incumbentName} size="xs" />
+              <span className="text-[13px] text-ink truncate">{incumbentName}</span>
+            </div>
+            <div className="text-2xs text-ink-3 mt-1 num">indice {round(incumbent.now)} → <span className="text-ink-2 font-semibold">{round(incumbent.next)}</span> projeté</div>
+          </>
+        ) : <div className="text-xs text-ink-4">Aucun titulaire régulier noté</div>}
+      </Step>
+      <Step n={3} label="Candidat" accent>
+        <div className="flex items-center gap-2 min-w-0">
+          <Avatar player={c.player} name={c.player.Player} size="xs" />
+          <span className="text-[13px] text-ink font-medium truncate">{c.player.Player}</span>
+        </div>
+        <div className="text-2xs text-ink-3 mt-1 truncate">{c.player.Age ?? '?'} ans · {c.player.Team}</div>
+      </Step>
+      <Step n={4} label="Projection chez nous">
+        <div className="flex items-baseline gap-2">
+          <span className="text-lg font-semibold text-ink num leading-none">{round(c.forecast.next)}</span>
+          {c.gain !== undefined && <span className="text-xs"><Delta value={c.gain} /> <span className="text-ink-4">vs titulaire</span></span>}
+        </div>
+        <div className="text-2xs text-ink-3 mt-1 num">actuel {round(c.forecast.now)}, saison prochaine</div>
+      </Step>
+      <Step n={5} label="Adéquation">
+        <div className="text-[13px] text-ink num">{ordinal(c.rank)} pct <span className="text-ink-3 text-2xs">du championnat</span></div>
+        <div className="text-2xs text-ink-3 mt-1 num" title={`Rang parmi les joueurs de ${leagueName} éligibles au rôle ; critères éliminatoires du rôle atteints en percentiles projetés`}>
+          seuils {c.thresholds.met}/{c.thresholds.total}{complements > 0 ? ` · complémentarité ${useComplements ? 'prise en compte' : 'ignorée'}` : ''}
+        </div>
+      </Step>
+      <Step n={6} label="Valeur">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[13px] text-ink font-medium num">{formatEuros(c.market?.value)}</span>
+          {c.market?.estimated !== undefined && <span className="text-2xs text-ink-3 num" title="Valeur estimée par la performance">est. {formatEuros(c.market.estimated)}</span>}
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          <span className={`text-2xs num ${c.contractMonths !== undefined && c.contractMonths <= CONTRACT_MONTHS ? 'text-warn' : 'text-ink-3'}`}>contrat {formatMonth(c.market?.contract)}</span>
+          {c.efficient && <FlagChip label="Qualité-prix" icon={Scale} tone="pos" title="Aucun autre candidat n'a un meilleur indice projeté pour une valeur inférieure ou égale" />}
+        </div>
+      </Step>
     </div>
   );
 };
@@ -590,74 +690,64 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
   // ============================================
 
   if (!team) {
-    return <div className="p-8 text-ink-3">Équipe introuvable dans les données chargées.</div>;
+    return <EmptyState title="Équipe introuvable dans les données chargées." />;
   }
   if (team.missingLeague) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-ink-3 text-center px-6">
-        <UserSearch className="w-12 h-12 mb-3 opacity-20" />
-        <p>{team.name} n'a pas de championnat couvert cette saison : le recrutement s'appuie sur le championnat de l'équipe.</p>
-      </div>
+      <EmptyState icon={UserSearch} title={`${team.name} n'a pas de championnat couvert cette saison.`}>
+        Le recrutement s'appuie sur le championnat de l'équipe.
+      </EmptyState>
     );
   }
   if (!models || market === undefined || lineups === undefined) {
-    return <div className="h-full min-h-[600px] bg-raised animate-pulse" />;
+    return <div className="p-5"><Skeleton className="h-[600px]" /></div>;
   }
 
   const levelGap = transfer ? (c: PlayerData) => leagueLevel(transfer, c.Competition, c['League tier']) : null;
   const incumbentName = need?.starter?.Player;
   const fullAge = state.filters.minAge <= AGE_RANGE[0] && state.filters.maxAge >= AGE_RANGE[1];
   const validation = transfer?.validation;
+  const candidateId = (c: Candidate) => c.player['Player ID'] ?? c.player.Player;
+  const focus = sorted.find(c => candidateId(c) === expanded) ?? sorted[0];
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* En-tête */}
-      <div className="flex flex-wrap items-center gap-4">
-        <TeamLogo src={ready!.logo} name={ready!.name} size="lg" />
-        <div className="min-w-0">
-          <h2 className="text-2xl font-bold text-ink">Recrutement · {ready!.name}</h2>
-          <div className="flex flex-wrap items-center gap-2 text-sm text-ink-3 mt-1">
-            <CompetitionBadge competition={ready!.competition} />
-            <span>· saison {ready!.season} · projection pour la saison suivante</span>
-          </div>
+    <div className="p-5 space-y-4">
+      {/* Contexte et avertissements */}
+      {(ready!.fromCup || ready!.inProgress || !transfer) && (
+        <div className="space-y-1.5">
+          {ready!.fromCup && (
+            <p className="flex items-start gap-2 text-xs text-ink-3"><Info className="w-3.5 h-3.5 mt-px shrink-0 text-ink-4" /> Analyse faite sur le championnat de l'équipe ({ready!.leagueName}) : l'entrée choisie est une coupe d'Europe.</p>
+          )}
+          {ready!.inProgress && (
+            <p className="flex items-start gap-2 text-xs text-ink-3"><Info className="w-3.5 h-3.5 mt-px shrink-0 text-ink-4" /> Saison en cours : les percentiles reposent sur peu de matchs (seuil de minutes abaissé à {IN_PROGRESS_MIN_MINUTES}) et les championnats en année civile ont plus de recul. Recoupez avec la saison précédente (sélecteur de saison en haut) avant de juger un joueur.</p>
+          )}
+          {!transfer && (
+            <p className="flex items-start gap-2 text-xs text-warn"><TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" /> Modèle de transfert absent (relancez scripts/prepare_data.py) : les candidats ne sont projetés qu'avec les courbes d'âge, sans tenir compte de leur championnat.</p>
+          )}
         </div>
-      </div>
+      )}
 
-      <div className="space-y-2">
-        {ready!.fromCup && (
-          <p className="flex items-start gap-2 text-xs text-ink-3"><Info className="w-4 h-4 shrink-0 text-ink-3" /> Analyse faite sur le championnat de l'équipe ({ready!.leagueName}) : l'entrée choisie est une coupe d'Europe.</p>
-        )}
-        {ready!.inProgress && (
-          <p className="flex items-start gap-2 text-xs text-ink-3"><Info className="w-4 h-4 shrink-0 text-ink-3" /> Saison en cours : les percentiles reposent sur peu de matchs (seuil de minutes abaissé à {IN_PROGRESS_MIN_MINUTES}) et les championnats en année civile ont plus de recul. Recoupez avec la saison précédente (sélecteur de saison en haut) avant de juger un joueur.</p>
-        )}
-        {!transfer && (
-          <p className="flex items-start gap-2 text-xs text-warn"><TriangleAlert className="w-4 h-4 shrink-0" /> Modèle de transfert absent (relancez scripts/prepare_data.py) : les candidats ne sont projetés qu'avec les courbes d'âge, sans tenir compte de leur championnat.</p>
-        )}
-      </div>
-
-      {/* Diagnostic */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-6">
+      {/* ===== 1. Diagnostic ===== */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         <Card
+          className="xl:col-span-7"
           title="Besoins par poste"
           subtitle={formation
-            ? `Onze type en ${formation.formation} (${formation.matches} matchs). Indice du meilleur rôle du titulaire, actuel → projeté la saison prochaine, et son rang parmi les joueurs du championnat éligibles à ce rôle.`
+            ? `Onze type en ${formation.formation} (${formation.matches} matchs). Indice du meilleur rôle du titulaire, actuel → projeté, et son rang parmi les joueurs du championnat éligibles à ce rôle. Cliquez sur un poste pour chercher.`
             : 'Aucune composition disponible pour cette équipe : choisissez un poste pour chercher des joueurs.'}
-        >
-          {formations.length > 1 && (
-            <div className="flex flex-wrap gap-2 mb-3">
+          right={formations.length > 1 && (
+            <div className="sv-seg">
               {formations.map((f, idx) => (
-                <button
-                  key={f.formation}
-                  onClick={() => update({ formationIdx: idx, slot: null, role: null })}
-                  className={`px-3 py-1 rounded-full text-xs border ${idx === formationIdx ? 'bg-accent/10 border-accent/40 text-accent font-semibold' : 'border-line-strong text-ink-3 hover:text-ink'}`}
-                >
-                  {f.formation} <span className="text-ink-3">· {f.matches}</span>
+                <button key={f.formation} onClick={() => update({ formationIdx: idx, slot: null, role: null })}
+                  className={`sv-seg-btn ${idx === formationIdx ? 'sv-seg-on' : ''}`}>
+                  {f.formation} <span className="text-ink-4 num">{f.matches}</span>
                 </button>
               ))}
             </div>
           )}
+        >
           {needs.length > 0 ? (
-            <div className="space-y-1">
+            <div className="-mx-1 space-y-px">
               {needOrder.map(i => (
                 <NeedRow
                   key={needs[i].placed.slot.slot}
@@ -669,318 +759,318 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
               ))}
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {['GK', 'CB', 'FB', 'DM', 'CM', 'AM', 'W', 'ST'].map(pos => (
-                <button
-                  key={pos}
-                  onClick={() => update({ manualPosition: pos, role: null })}
-                  className={`px-3 py-1.5 rounded-md text-xs border ${state.manualPosition === pos ? 'bg-accent/10 border-accent/40 text-accent font-semibold' : 'border-line-strong text-ink-3 hover:text-ink'}`}
-                >
+                <button key={pos} onClick={() => update({ manualPosition: pos, role: null })}
+                  className={`sv-chip ${state.manualPosition === pos ? 'sv-chip-on' : ''}`}>
                   {positionName(pos)}
                 </button>
               ))}
             </div>
           )}
           {needs.length > 0 && (
-            <p className="text-[11px] text-ink-3 mt-3 leading-relaxed">
+            <p className="text-2xs text-ink-4 mt-3 leading-relaxed">
               Prioritaire : titulaire projeté dans les 40 % les plus faibles du championnat. À évaluer : aucun joueur de ce poste n'a 40 % des minutes de l'équipe, le besoin n'est pas mesurable. À renforcer : entre 40 et 65 %, ou titulaire plus solide mais en fin de contrat, en déclin lié à l'âge, ou poste en rotation. Solide : au-delà.
             </p>
           )}
         </Card>
 
-        <div className="space-y-6">
+        <div className="xl:col-span-5 space-y-4">
           <Card
             title="Profil de l'effectif"
-            subtitle={`Rang parmi les équipes de ${ready!.leagueName} : moyenne des percentiles des joueurs (chacun comparé aux joueurs de son rôle), pondérée par les minutes.`}
+            subtitle={`Rang parmi les équipes de ${ready!.leagueName} : moyenne des percentiles des joueurs (chacun comparé à son rôle), pondérée par les minutes.`}
           >
             {profile.length > 0 ? (
               <>
-                <div className="flex gap-4 text-[11px] text-ink-3 mb-3">
-                  <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: BLUE }} /> Au-dessus de la médiane</span>
-                  <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: RED }} /> En dessous</span>
+                <div className="flex gap-4 mb-2.5">
+                  <LegendItem color={BLUE} shape="bar">Au-dessus de la médiane</LegendItem>
+                  <LegendItem color={RED} shape="bar">En dessous</LegendItem>
                 </div>
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {profile.map(d => (
                     <DivergingRow key={d.key} label={d.label} rank={d.rank}
                       detail={`${d.label} : moyenne ${round(d.value)}, rang ${ordinal(d.rank)} percentile sur ${d.teams} équipes`} />
                   ))}
                 </div>
               </>
-            ) : <p className="text-sm text-ink-3">Pas assez de données de joueurs.</p>}
+            ) : <p className="text-xs text-ink-4">Pas assez de données de joueurs.</p>}
           </Card>
           {output.length > 0 && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="sv-panel grid grid-cols-2 md:grid-cols-4 xl:grid-cols-2 divide-x divide-line [&>*:nth-child(n+3)]:xl:border-t [&>*:nth-child(3)]:xl:border-l-0">
               {output.map(o => (
-                <div key={o.label} className="bg-surface border border-line rounded-md p-3">
-                  <div className="text-[11px] text-ink-3">{o.label}</div>
-                  <div className="text-lg font-semibold text-ink">{o.value}</div>
-                  <div className="text-[11px] text-ink-3">{ordinal(o.rank)} percentile du championnat</div>
-                </div>
+                <Stat key={o.label} className="px-3 py-2.5 border-line" label={o.label} value={o.value}
+                  sub={<span className="inline-flex items-center gap-1.5">rang <PercentileValue value={o.rank} className="text-2xs" /></span>} />
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* Profil recherché */}
+      {/* ===== 2. Profil recherché ===== */}
       {preset && position && (
         <Card
-          title={<span className="flex items-center gap-2"><UserSearch className="w-4 h-4 text-accent" /> Profil recherché · {positionName(position)}</span>}
+          title={<span className="flex items-center gap-1.5"><UserSearch className="w-3.5 h-3.5 text-accent" /> Profil recherché · {positionName(position)}</span>}
           subtitle={need?.starter && incumbent
             ? `Comparé au titulaire, ${need.starter.Player}, projeté dans le même rôle la saison prochaine (indice ${round(incumbent.next)}).`
             : 'Pas de titulaire régulier noté à ce poste : les candidats sont classés par indice projeté.'}
         >
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
-              <div className="text-[11px] text-ink-3 uppercase tracking-wider mb-2">Rôle</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="sv-label mb-1.5">Rôle <span className="normal-case tracking-normal font-normal text-ink-4">· indice actuel du titulaire</span></div>
+              <div className="flex flex-wrap gap-1.5">
                 {roleOptions.map(([name, p]) => {
                   const own = need?.starter && models ? forecastRole(need.starter, p, models) : undefined;
                   return (
-                    <button
-                      key={name}
-                      onClick={() => update({ role: name })}
-                      title={p.description}
-                      className={`px-3 py-1.5 rounded-md text-xs border ${name === roleName ? 'bg-accent/10 border-accent/40 text-accent font-semibold' : 'border-line-strong text-ink-2 hover:text-ink'}`}
-                    >
-                      {name}{own && <span className="text-ink-3 font-mono"> · {round(own.now)}</span>}
+                    <button key={name} onClick={() => update({ role: name })} title={p.description}
+                      className={`sv-chip ${name === roleName ? 'sv-chip-on' : ''}`} aria-pressed={name === roleName}>
+                      {name}{own && <span className="text-ink-4 num">{round(own.now)}</span>}
                     </button>
                   );
                 })}
               </div>
-              {preset.description && <p className="text-xs text-ink-3 mt-2">{preset.description}</p>}
+              {preset.description && <p className="text-xs text-ink-3 mt-1.5">{preset.description}</p>}
             </div>
 
             {partner?.starter && (
               <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <span className="text-[11px] text-ink-3 uppercase tracking-wider">
-                    Complémentarité avec {partner.starter.Player} ({positionName(partner.position)})
-                  </span>
+                <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <span className="sv-label">Complémentarité avec {partner.starter.Player} ({positionName(partner.position)})</span>
                   {complements.length > 0 && (
                     <label className="flex items-center gap-2 text-xs text-ink-2 cursor-pointer">
-                      <input type="checkbox" className="accent-accent" checked={state.useComplements}
-                        onChange={e => update({ useComplements: e.target.checked })} />
+                      <input type="checkbox" checked={state.useComplements} onChange={e => update({ useComplements: e.target.checked })} />
                       En tenir compte
                     </label>
                   )}
                 </div>
                 {complements.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {complements.map(c => (
-                      <span key={c.metric} className={`px-2 py-1 rounded-md border text-xs ${state.useComplements ? 'border-line-strong text-ink' : 'border-line text-ink-3'}`}>
-                        {metricLabel(c.metric)} <span className="font-mono text-ink-3">· {ordinal(c.value)} pct</span>
+                      <span key={c.metric} className={`sv-tag !font-normal ${state.useComplements ? '' : 'opacity-50'}`}>
+                        {metricLabel(c.metric)} <span className="text-ink-4 num">{ordinal(c.value)} pct</span>
                       </span>
                     ))}
-                    <span className="text-[11px] text-ink-3 self-center">Ses points faibles comptent en plus dans l'indice du candidat.</span>
+                    <span className="text-2xs text-ink-4">Ses points faibles comptent en plus dans l'indice du candidat.</span>
                   </div>
                 ) : (
-                  <p className="text-xs text-ink-3">Aucun point faible marqué (sous le {COMPLEMENT_THRESHOLD}e percentile) sur les métriques du poste.</p>
+                  <p className="text-xs text-ink-4">Aucun point faible marqué (sous le {COMPLEMENT_THRESHOLD}e percentile) sur les métriques du poste.</p>
                 )}
               </div>
             )}
 
             {/* Filtres : une rangée au-dessus des résultats */}
-            <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-line">
-              <SlidersHorizontal className="w-4 h-4 text-ink-3 mb-2" aria-hidden />
-              <label className="text-[11px] text-ink-3">
+            <div className="flex flex-wrap items-end gap-3 pt-3 border-t border-line">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-ink-4 mb-2" aria-hidden />
+              <label className="sv-label">
                 Âge
                 <span className="flex items-center gap-1 mt-1">
                   <input type="number" min={AGE_RANGE[0]} max={AGE_RANGE[1]} value={state.filters.minAge}
                     onChange={e => updateFilters({ minAge: Number(e.target.value) || AGE_RANGE[0] })}
-                    className="w-14 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink" aria-label="Âge minimum" />
+                    className="sv-input sv-input-sm !w-14" aria-label="Âge minimum" />
                   <span className="text-ink-4">–</span>
                   <input type="number" min={AGE_RANGE[0]} max={AGE_RANGE[1]} value={state.filters.maxAge}
                     onChange={e => updateFilters({ maxAge: Number(e.target.value) || AGE_RANGE[1] })}
-                    className="w-14 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink" aria-label="Âge maximum" />
+                    className="sv-input sv-input-sm !w-14" aria-label="Âge maximum" />
                 </span>
               </label>
-              {market && <label className="text-[11px] text-ink-3">
+              {market && <label className="sv-label">
                 Valeur max (M€)
                 <input type="number" min={0} step={0.5} placeholder="sans limite"
                   value={state.filters.maxValue === undefined ? '' : state.filters.maxValue / 1e6}
                   onChange={e => updateFilters({ maxValue: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) * 1e6 })}
-                  className="block mt-1 w-28 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink" />
+                  className="sv-input sv-input-sm !w-28 mt-1 block normal-case tracking-normal font-normal" />
               </label>}
               {market && state.filters.maxValue !== undefined && (
-                <label className="flex items-center gap-1.5 text-[11px] text-ink-3 pb-1.5">
-                  <input type="checkbox" className="accent-accent" checked={state.filters.includeUnknownValue}
+                <label className="flex items-center gap-1.5 text-xs text-ink-2 pb-1.5">
+                  <input type="checkbox" checked={state.filters.includeUnknownValue}
                     onChange={e => updateFilters({ includeUnknownValue: e.target.checked })} />
                   garder les valeurs inconnues
                 </label>
               )}
-              <label className="text-[11px] text-ink-3">
+              <label className="sv-label">
                 Minutes min.
                 <select value={state.filters.minMinutes} onChange={e => updateFilters({ minMinutes: Number(e.target.value) })}
-                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
+                  className="sv-select sv-select-sm block mt-1 normal-case tracking-normal font-normal">
                   {[0, 450, 900, 1350, 1800, 2400].map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </label>
-              <label className="text-[11px] text-ink-3">
+              <label className="sv-label">
                 Contrat
                 <select value={state.filters.contractWithinMonths ?? ''}
                   onChange={e => updateFilters({ contractWithinMonths: e.target.value === '' ? undefined : Number(e.target.value) })}
-                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
+                  className="sv-select sv-select-sm block mt-1 normal-case tracking-normal font-normal">
                   <option value="">Tous</option>
                   <option value={6}>Fin ≤ 6 mois</option>
                   <option value={12}>Fin ≤ 12 mois</option>
                   <option value={24}>Fin ≤ 24 mois</option>
                 </select>
               </label>
-              <label className="text-[11px] text-ink-3">
+              <label className="sv-label">
                 Championnats
                 <select value={state.filters.leagues} onChange={e => updateFilters({ leagues: e.target.value as LeagueScope })}
-                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
+                  className="sv-select sv-select-sm block mt-1 normal-case tracking-normal font-normal">
                   {LEAGUE_SCOPES.filter(s => s.key !== 'lower' || transfer).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
-              <label className="text-[11px] text-ink-3">
+              <label className="sv-label">
                 Trier par
                 <select value={state.sort} onChange={e => update({ sort: e.target.value as SortKey })}
-                  className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
+                  className="sv-select sv-select-sm block mt-1 normal-case tracking-normal font-normal">
                   {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
-              {!fullAge && <span className="text-[10px] text-ink-3 pb-1.5">Âge inconnu : joueur écarté</span>}
+              {!fullAge && <span className="text-2xs text-ink-4 pb-1.5">Âge inconnu : joueur écarté</span>}
             </div>
           </div>
         </Card>
       )}
 
-      {/* Suggestions */}
+      {/* ===== 3. Décision ===== */}
       {preset && (
         <Card
           title="Suggestions"
-          subtitle={`${candidates.length} joueur${candidates.length > 1 ? 's' : ''} (40 au plus), classés par indice projeté dans l'équipe la saison prochaine${market ? ` · valeurs Transfermarkt au ${market.scrapedAt ?? '—'}` : ' · valeurs Transfermarkt indisponibles'}.`}
+          subtitle={`${candidates.length} joueur${candidates.length > 1 ? 's' : ''} (40 au plus), classés par indice projeté dans l'équipe la saison prochaine${market ? ` · valeurs Transfermarkt au ${market.scrapedAt ?? '—'}` : ' · valeurs Transfermarkt indisponibles'}. Sélectionnez un candidat (ligne ou point) : la chaîne de décision et le détail de sa projection se mettent à jour.`}
         >
           {candidates.length === 0 ? (
-            <p className="text-sm text-ink-3">Aucun joueur ne correspond aux filtres.</p>
+            <EmptyState title="Aucun joueur ne correspond aux filtres." />
           ) : (
-            <div className="space-y-6">
-              <CandidateScatter
-                candidates={candidates}
-                baseline={incumbent?.next}
-                baselineName={incumbentName}
-                onPick={id => {
-                  setExpanded(id);
-                  requestAnimationFrame(() => document.getElementById(`candidate-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
-                }}
-              />
+            <div className="space-y-4">
+              {focus && (
+                <DecisionChain
+                  need={need} position={position} incumbent={incumbent} incumbentName={incumbentName} incumbentPlayer={need?.starter}
+                  candidate={focus} roleName={roleName} leagueName={ready!.leagueName}
+                  complements={complements.length} useComplements={state.useComplements}
+                />
+              )}
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-[11px] text-ink-3 uppercase tracking-wider border-b border-line">
-                      <th className="text-left font-semibold py-2 pr-3">Joueur</th>
-                      <th className="text-right font-semibold py-2 px-3">Indice projeté</th>
-                      <th className="text-right font-semibold py-2 px-3" title={`Rang parmi les joueurs de ${ready!.leagueName} éligibles au rôle`}>Rang</th>
-                      <th className="text-right font-semibold py-2 px-3" title="Critères éliminatoires du rôle atteints, en percentiles projetés">Seuils</th>
-                      <th className="text-left font-semibold py-2 px-3">Valeur · contrat</th>
-                      <th className="text-left font-semibold py-2 px-3">Signaux</th>
-                      <th className="py-2 pl-3 w-8" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sorted.map(c => {
-                      const id = c.player['Player ID'] ?? c.player.Player;
-                      const open = expanded === id;
-                      return (
-                        <React.Fragment key={id}>
-                          <tr
-                            id={`candidate-${id}`}
-                            className={`border-b border-line/60 cursor-pointer ${open ? 'bg-raised/70' : 'hover:bg-raised/40'}`}
-                            onClick={() => setExpanded(open ? null : id)}
-                          >
-                            <td className="py-2.5 pr-3">
-                              <div className="flex items-center gap-3 min-w-[15rem]">
-                                <Avatar player={c.player} name={c.player.Player} />
-                                <div className="min-w-0">
-                                  <div className="text-ink font-medium truncate">
-                                    {c.player.Player}
-                                    <span className="text-ink-3 font-normal text-xs"> · {c.player.Age ?? '?'} ans · {positionLabel(c.player.Position)}</span>
-                                  </div>
-                                  <TeamLine player={c.player} className="text-xs text-ink-3 max-w-[16rem]" />
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                              <span className="text-lg font-semibold text-ink">{round(c.forecast.next)}</span>
-                              {c.gain !== undefined && (
-                                <span className="block text-[11px] text-ink-3">{signed(c.gain)} vs titulaire</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right text-xs text-ink-2 whitespace-nowrap tabular-nums">{ordinal(c.rank)}</td>
-                            <td className="py-2.5 px-3 text-right text-xs text-ink-3 whitespace-nowrap tabular-nums">{c.thresholds.met}/{c.thresholds.total}</td>
-                            <td className="py-2.5 px-3 text-xs whitespace-nowrap">
-                              <span className="text-ink">{formatEuros(c.market?.value)}</span>
-                              {c.market?.estimated !== undefined && (
-                                <span className="text-ink-3" title="Valeur estimée par la performance (modèle, saison actuelle)"> · est. {formatEuros(c.market.estimated)}</span>
-                              )}
-                              <span className="block text-ink-3">contrat {formatMonth(c.market?.contract)}</span>
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <div className="flex flex-wrap gap-1 min-w-[12rem] max-w-[22rem]">
-                                {c.efficient && <FlagChip label="Qualité-prix" icon={Scale} title="Aucun autre candidat n'a un meilleur indice projeté pour une valeur inférieure ou égale" />}
-                                {c.flags.map(f => (
-                                  <FlagChip key={f} {...CANDIDATE_FLAGS[f]}
-                                    title={f === 'fewMinutes' ? `Moins de ${fewMinutes.toLocaleString('fr-FR')} minutes cette saison : percentiles plus instables` : CANDIDATE_FLAGS[f].title} />
-                                ))}
-                              </div>
-                            </td>
-                            <td className="py-2.5 pl-3 text-ink-3">
-                              {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                            </td>
-                          </tr>
-                          {open && (
-                            <tr className="bg-raised/70 border-b border-line">
-                              <td colSpan={7} className="px-4 pb-5 pt-2">
-                                <div className="grid grid-cols-1 lg:grid-cols-[1fr_16rem] gap-6">
-                                  <div className="space-y-3">
-                                    <PartsLine candidate={c} />
-                                    <MetricDumbbells candidate={c} preset={preset} extraWeights={extraWeights} incumbent={incumbent} incumbentName={incumbentName} />
-                                  </div>
-                                  <div className="space-y-2 text-xs text-ink-3">
-                                    <div>Minutes : <span className="text-ink">{c.player['Minutes played']}</span> ({c.player['Matches played']} matchs)</div>
-                                    {levelGap && c.player.Competition !== ready!.competition && (
-                                      <div>
-                                        Écart de niveau moyen vers {ready!.leagueName} :{' '}
-                                        <span className="text-ink font-mono">{signed(levelGap(c.player) - leagueLevel(transfer!, ready!.competition, ready!.tier))}</span> pts de percentile
-                                        {' '}({transfer!.leagues[c.player.Competition ?? '']?.moves ?? 0} transferts observés)
-                                      </div>
-                                    )}
-                                    {c.player['Team style'] && <div>Style de son équipe : <span className="text-ink">{String(c.player['Team style'])}</span></div>}
-                                    {onSelectPlayer && (
-                                      <button
-                                        onClick={e => { e.stopPropagation(); onSelectPlayer(c.player); }}
-                                        className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-accent-ink font-semibold hover:bg-accent-strong"
-                                      >
-                                        Fiche du joueur <ExternalLink className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-x-6 gap-y-4">
+                <div className="xl:col-span-5 space-y-2">
+                  <div className="sv-label">Valeur et indice projeté</div>
+                  <CandidateScatter
+                    candidates={candidates}
+                    baseline={incumbent?.next}
+                    baselineName={incumbentName}
+                    onPick={id => {
+                      setExpanded(id);
+                      requestAnimationFrame(() => document.getElementById(`candidate-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+                    }}
+                  />
+                </div>
+                {focus && (
+                  <div className="xl:col-span-7 space-y-4">
+                    <ProjectionWaterfall candidate={focus} />
+                    <MetricDumbbells candidate={focus} preset={preset} extraWeights={extraWeights} incumbent={incumbent} incumbentName={incumbentName} />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="overflow-x-auto border border-line rounded-md max-h-[640px] overflow-y-auto">
+                  <table className="sv-table">
+                    <thead>
+                      <tr>
+                        <th className="pl-3">Candidat</th>
+                        <th className="text-right" title="Indice du rôle projeté dans notre équipe la saison prochaine">Projection</th>
+                        <th className="text-right" title="Écart d'indice projeté avec le titulaire">vs titulaire</th>
+                        <th className="text-right" title={`Rang parmi les joueurs de ${ready!.leagueName} éligibles au rôle · critères éliminatoires atteints`}>Adéquation</th>
+                        <th className="text-right">Valeur · contrat</th>
+                        <th>Signaux</th>
+                        <th className="w-6 pr-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sorted.map(c => {
+                        const id = candidateId(c);
+                        const open = expanded === id;
+                        const isFocus = focus && candidateId(focus) === id;
+                        return (
+                          <React.Fragment key={id}>
+                            <tr id={`candidate-${id}`} className={`cursor-pointer ${isFocus ? '[&>td]:!bg-raised' : ''}`}
+                              onClick={() => setExpanded(open ? null : id)} aria-expanded={open}>
+                              <td className="pl-3 relative">
+                                {isFocus && <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-accent" aria-hidden />}
+                                <div className="flex items-center gap-2.5 min-w-[13rem]">
+                                  <Avatar player={c.player} name={c.player.Player} size="sm" />
+                                  <div className="min-w-0">
+                                    <div className="text-[13px] text-ink font-medium truncate">
+                                      {c.player.Player}
+                                      <span className="text-ink-4 font-normal text-2xs"> · {c.player.Age ?? '?'} ans · {positionLabel(c.player.Position)}</span>
+                                    </div>
+                                    <TeamLine player={c.player} className="text-2xs text-ink-3 max-w-[15rem]" />
                                   </div>
                                 </div>
                               </td>
+                              <td className="text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-2">
+                                  <span className="text-2xs text-ink-4 num">{round(c.forecast.now)} →</span>
+                                  <span className="text-[15px] font-semibold text-ink num w-7">{round(c.forecast.next)}</span>
+                                </div>
+                              </td>
+                              <td className="text-right">{c.gain !== undefined ? <Delta value={c.gain} /> : <span className="text-ink-4">–</span>}</td>
+                              <td className="text-right whitespace-nowrap">
+                                <div className="text-xs text-ink-2 num">{ordinal(c.rank)} pct</div>
+                                <div className="text-2xs text-ink-4 num">seuils {c.thresholds.met}/{c.thresholds.total}</div>
+                              </td>
+                              <td className="text-right whitespace-nowrap">
+                                <div className="text-xs text-ink num">
+                                  {formatEuros(c.market?.value)}
+                                  {c.market?.estimated !== undefined && <span className="text-ink-4" title="Valeur estimée par la performance (modèle, saison actuelle)"> · est. {formatEuros(c.market.estimated)}</span>}
+                                </div>
+                                <div className={`text-2xs num ${c.contractMonths !== undefined && c.contractMonths <= CONTRACT_MONTHS ? 'text-warn' : 'text-ink-4'}`}>contrat {formatMonth(c.market?.contract)}</div>
+                              </td>
+                              <td>
+                                <div className="flex flex-wrap gap-1 min-w-[9rem] max-w-[18rem]">
+                                  {c.efficient && <FlagChip label="Qualité-prix" icon={Scale} tone="pos" title="Aucun autre candidat n'a un meilleur indice projeté pour une valeur inférieure ou égale" />}
+                                  {c.flags.map(f => (
+                                    <FlagChip key={f} {...CANDIDATE_FLAGS[f]}
+                                      title={f === 'fewMinutes' ? `Moins de ${fewMinutes.toLocaleString('fr-FR')} minutes cette saison : percentiles plus instables` : CANDIDATE_FLAGS[f].title} />
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="pr-3 text-ink-4">
+                                {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </td>
                             </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            {open && (
+                              <tr>
+                                <td colSpan={7} className="!bg-raised/40 px-4 py-2.5">
+                                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-3">
+                                    <span>Minutes <span className="text-ink-2 num">{c.player['Minutes played']}</span> ({c.player['Matches played']} matchs)</span>
+                                    {levelGap && c.player.Competition !== ready!.competition && (
+                                      <span>
+                                        Écart de niveau vers {ready!.leagueName} : <Delta value={levelGap(c.player) - leagueLevel(transfer!, ready!.competition, ready!.tier)} /> pts
+                                        {' '}({transfer!.leagues[c.player.Competition ?? '']?.moves ?? 0} transferts observés)
+                                      </span>
+                                    )}
+                                    {c.player['Team style'] && <span>Style de son équipe : <span className="text-ink-2">{String(c.player['Team style'])}</span></span>}
+                                    {onSelectPlayer && (
+                                      <button onClick={e => { e.stopPropagation(); onSelectPlayer(c.player); }} className="sv-btn sv-btn-primary sv-btn-sm ml-auto">
+                                        Fiche du joueur <ExternalLink className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
         </Card>
       )}
 
-      {/* Méthode */}
-      <section className="bg-surface border border-line rounded-lg">
-        <button onClick={() => setShowMethod(v => !v)} className="w-full flex items-center justify-between px-5 py-4 text-left" aria-expanded={showMethod}>
-          <span className="text-sm font-bold text-ink uppercase tracking-wider flex items-center gap-2"><Info className="w-4 h-4 text-ink-3" /> Méthode et fiabilité</span>
+      {/* ===== Méthode ===== */}
+      <section className="sv-panel">
+        <button onClick={() => setShowMethod(v => !v)} className="w-full flex items-center justify-between px-4 py-3 text-left" aria-expanded={showMethod}>
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink flex items-center gap-1.5"><Info className="w-3.5 h-3.5 text-ink-3" /> Méthode et fiabilité</span>
           {showMethod ? <ChevronDown className="w-4 h-4 text-ink-3" /> : <ChevronRight className="w-4 h-4 text-ink-3" />}
         </button>
         {showMethod && (
-          <div className="px-5 pb-5 grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs text-ink-3 leading-relaxed">
+          <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs text-ink-3 leading-relaxed">
             <div className="space-y-3">
               <p>
                 <span className="text-ink font-semibold">Projection.</span> Chaque percentile d'un candidat est projeté à la saison
@@ -1027,14 +1117,14 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                   métriques). Les percentiles PitchAPI sont calculés par niveau (1, 2, 3) : c'est une traduction, pas un classement de force.
                 </p>
                 <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1 max-h-72 overflow-y-auto pr-2">
-                  <span className="text-[10px] uppercase text-ink-3">Championnat</span>
-                  <span className="text-[10px] uppercase text-ink-3 text-right">Écart</span>
-                  <span className="text-[10px] uppercase text-ink-3 text-right">Transferts</span>
+                  <span className="sv-label">Championnat</span>
+                  <span className="sv-label text-right">Écart</span>
+                  <span className="sv-label text-right">Transferts</span>
                   {Object.entries(transfer.leagues).map(([key, l]) => (
                     <React.Fragment key={key}>
                       <span className={key === ready!.competition ? 'text-ink' : ''}><CompetitionBadge competition={key} /></span>
-                      <span className="font-mono text-right text-ink tabular-nums">{key === ready!.competition ? '—' : signed(l.level - leagueLevel(transfer, ready!.competition, ready!.tier))}</span>
-                      <span className="font-mono text-right tabular-nums">{l.moves}</span>
+                      <span className="text-right num">{key === ready!.competition ? '—' : <Delta value={l.level - leagueLevel(transfer, ready!.competition, ready!.tier)} />}</span>
+                      <span className="text-right num">{l.moves}</span>
                     </React.Fragment>
                   ))}
                 </div>
