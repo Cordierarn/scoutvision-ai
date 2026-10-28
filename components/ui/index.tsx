@@ -199,6 +199,19 @@ export const PercentileBar: React.FC<{ value: number; className?: string; height
 };
 
 /**
+ * Barre d'un indice 0-100 (indice du rôle) : remplissage neutre, sans paliers ni repère de médiane,
+ * pour ne pas le lire comme un percentile
+ */
+export const IndexBar: React.FC<{ value: number; className?: string }> = ({ value, className = '' }) => {
+  const v = Math.max(0, Math.min(100, value));
+  return (
+    <div className={`relative h-1.5 bg-raised rounded-sm overflow-hidden ${className}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v)} aria-label={`Indice ${Math.round(v)} sur 100`}>
+      <div className="absolute inset-y-0 left-0 rounded-sm bg-accent/60" style={{ width: `${Math.max(v, 1.5)}%` }} />
+    </div>
+  );
+};
+
+/**
  * Valeur de percentile (P92) avec pastille de palier
  */
 export const PercentileValue: React.FC<{ value: number | undefined; className?: string; tip?: string }> = ({ value, className = '', tip }) => {

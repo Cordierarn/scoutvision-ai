@@ -159,7 +159,11 @@ const App: React.FC = () => {
       )}
 
       {view === ViewState.PROSPECTS && (
-        <Prospects data={players} onSelectPlayer={handleSelectPlayer} />
+        <Prospects
+          data={players}
+          onSelectPlayer={handleSelectPlayer}
+          selectedId={selectedPlayer ? getPlayerSeasonId(selectedPlayer) : undefined}
+        />
       )}
 
       {view === ViewState.FORECAST && <Forecast />}

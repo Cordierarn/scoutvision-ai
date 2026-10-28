@@ -4,22 +4,22 @@ import { PlayerData, ShotEvent, extractSeason, getPlayerSeason, getSeasonShortLa
 import { useShots } from '../hooks/useShots';
 import { useAsyncData } from '../hooks/useAsyncData';
 import PlayerHeatmap from './PlayerHeatmap';
-import { metricLabel, positionName, roleLabel, styleLabel, footLabel } from '../utils/labels';
+import { metricLabel, positionName, styleLabel, footLabel } from '../utils/labels';
 import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsights';
 import { dataLoader } from '../services/dataLoader';
 import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { generateScoutReport, ScoutReportError } from '../services/scoutReportService';
-import { getBestRoles } from '../utils/scoringUtils';
+import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
 import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { getFlagUrl } from '../utils/flags';
 import { TeamLogo, CompetitionBadge, CountryFlag, PlayerAvatar } from './Media';
-import { Panel, Stat, PercentileRow, PercentileValue, PercentileBar, PercentileLegend, LegendItem, EmptyState, Delta, PolarTick, InfoTip, LoadError, SkeletonBlock } from './ui';
+import { Panel, Stat, PercentileRow, PercentileValue, PercentileLegend, LegendItem, EmptyState, Delta, PolarTick, InfoTip, LoadError, SkeletonBlock, IndexBar } from './ui';
 import { groupMetrics } from '../utils/metricCategories';
-import { isSeasonInProgress, MIN_NETWORK_MATCHES, MIN_RAPM_MINUTES, PIPELINE_PERCENTILE_HELP, RATING_HELP } from '../utils/sampleContext';
+import { isSeasonInProgress, MIN_NETWORK_MATCHES, MIN_RAPM_MINUTES, PIPELINE_PERCENTILE_HELP, RATING_HELP, roleIndexHelp } from '../utils/sampleContext';
 import { BRAND, CONTEXT, INK, polarGridProps } from '../theme/charts';
 import ShotPitch, { ShotLegend } from './ShotPitch';
 
@@ -179,9 +179,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   const developmentMetrics = useMemo(() =>
     [...getRadarMetricsForPosition(player.Position), 'Rating'], [player.Position]);
 
-  const bestRoles = useMemo(() => {
-    return getBestRoles(player, allPlayers);
-  }, [player, allPlayers]);
+  // Rôles officiels (utils/rolePresets.json) : même indice que le Chasseur de pépites
+  const bestRoles = useMemo(() => rankPresets(player), [player]);
 
   // Shot Map Data : chargement, échec et « aucun tir » sont distincts
   const shotsRequest = useShots(getPlayerSeason(player), player.Competition);
@@ -307,7 +306,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
       const text = await generateScoutReport(player, {
         language: 'fr',
         percentileProfile: { player, percentiles, zScores: {}, averages: {} },
-        bestRoles,
+        bestRoles: bestRoles.map(r => ({ role: r.name, normalizedScore: r.index })),
         shotStats: reportShots ? {
           total: reportShots.length, goals: reportGoals, xG: reportXG, xGDiff: reportGoals - reportXG,
           onTarget: reportShots.filter(s => s.result === 'Goal' || s.result === 'SavedShot').length,
@@ -489,7 +488,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 {player.Position
                   ? <span className="sv-tag !border-accent/50 !text-accent !bg-accent/10" title={positionCategory}>{positionName(player.Position)}</span>
                   : <span className="sv-tag !font-normal text-ink-3">Poste inconnu</span>}
-                {bestRoles[0] && <span className="sv-tag" title="Meilleur rôle (indice de rôle)">{roleLabel(bestRoles[0].role)} · {bestRoles[0].normalizedScore}</span>}
+                {bestRoles[0] && <span className="sv-tag" title="Meilleur rôle · indice du rôle (0-100)">{bestRoles[0].name} · {bestRoles[0].index}</span>}
                 {player['Team style'] && (
                   <span className="sv-tag" title="Style de jeu de l'équipe cette saison (ACP + k-means sur les indicateurs d'équipe)">Équipe : {styleLabel(player['Team style'])}</span>
                 )}
@@ -668,19 +667,19 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           </div>
         </Panel>
 
-        <Panel className="xl:col-span-3" title="Meilleurs rôles" icon={Award}
-          subtitle="Indice du rôle : moyenne pondérée des percentiles, parmi les joueurs du même poste et du même niveau.">
+        <Panel className="xl:col-span-3" title={<>Meilleurs rôles <InfoTip text={roleIndexHelp(ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS)} /></>} icon={Award}
+          subtitle="Indice du rôle (0-100) parmi les rôles du poste : composite pondéré des percentiles, même calcul que le Chasseur de pépites.">
           <div className="space-y-2">
             {bestRoles.map((role, idx) => (
-              <div key={role.role}>
+              <div key={role.name}>
                 <div className="flex items-center justify-between gap-2 text-xs mb-1">
                   <span className="flex items-center gap-2 min-w-0">
                     <span className="w-3 text-ink-4 num">{idx + 1}</span>
-                    <span className={`truncate ${idx === 0 ? 'text-ink font-medium' : 'text-ink-2'}`}>{roleLabel(role.role)}</span>
+                    <span className={`truncate ${idx === 0 ? 'text-ink font-medium' : 'text-ink-2'}`}>{role.name}</span>
                   </span>
-                  <span className="num font-semibold text-ink">{role.normalizedScore}</span>
+                  <span className="num font-semibold text-ink">{role.index}</span>
                 </div>
-                <PercentileBar value={role.normalizedScore} className="ml-5" />
+                <IndexBar value={role.index} className="ml-5" />
               </div>
             ))}
             {bestRoles.length === 0 && <p className="text-xs text-ink-4">Aucun rôle évaluable pour ce poste.</p>}

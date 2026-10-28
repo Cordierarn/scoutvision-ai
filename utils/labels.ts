@@ -204,6 +204,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 /**
  * Libellé français d'un rôle tactique (clé de ROLE_DEFINITIONS)
+ * @deprecated Les rôles affichés viennent de utils/rolePresets.json, déjà nommés en français.
  */
 export function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role;

@@ -29,4 +29,11 @@ export function isSeasonInProgress(appSeason: string, seasonLabel: string | unde
 // Percentiles fournis par le pipeline (« X pct »)
 export const PIPELINE_PERCENTILE_HELP = 'Percentile (0-100) parmi les joueurs du même rôle (GK, CB, FB, WB, DM, CM, AM, W, ST) et du même niveau de compétition, sur la même saison.\nComparaison par rôle et par niveau, pas par compétition.';
 
+// Indice du rôle (utils/rolePresets.ts, roleIndex) : même calcul partout dans ScoutVision
+export const roleIndexHelp = (coreWeight: number, bonus: number) =>
+  'Indice du rôle (0-100) : indice composite pondéré, pas un rang percentile.\n'
+  + `Moyenne pondérée des percentiles du joueur (même rôle, même niveau, même saison) sur les critères du rôle : critères éliminatoires au poids ${String(coreWeight).replace('.', ',')} (sauf poids propre), critères de classement à leur poids, « moins c'est mieux » compté 100 − percentile. `
+  + `Percentiles absents ignorés, poids recalculés ; +${bonus} si le profil de milieu correspond ; plafonné à 100.\n`
+  + 'Calcul identique dans la fiche joueur et le Chasseur de pépites.';
+
 export const RATING_HELP = 'Note : moyenne des notes de match de la saison (PitchAPI), qui surpondère les actions offensives.';

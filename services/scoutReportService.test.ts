@@ -10,11 +10,11 @@ describe('buildReportRequest', () => {
     const body = buildReportRequest(player, {
       language: 'fr',
       percentileProfile: { player, percentiles: { xG: 90 }, zScores: { xG: 1 }, averages: {} },
-      bestRoles: [{ role: 'Poacher', rawScore: 1, normalizedScore: 80, percentile: 80, breakdown: [] }],
+      bestRoles: [{ role: 'Renard des surfaces', normalizedScore: 80 }],
       shotStats: { total: 10, goals: 3, xG: 2.5, xGDiff: 0.5, onTarget: 5, blocked: 1, conversion: 30, avgXG: 0.25 },
     });
     expect(body.options.percentiles).toEqual({ xG: 90 });
-    expect(body.options.bestRoles).toEqual([{ role: 'Poacher', normalizedScore: 80 }]);
+    expect(body.options.bestRoles).toEqual([{ role: 'Renard des surfaces', normalizedScore: 80 }]);
     expect(body.options.shotStats).toEqual({ total: 10, goals: 3, xG: 2.5, conversion: 30 });
     expect(JSON.stringify(body.options)).not.toContain('zScores');
   });

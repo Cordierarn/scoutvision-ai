@@ -4,7 +4,7 @@
  * calculés à l'endpoint serveur POST /api/scout-report (server/), qui détient la clé.
  */
 
-import { PlayerData, PlayerPercentileProfile, RoleScoreResult, ShotStats } from '../types';
+import { PlayerData, PlayerPercentileProfile, ShotStats } from '../types';
 
 export const SCOUT_REPORT_ENDPOINT = '/api/scout-report';
 
@@ -17,7 +17,7 @@ export interface ScoutReportOptions {
   focusAreas?: ('attacking' | 'defending' | 'physical' | 'mental')[];
   targetRole?: string;
   percentileProfile?: PlayerPercentileProfile;
-  bestRoles?: RoleScoreResult[];
+  bestRoles?: { role: string; normalizedScore: number }[];   // rôles officiels (rolePresets) et indice
   shotStats?: ShotStats;
   insights?: string[];          // indicateurs avancés déjà formulés (RAPM, finition, valeur...)
 }

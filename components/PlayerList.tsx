@@ -561,7 +561,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
               return (
                 <tr
                   key={`${player.Player}-${player.Team}-${season}-${idx}`}
-                  className={`group cursor-pointer hover:[&>td]:!bg-raised focus-visible:outline-none focus-visible:[&>td]:!bg-raised ${selected ? 'sv-row-selected' : ''}`}
+                  className={`group cursor-pointer [&:hover>td]:!bg-raised focus-visible:outline-none [&:focus-visible>td]:!bg-raised ${selected ? 'sv-row-selected' : ''}`}
                   onClick={() => onSelectPlayer(player)}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectPlayer(player); } }}
                   tabIndex={0}

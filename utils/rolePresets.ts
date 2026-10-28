@@ -54,6 +54,7 @@ const config = presetConfig as {
 
 // Les critères éliminatoires comptent ce poids dans l'indice
 const CORE_WEIGHT = config.coreWeight;
+export const ROLE_CORE_WEIGHT = CORE_WEIGHT;
 export const MIDFIELD_PROFILE_BONUS = config.midfieldProfileBonus;
 
 export const DEFAULT_ROLE_PRESETS: Record<string, RolePreset> = config.presets;
@@ -118,6 +119,75 @@ export function roleIndex(player: PlayerData, preset: RolePreset): number {
   const score = weightedRoleScore(preset, key => pct(player, key));
   if (score === undefined) return 0;
   return Math.min(100, Math.round(score + midfieldBonus(player, preset)));
+}
+
+/**
+ * Terme de l'indice d'un rôle : une métrique, son percentile et sa part dans l'indice
+ */
+export interface RoleIndexTerm {
+  metric: string;
+  eliminatory: boolean;          // critère éliminatoire (seuil de percentile)
+  ranking: boolean;              // critère de classement (poids propre)
+  percentile: number | undefined;
+  weight: number;                // poids signé (négatif : « moins c'est mieux »)
+  inverted: boolean;             // poids négatif : 100 - percentile
+  scored: number | undefined;    // percentile compté (inversé si besoin) ; undefined si absent
+  share: number;                 // part du poids dans l'indice (0-1), 0 si percentile absent
+  contribution: number;          // points d'indice apportés (share × scored)
+}
+
+export interface RoleIndexBreakdown {
+  terms: RoleIndexTerm[];
+  weightedScore: number | undefined;  // moyenne pondérée non arrondie (weightedRoleScore)
+  bonus: number;                      // bonus de profil de milieu
+  total: number;                      // indice du rôle, identique à roleIndex
+}
+
+/**
+ * Décomposition de l'indice d'un rôle, sans autre formule que roleIndex :
+ * même moyenne pondérée (weightedRoleScore), même bonus, même arrondi et même plafond.
+ */
+export function roleIndexBreakdown(player: PlayerData, preset: RolePreset): RoleIndexBreakdown {
+  const weights = presetWeights(preset);
+  const counted = Object.entries(weights).filter(([key, w]) => w !== 0 && pct(player, key) !== undefined);
+  const totalWeight = counted.reduce((sum, [, w]) => sum + Math.abs(w), 0);
+  const terms: RoleIndexTerm[] = Object.entries(weights).map(([metric, weight]) => {
+    const percentile = pct(player, metric);
+    const inverted = weight < 0;
+    const scored = percentile === undefined ? undefined : inverted ? 100 - percentile : percentile;
+    const share = scored === undefined || weight === 0 || totalWeight === 0 ? 0 : Math.abs(weight) / totalWeight;
+    return {
+      metric,
+      eliminatory: metric in preset.metrics,
+      ranking: metric in (preset.weights ?? {}),
+      percentile,
+      weight,
+      inverted,
+      scored,
+      share,
+      contribution: scored === undefined ? 0 : share * scored,
+    };
+  });
+  const weightedScore = weightedRoleScore(preset, key => pct(player, key));
+  const bonus = weightedScore === undefined ? 0 : midfieldBonus(player, preset);
+  const total = weightedScore === undefined ? 0 : Math.min(100, Math.round(weightedScore + bonus));
+  return { terms, weightedScore, bonus, total };
+}
+
+/**
+ * Rôles d'un poste classés par indice décroissant (même ordre que bestPreset en cas d'égalité) ;
+ * les rôles sans aucun percentile disponible sont écartés
+ */
+export function rankPresets(
+  player: PlayerData,
+  presets: Record<string, RolePreset> = DEFAULT_ROLE_PRESETS,
+  limit = 3,
+): { name: string; preset: RolePreset; index: number }[] {
+  return presetsForPosition(player.Position, presets)
+    .filter(([, preset]) => weightedRoleScore(preset, key => pct(player, key)) !== undefined)
+    .map(([name, preset]) => ({ name, preset, index: roleIndex(player, preset) }))
+    .sort((a, b) => b.index - a.index)
+    .slice(0, limit);
 }
 
 /**
