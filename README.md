@@ -177,10 +177,16 @@ from the PitchApi-big-5 analyses in `global.tar/reports/`:
 | **Model vs market** | Forecasts page | odds from football-data.co.uk (27 competitions): pipeline backtest vs margin-free closing odds (power de-vig) — RPS, log-loss, model weight in a logarithmic pool, simulated value bets judged by closing line value. Oct. 2026: RPS 0.2102 vs 0.2034, weight 0.00, CLV −10.5 % on 1,702 bets: no edge |
 
 **Recruitment validation** (Oct. 2026, test season 2025-26, absent from the fit, 405 league
-changes): mean absolute error of the role index 12.3 points with the transfer model, 14.0 with
-the age curves alone, 16.9 when the current index is kept; rank correlation with the index
-actually reached 0.53 vs 0.35; bias of players moving up a level +1.4 points vs +10.0 (moving
-down: −0.3 vs −7.1). Per metric: 21.7 vs 26.2 percentile points, bias moving up +0.0 vs +6.6.
+changes, role presets of the Oct. 2026 calibration): mean absolute error of the role index 12.2
+points with the transfer model, 13.9 with the age curves alone, 16.8 when the current index is
+kept; rank correlation with the index actually reached 0.525 vs 0.347; bias of players moving up a
+level +1.3 points vs +9.8 (moving down: −0.2 vs −7.0). Per metric (does not depend on the
+presets): 21.7 vs 26.1 percentile points, bias moving up +0.0 vs +6.7. With the previous presets:
+12.3 / 14.0 / 16.9, rank 0.529, bias +1.4 / −0.3. Per role the error is uneven (about 8 to 16
+points on 37 to 111 movers per role, so differences under about 1 point are noise); it rose for
+*Créateur excentré* (15.2 → 16.2) and *Faux neuf* (12.9 → 13.5), now evaluated on wingers and
+strikers only (52 and 54 movers instead of 82 and 84), and for *Gardien libéro* (11.7 → 12.3,
+42 goalkeepers); it fell for *Gardien relanceur* (15.9 → 14.6) and *Neuf et demi* (15.5 → 14.6).
 A role index still moves by about 12 points from one season to the next: suggestions are a
 shortlist for video and scouting, not a verdict. Recomputed by every `prepare_data.py` run
 (`models/transfer.json`, shown in the app under *Méthode et fiabilité*).
@@ -320,10 +326,11 @@ the same index (`roleIndex`, explained by `roleIndexBreakdown`). The former `ROL
 *Gardien relanceur*, *Défenseur porteur*, *Milieu percuteur*, *Numéro 10*, *Neuf et demi*,
 *Créateur excentré* (wingers only), *Faux neuf* (strikers only) and *Attaquant presseur* were
 recalibrated; *Attaquant de profondeur* and *Créateur sur coups de pied arrêtés* only changed
-description (off-ball runs and set pieces are not in the data). **Pending:** `models/transfer.json`
-and the recruitment validation figures above were computed with the previous presets. Run the full
-pipeline (`npm run data:prepare`) to rebuild and revalidate them before treating this calibration
-as validated for recruitment.
+description (off-ball runs and set pieces are not in the data). Revalidated with the full pipeline
+(`npm run data:prepare`, Oct. 28): the transfer model's coefficients do not depend on the presets
+and the recruitment validation above barely moves (index error 12.3 → 12.2, rank 0.529 → 0.525).
+The published `scoutvision-data` archive still holds the `transfer.json` of the previous presets
+until the data workflow is run again.
 
 ## 🧪 Tests
 
