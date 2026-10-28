@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
 import { Search, GitCompare, ArrowRight, User, Check, X } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend } from 'recharts';
 import { queryService } from '../services/queryService';
@@ -12,7 +12,9 @@ import {
   getTopPerformingMetrics
 } from '../utils/positionMetrics';
 import { metricLabel, positionLabel } from '../utils/labels';
-import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
+import { PlayerAvatar, TeamLine } from './Media';
+import { EmptyState, LegendItem, PageHeader, Panel, PolarTick } from './ui';
+import { BRAND, SERIES, polarGridProps } from '../theme/charts';
 
 interface SimilarityFinderProps {
   data: PlayerData[];
@@ -152,238 +154,148 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
   }, [searchTerm]);
 
   return (
-    <div className="flex flex-col h-full animate-fade-in gap-6">
-      
-      {/* Search Header */}
-      <div className="w-full max-w-2xl mx-auto text-center mb-4">
-        <h1 className="text-3xl font-bold text-ink mb-2">Joueurs similaires</h1>
-        <p className="text-ink-3 mb-6">Trouvez les joueurs au profil statistique le plus proche (distance euclidienne sur les métriques de performance).</p>
-        
-        <div className="relative z-50">
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-3 w-5 h-5" />
-            <input 
-              type="text" 
-              placeholder="Rechercher un joueur de référence..."
-              className="w-full bg-overlay border border-line-strong text-ink pl-12 pr-4 py-4 rounded-md focus:ring-2 focus:ring-accent focus:outline-none  text-lg"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                if (!e.target.value) setReferencePlayer(null);
-              }}
-              onFocus={() => {
-                if(referencePlayer) {
-                    setSearchTerm('');
-                    setReferencePlayer(null);
-                }
-              }}
-            />
-          </div>
+    <div className="p-5 space-y-4 animate-fade-in">
+      <PageHeader
+        title="Joueurs similaires"
+        icon={GitCompare}
+        description="Profils statistiques les plus proches d'un joueur de référence (distance euclidienne sur les métriques de performance du poste)."
+      />
 
-          {/* Search Results Dropdown */}
-          {searchTerm && !referencePlayer && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-overlay border border-line-strong rounded-md  overflow-hidden max-h-80 overflow-y-auto">
-              {filteredSearch.map((p, idx) => {
-                const pSeason = extractSeason(p.League);
-                const pSeasonColors = getSeasonColor(pSeason);
-                return (
-                <button 
-                  key={getPlayerSeasonId(p)}
-                  onClick={() => {
-                    setReferencePlayer(p);
-                    setSearchTerm(p.Player || '');
-                  }}
-                  className="w-full text-left px-4 py-3 hover:bg-line-strong flex items-center justify-between group transition-colors border-b border-line-strong/50 last:border-0"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="relative overflow-hidden w-9 h-9 rounded-full bg-raised flex items-center justify-center text-xs font-bold text-ink-3 group-hover:text-accent group-hover:bg-accent/10 transition-colors">
-                          {(p.Player || '??').substring(0, 2).toUpperCase()}
-                          <PhotoOverlay src={p.Image} alt={p.Player} />
-                      </div>
-                      <div className={`absolute -bottom-1 -right-1 px-1.5 py-0 rounded text-[8px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text} border ${pSeasonColors.border}`}>
-                        {getSeasonShortLabel(pSeason)}
-                      </div>
-                    </div>
-                    <div>
-                        <div className="font-medium text-ink">{p.Player || 'Inconnu'}</div>
-                        <div className="text-xs text-ink-3 flex items-center gap-1"><TeamLine player={p} /> • {positionLabel(p.Position) || 'N/A'}</div>
-                    </div>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-ink-4 group-hover:text-accent opacity-0 group-hover:opacity-100 transition-all transform -translate-x-2 group-hover:translate-x-0" />
-                </button>
-                );
-              })}
-              {filteredSearch.length === 0 && (
-                  <div className="p-4 text-ink-3 text-center text-sm">Aucun joueur trouvé</div>
-              )}
-            </div>
-          )}
-        </div>
+      <div className="relative z-40 w-full max-w-xl">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
+        <input
+          type="text"
+          placeholder="Rechercher un joueur de référence"
+          className="sv-input pl-8"
+          aria-label="Joueur de référence"
+          value={searchTerm}
+          onChange={(e) => {
+            setSearchTerm(e.target.value);
+            if (!e.target.value) setReferencePlayer(null);
+          }}
+          onFocus={() => {
+            if (referencePlayer) {
+              setSearchTerm('');
+              setReferencePlayer(null);
+            }
+          }}
+        />
+        {searchTerm && !referencePlayer && (
+          <div className="sv-menu absolute top-full left-0 right-0 mt-1 max-h-80 overflow-y-auto">
+            {filteredSearch.map(p => (
+              <button key={getPlayerSeasonId(p)} onClick={() => { setReferencePlayer(p); setSearchTerm(p.Player || ''); }}
+                className="sv-menu-item flex items-center gap-2.5">
+                <PlayerAvatar player={p} size="xs" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] text-ink truncate">{p.Player || 'Inconnu'}</span>
+                  <span className="block text-2xs text-ink-3 truncate"><TeamLine player={p} /></span>
+                </span>
+                <span className="sv-tag">{positionLabel(p.Position) || 'N/D'}</span>
+                <span className="sv-tag !font-normal">{getSeasonShortLabel(extractSeason(p.League))}</span>
+              </button>
+            ))}
+            {filteredSearch.length === 0 && <div className="px-3 py-2 text-xs text-ink-4">Aucun joueur trouvé</div>}
+          </div>
+        )}
       </div>
 
-      {referencePlayer && (
-        <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
-            {/* Left: Settings & Reference */}
-            <div className="w-full lg:w-80 flex flex-col gap-4">
-                <div className="bg-surface border border-line rounded-lg p-6  relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 p-24 bg-accent/5 rounded-full  -mr-10 -mt-10 pointer-events-none"></div>
-                    <div className="relative z-10">
-                        <h2 className="text-xs font-bold text-accent uppercase tracking-widest mb-4">Joueur de référence</h2>
-                        {(() => {
-                          const refSeason = extractSeason(referencePlayer.League);
-                          const refSeasonColors = getSeasonColor(refSeason);
-                          return (
-                            <div className="relative w-20 h-20 mb-4">
-                              <div className="relative overflow-hidden w-20 h-20 bg-overlay rounded-lg flex items-center justify-center text-2xl font-bold text-ink-2 border-2 border-line-strong">
-                                {(referencePlayer.Player || '??').substring(0, 2).toUpperCase()}
-                                <PhotoOverlay src={referencePlayer.Image} alt={referencePlayer.Player} />
-                              </div>
-                              <div className={`absolute -bottom-1 -right-1 px-2 py-0.5 rounded text-[10px] font-bold ${refSeasonColors.bg} ${refSeasonColors.text} border ${refSeasonColors.border}`}>
-                                {getSeasonShortLabel(refSeason)}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                        <h3 className="text-2xl font-bold text-ink leading-tight mb-1">{referencePlayer.Player || 'Inconnu'}</h3>
-                        <p className="text-ink-3 text-sm mb-4"><TeamLine player={referencePlayer} /></p>
-                        
-                        <div className="flex items-center gap-2 mb-2">
-                             <span className="px-2 py-1 bg-overlay rounded border border-line-strong text-xs text-ink-2 font-mono">{positionLabel(referencePlayer.Position)}</span>
-                             <span className="px-2 py-1 bg-overlay rounded border border-line-strong text-xs text-ink-2 font-mono">{referencePlayer.Age ?? '–'} ans</span>
-                        </div>
-                        <div className="text-accent font-mono font-bold text-lg mt-2">
-                             {typeof referencePlayer["Market value"] === 'number' ? `€${referencePlayer["Market value"].toLocaleString()}` : '–'}
-                        </div>
+      {!referencePlayer ? (
+        <div className="sv-panel">
+          <EmptyState icon={GitCompare} title="Choisissez un joueur de référence">
+            Les joueurs les plus proches sont classés par similarité ; le radar superpose la référence (cyan) et chaque joueur.
+          </EmptyState>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[17rem_1fr] gap-4 items-start">
+          <div className="space-y-4">
+            <Panel title="Référence">
+              <div className="flex items-center gap-3">
+                <PlayerAvatar player={referencePlayer} size="lg" />
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold text-ink leading-tight">{referencePlayer.Player || 'Inconnu'}</div>
+                  <div className="text-2xs text-ink-3 mt-0.5"><TeamLine player={referencePlayer} /></div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                <span className="sv-tag">{positionLabel(referencePlayer.Position)}</span>
+                <span className="sv-tag !font-normal">{referencePlayer.Age ?? '–'} ans</span>
+                <span className="sv-tag !font-normal">{getSeasonShortLabel(extractSeason(referencePlayer.League))}</span>
+                <span className="sv-tag !font-normal">{typeof referencePlayer['Market value'] === 'number' ? `€${(referencePlayer['Market value'] / 1e6).toFixed(1)}M` : '–'}</span>
+              </div>
+            </Panel>
+
+            <Panel title="Paramètres">
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between"><span className="text-ink-3">Type de poste</span><span className="text-ink">{positionCategory}</span></div>
+                <div className="flex items-center justify-between"><span className="text-ink-3">Métriques comparées</span><span className="text-ink num">{metricKeys.length}</span></div>
+                <label className="flex items-center gap-2 pt-2 border-t border-line cursor-pointer text-ink-2">
+                  <input type="checkbox" checked={samePositionOnly} onChange={() => setSamePositionOnly(!samePositionOnly)} />
+                  Même poste uniquement
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-ink-2">
+                  <input type="checkbox" checked={useTopMetrics} onChange={() => setUseTopMetrics(!useTopMetrics)} />
+                  Utiliser ses meilleures métriques
+                </label>
+              </div>
+              {metricKeys.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-line">
+                  <div className="sv-label mb-1.5">Métriques de comparaison</div>
+                  <div className="flex flex-wrap gap-1">
+                    {metricKeys.map(m => (
+                      <span key={m} className="sv-tag !font-normal max-w-[15rem] truncate" title={metricLabel(m)}>{metricLabel(m).replace(' par 90', '/90')}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="sv-label">Profils les plus proches</span>
+              <div className="flex gap-3">
+                <LegendItem color={BRAND} shape="line">Référence</LegendItem>
+                <LegendItem color={SERIES[1]} shape="line">Joueur comparé</LegendItem>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+              {similarPlayers.map(({ player, score }, idx) => (
+                <div key={getPlayerSeasonId(player)} className="sv-panel flex flex-col overflow-hidden">
+                  <div className="px-3 pt-3 flex justify-between items-start gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-2xs text-ink-4 num w-4">{idx + 1}</span>
+                      <PlayerAvatar player={player} size="sm" />
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium text-ink truncate">{player.Player || 'Inconnu'}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span></div>
+                        <div className="text-2xs text-ink-3 truncate max-w-[12rem]"><TeamLine player={player} /></div>
+                      </div>
                     </div>
+                    <div className="text-right shrink-0" title="Similarité avec la référence">
+                      <div className="text-base font-semibold text-ink num leading-none">{score.toFixed(0)} %</div>
+                      <div className="sv-label mt-1">Similarité</div>
+                    </div>
+                  </div>
+                  <div className="h-44 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart cx="50%" cy="50%" outerRadius="62%" data={getChartData(player)}>
+                        <PolarGrid {...polarGridProps} />
+                        <PolarAngleAxis dataKey="subject" tick={<PolarTick maxChars={12} />} />
+                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                        <Radar name="Référence" dataKey="Reference" stroke={BRAND} strokeWidth={1.5} fill={BRAND} fillOpacity={0.08} isAnimationActive={false} />
+                        <Radar name="Joueur" dataKey="Target" stroke={SERIES[1]} strokeWidth={1.5} fill={SERIES[1]} fillOpacity={0.12} isAnimationActive={false} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="px-3 py-2 mt-auto border-t border-line flex items-center justify-between text-xs">
+                    <span className="text-ink-3 num">
+                      {positionLabel(player.Position)} · {player.Age ?? '–'} ans · {typeof player['Market value'] === 'number' ? `€${(player['Market value'] / 1e6).toFixed(1)}M` : '–'}
+                    </span>
+                    <button onClick={() => onSelectPlayer(player)} className="sv-btn sv-btn-ghost sv-btn-sm !text-accent">Fiche</button>
+                  </div>
                 </div>
-
-                <div className="bg-surface border border-line rounded-lg p-5 ">
-                     <h3 className="text-sm font-semibold text-ink-2 mb-3">Paramètres</h3>
-                     
-                     <div className="space-y-3">
-                       {/* Position Category Badge */}
-                       <div className="flex items-center justify-between text-xs">
-                         <span className="text-ink-3">Type de poste</span>
-                         <span className="px-2 py-1 bg-accent/10 text-accent rounded font-medium">{positionCategory}</span>
-                       </div>
-                       
-                       {/* Metrics Used Count */}
-                       <div className="flex items-center justify-between text-xs">
-                         <span className="text-ink-3">Métriques comparées</span>
-                         <span className="text-ink-2 font-mono">{metricKeys.length}</span>
-                       </div>
-                       
-                       <div className="h-px bg-overlay my-2"></div>
-                       
-                       {/* Same Position Filter */}
-                       <label className="flex items-center gap-3 cursor-pointer group">
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${samePositionOnly ? 'bg-accent border-accent' : 'bg-raised border-line-strong group-hover:border-ink-4'}`}>
-                               {samePositionOnly && <Check className="w-3 h-3 text-accent-ink" />}
-                          </div>
-                          <input type="checkbox" className="hidden" checked={samePositionOnly} onChange={() => setSamePositionOnly(!samePositionOnly)} />
-                          <span className="text-sm text-ink-3 group-hover:text-ink transition-colors">Même poste uniquement</span>
-                       </label>
-                       
-                       {/* Top Metrics Toggle */}
-                       <label className="flex items-center gap-3 cursor-pointer group">
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${useTopMetrics ? 'bg-purple-500 border-purple-500' : 'bg-raised border-line-strong group-hover:border-ink-4'}`}>
-                               {useTopMetrics && <Check className="w-3 h-3 text-accent-ink" />}
-                          </div>
-                          <input type="checkbox" className="hidden" checked={useTopMetrics} onChange={() => setUseTopMetrics(!useTopMetrics)} />
-                          <span className="text-sm text-ink-3 group-hover:text-ink transition-colors">Utiliser ses meilleures métriques</span>
-                       </label>
-                     </div>
-                     
-                     {/* Metrics Preview */}
-                     {metricKeys.length > 0 && (
-                       <div className="mt-4 pt-3 border-t border-line">
-                         <div className="text-[10px] uppercase text-ink-4 font-bold mb-2">Métriques de comparaison</div>
-                         <div className="flex flex-wrap gap-1">
-                           {metricKeys.slice(0, 6).map(m => (
-                             <span key={m} className="px-1.5 py-0.5 bg-raised rounded text-[9px] text-ink-3 truncate max-w-[80px]" title={metricLabel(m)}>
-                               {metricLabel(m).replace(' par 90', '')}
-                             </span>
-                           ))}
-                           {metricKeys.length > 6 && (
-                             <span className="px-1.5 py-0.5 text-[9px] text-ink-4">+{metricKeys.length - 6}</span>
-                           )}
-                         </div>
-                       </div>
-                     )}
-                </div>
+              ))}
             </div>
-
-            {/* Right: Results */}
-            <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-                <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
-                    <GitCompare className="w-5 h-5 text-purple-400" />
-                    Profils les plus proches
-                </h2>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto pb-10 pr-2 custom-scrollbar">
-                    {similarPlayers.map(({ player, score }, idx) => {
-                        const playerSeason = extractSeason(player.League);
-                        const playerSeasonColors = getSeasonColor(playerSeason);
-                        return (
-                        <div key={getPlayerSeasonId(player)} className="bg-surface border border-line rounded-lg p-0 overflow-hidden hover:border-line-strong transition-all flex flex-col">
-                            <div className="p-4 border-b border-line/50 flex justify-between items-start bg-raised/30">
-                                <div className="flex items-center gap-3">
-                                    <div className="relative">
-                                      <div className="relative overflow-hidden w-10 h-10 rounded-full bg-overlay flex items-center justify-center text-xs font-bold text-ink-3 border border-line-strong">
-                                          {(player.Player || '??').substring(0, 2).toUpperCase()}
-                                          <PhotoOverlay src={player.Image} alt={player.Player} />
-                                      </div>
-                                      <div className={`absolute -bottom-1 -right-1 px-1.5 py-0 rounded text-[8px] font-bold ${playerSeasonColors.bg} ${playerSeasonColors.text} border ${playerSeasonColors.border}`}>
-                                        {getSeasonShortLabel(playerSeason)}
-                                      </div>
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-ink text-sm">{player.Player || 'Inconnu'}</div>
-                                        <div className="text-xs text-ink-3 truncate max-w-[160px]"><TeamLine player={player} /></div>
-                                    </div>
-                                </div>
-                                <div className="flex flex-col items-end">
-                                    <div className={`text-lg font-bold ${score > 85 ? 'text-accent' : score > 70 ? 'text-warn' : 'text-ink-3'}`}>
-                                        {score.toFixed(0)}%
-                                    </div>
-                                    <div className="text-[10px] text-ink-4 uppercase tracking-wider font-bold">Similarité</div>
-                                </div>
-                            </div>
-                            
-                            {/* Mini Radar Comparison */}
-                            <div className="h-40 w-full relative bg-surface/50">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <RadarChart cx="50%" cy="50%" outerRadius="65%" data={getChartData(player)}>
-                                        <PolarGrid stroke="#334155" strokeOpacity={0.5} />
-                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 8 }} />
-                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                                        <Radar name="Référence" dataKey="Reference" stroke="#10b981" strokeWidth={1} fill="#10b981" fillOpacity={0.1} />
-                                        <Radar name="Joueur" dataKey="Target" stroke="#8b5cf6" strokeWidth={2} fill="#8b5cf6" fillOpacity={0.3} />
-                                    </RadarChart>
-                                </ResponsiveContainer>
-                                <div className="absolute bottom-2 right-2 flex gap-3 text-[10px]">
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-accent"></div><span className="text-ink-3">Référence</span></div>
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div><span className="text-ink-3">Joueur</span></div>
-                                </div>
-                            </div>
-
-                            <div className="p-3 bg-raised/50 mt-auto border-t border-line flex items-center justify-between">
-                                <div className="text-xs text-ink-3 font-mono">
-                                    €{typeof player["Market value"] === 'number' ? (player["Market value"]/1000000).toFixed(1) + 'M' : '-'}
-                                </div>
-                                <button 
-                                   onClick={() => onSelectPlayer(player)}
-                                   className="text-xs bg-overlay hover:bg-line-strong text-ink-2 px-3 py-1.5 rounded-md transition-colors border border-line-strong"
-                                >
-                                    Voir la fiche
-                                </button>
-                            </div>
-                        </div>
-                        );
-                    })}
-                </div>
-            </div>
+          </div>
         </div>
       )}
     </div>

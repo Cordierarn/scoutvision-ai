@@ -16,7 +16,7 @@ const DuoLine: React.FC<{ d: DuoRow; scale: number }> = ({ d, scale }) => {
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_5rem] items-center gap-3 py-2 border-b border-line/60 text-xs">
       <div className="min-w-0">
         <div className="text-ink truncate">{d.from_name} <span className="text-ink-3">→</span> {d.to_name}</div>
-        <div className="text-[11px] text-ink-3">{d.passes} passes pour {frNumber(d.expected, 0)} attendues</div>
+        <div className="text-2xs text-ink-3">{d.passes} passes pour {frNumber(d.expected, 0)} attendues</div>
       </div>
       <div className="relative h-3">
         <div className="absolute top-1/2 inset-x-0 h-px bg-overlay" />
@@ -63,7 +63,7 @@ const DuosTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
         right={<VerdictBadge verdict={e.verdict} />}
       >
         <div className="flex flex-wrap items-end gap-3">
-          <label className="text-[11px] text-ink-3">Saison
+          <label className="text-2xs text-ink-3">Saison
             <select value={current} onChange={e => setSeason(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
               {seasons.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -88,7 +88,7 @@ const DuosTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-xs font-bold text-ink-3 uppercase tracking-wider">{team.name} : les duos qui se cherchent</h4>
-                <div className="flex gap-3 text-[11px] text-ink-3">
+                <div className="flex gap-3 text-2xs text-ink-3">
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> attendu</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SERIES[0] }} /> réel</span>
                 </div>
@@ -115,7 +115,7 @@ const DuosTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
             </div>
           </div>
         )}
-        <p className="text-[11px] text-ink-3 mt-4">Duos avec au moins 30 passes attendues sur la saison (championnats, matchs avec réseau de passes). L'attendu absorbe une partie de l'excès d'un duo : ces rapports sont prudents.</p>
+        <p className="text-2xs text-ink-3 mt-4">Duos avec au moins 30 passes attendues sur la saison (championnats, matchs avec réseau de passes). L'attendu absorbe une partie de l'excès d'un duo : ces rapports sont prudents.</p>
       </Panel>
     </div>
   );

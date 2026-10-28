@@ -513,9 +513,9 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
                       <td className="pl-5 text-ink-4 text-xs sticky left-0 bg-surface group-hover:bg-raised">{idx + 1}</td>
                       <td className="sticky left-10 bg-surface group-hover:bg-raised">
                         <div className="flex items-center gap-2.5">
-                          <PlayerAvatar player={player} size="sm" season={multiSeason ? getSeasonShortLabel(extractSeason(player.League)) : undefined} />
+                          <PlayerAvatar player={player} size="sm" />
                           <div className="min-w-0">
-                            <div className="text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}</div>
+                            <div className="text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}{multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span>}</div>
                             <div className="text-2xs text-ink-3 max-w-[14rem]"><TeamLine player={player} /></div>
                           </div>
                         </div>

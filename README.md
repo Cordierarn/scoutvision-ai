@@ -24,7 +24,7 @@ A modern, data-driven scouting application for football analytics with AI-powere
 - ⚽ **Team Analysis** - Squad depth, tactical profiles, shot maps and recruitment
 - 🧩 **Data-driven recruitment** - Team needs by position, squad profile, and player suggestions projected into the team (league level, team context, adaptation), with complementarity and a value-for-money frontier
 - 📝 **AI Scout Reports** - Generate AI-powered scouting reports with Gemini
-- 🌙 **Modern Dark UI** - Glassmorphism design with premium aesthetics
+- 🌙 **Analyst UI** - Dense dark design system built from the ScoutVision logo (tokens, percentile tiers, colour-blind-checked chart palette)
 - 📈 **Impact & value** - RAPM (regularized plus-minus), finishing skill, pass-network role, performance-based value vs Transfermarkt
 - 🌱 **Development** - Age curves by role and one-year percentile projection (regression to the mean separated from age)
 - 🧭 **Playing styles** - Team styles (PCA + k-means) and style map per competition
@@ -86,6 +86,20 @@ A modern, data-driven scouting application for football analytics with AI-powere
    ```bash
    npm run dev
    ```
+
+## 🎨 Design system
+
+The interface follows the logo: background `#0B111A`, ink `#F8FAFC`, accent cyan `#00E5FF`, short angular radii.
+
+| Where | What |
+|---|---|
+| `styles/index.css` | colour tokens (CSS variables), base styles and primitives: `sv-panel`, `sv-label`, `sv-input`, `sv-select`, `sv-btn-*`, `sv-chip`, `sv-tag`, `sv-seg`, `sv-tabs`, `sv-table`, `sv-tooltip`, `sv-menu` |
+| `tailwind.config.js` | token names for Tailwind: `canvas`, `surface`, `raised`, `overlay`, `line`, `ink`/`ink-2..4`, `accent`, `pos`, `neg`, `warn` |
+| `components/ui` | `PageHeader`, `Panel`, `Stat`, `PercentileBar`, `PercentileRow`, `PercentileValue`, `PercentileLegend`, `LegendItem`, `Delta`, `EmptyState`, `PolarTick` |
+| `theme/charts.ts` | chart identity: series order (cyan, orange, violet, yellow; checked for colour blindness on the panel surface), context grey, diverging pair, cyan sequential ramp, reserved status colours, Recharts axis/grid/tooltip props |
+| `theme/percentile.ts` | percentile tiers: elite ≥ 90, above 70-89, average 31-69, below 11-30, weak ≤ 10 |
+
+Colour never carries meaning alone: percentiles show their value (P92), verdicts and needs keep their icon and label.
 
 ## 📁 Data Format
 
@@ -256,7 +270,7 @@ npm run test:data      # Python (unittest): transfer model (parameter recovery o
 
 - **Frontend**: React 19, TypeScript
 - **Build Tool**: Vite
-- **Styling**: Tailwind CSS
+- **Styling**: Tailwind CSS 3 (compiled with PostCSS), design tokens in `styles/index.css` and `tailwind.config.js`
 - **Charts**: Recharts
 - **AI**: Google Gemini API
 - **PDF Export**: jsPDF, html2canvas

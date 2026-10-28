@@ -3,6 +3,7 @@
  * L'électrochoc (retour à la moyenne), l'ADN de style des entraîneurs et le simulateur d'arrivée.
  */
 
+import { INK } from '../../theme/charts';
 import React, { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -48,19 +49,19 @@ const ChangeChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
   }, [cc]);
   return (
     <div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-ink-3 mb-2">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-2xs text-ink-3 mb-2">
         <span className="inline-flex items-center gap-1.5"><span className="w-4 h-0.5" style={{ backgroundColor: SERIES[0] }} /> Clubs qui changent d'entraîneur ({cc.changes})</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-4 h-0.5" style={{ backgroundColor: CONTEXT }} /> Clubs comparables qui gardent le leur</span>
       </div>
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 800, height: 288 }}>
           <LineChart data={data} margin={{ top: 26, right: 16, bottom: 24, left: 0 }}>
-            <CartesianGrid stroke="#1e293b" vertical={false} />
-            <XAxis dataKey="label" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} interval={1}
-              label={{ value: 'Matchs de championnat avant / après le changement', position: 'insideBottom', offset: -14, fill: '#64748b', fontSize: 11 }} />
-            <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} width={44}
+            <CartesianGrid stroke={INK.grid} vertical={false} />
+            <XAxis dataKey="label" stroke={INK.axis} tick={{ fill: INK.muted, fontSize: 11 }} interval={1}
+              label={{ value: 'Matchs de championnat avant / après le changement', position: 'insideBottom', offset: -14, fill: INK.muted, fontSize: 11 }} />
+            <YAxis stroke={INK.axis} tick={{ fill: INK.muted, fontSize: 11 }} width={44}
               tickFormatter={(v: number) => frNumber(v, 2, true)} />
-            <ReferenceLine x="+1" stroke="#64748b" label={{ value: 'nouvel entraîneur', position: 'top', fill: '#94a3b8', fontSize: 11 }} />
+            <ReferenceLine x="+1" stroke={INK.muted} label={{ value: 'nouvel entraîneur', position: 'top', fill: INK.muted, fontSize: 11 }} />
             <Tooltip
               content={({ payload, label }) => {
                 if (!payload?.length) return null;
@@ -75,11 +76,11 @@ const ChangeChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
               }}
             />
             <Line type="monotone" dataKey="controls" stroke={CONTEXT} strokeWidth={2} dot={false} isAnimationActive={false} />
-            <Line type="monotone" dataKey="changers" stroke={SERIES[0]} strokeWidth={2} dot={{ r: 3, fill: SERIES[0], stroke: '#020617', strokeWidth: 2 }} isAnimationActive={false} />
+            <Line type="monotone" dataKey="changers" stroke={SERIES[0]} strokeWidth={2} dot={{ r: 3, fill: SERIES[0], stroke: INK.surface, strokeWidth: 2 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-[11px] text-ink-3 mt-1">
+      <p className="text-2xs text-ink-3 mt-1">
         xG différentiel par match, corrigé de l'adversaire et du terrain, moyenne glissante sur 3 matchs (avant et après séparément). Témoins : pour chaque
         changement, les 10 périodes de 20 matchs sans changement d'entraîneur (tous championnats) dont la forme des 10 matchs d'avant et le niveau plus
         ancien étaient les plus proches.
@@ -148,7 +149,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           >
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
               <div>
-                <div className="flex gap-4 text-[11px] text-ink-3 mb-3">
+                <div className="flex gap-4 text-2xs text-ink-3 mb-3">
                   <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: CONTEXT }} /> Style d'avant du club</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: SERIES[0] }} /> Style apporté par l'entraîneur</span>
                 </div>
@@ -169,7 +170,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-ink-3 mt-3">
+                <p className="text-2xs text-ink-3 mt-3">
                   Exemple : un entraîneur dont l'équipe pressait un écart-type plus haut que son championnat fait monter le pressing de son nouveau club d'environ {frNumber(data.imprint.pressing.coach, 2)} écart-type.
                   Ses résultats, eux, ne le suivent pas : r = {frNumber(res.r, 2)} entre deux clubs successifs (IC [{frNumber(res.ci[0], 2, true)} ; {frNumber(res.ci[1], 2, true)}]).
                 </p>
@@ -202,7 +203,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                     </div>
                     <table className="w-full text-xs mt-4">
                       <thead>
-                        <tr className="text-[10px] uppercase tracking-wider text-ink-3 border-b border-line">
+                        <tr className="text-2xs uppercase tracking-wider text-ink-3 border-b border-line">
                           <th className="text-left font-semibold py-1.5">Club</th>
                           <th className="text-left font-semibold py-1.5">Période</th>
                           <th className="text-right font-semibold py-1.5">Matchs</th>
@@ -220,7 +221,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                         ))}
                       </tbody>
                     </table>
-                    <p className="text-[10px] text-ink-3 mt-2">Style : moyenne de ses périodes (matchs de championnat avec données avancées), pondérée par les matchs. À droite = plus que la moyenne de son championnat.</p>
+                    <p className="text-2xs text-ink-3 mt-2">Style : moyenne de ses périodes (matchs de championnat avec données avancées), pondérée par les matchs. À droite = plus que la moyenne de son championnat.</p>
                   </div>
                 )}
               </div>
@@ -251,7 +252,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                   <span className="text-ink font-semibold">{team.team}</span> sous {current.coach} ({current.start.slice(0, 7)} → {current.end.slice(0, 7)})
                   {' '}avec <span className="text-ink font-semibold">{selected}</span>
                 </div>
-                <div className="flex gap-5 text-[11px] text-ink-3 mb-3">
+                <div className="flex gap-5 text-2xs text-ink-3 mb-3">
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CONTEXT }} /> Style actuel</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SERIES[0] }} /> Style attendu avec {selected}</span>
                 </div>
@@ -274,7 +275,7 @@ const CoachesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
                     );
                   })}
                 </div>
-                <p className="text-[10px] text-ink-3 mt-3">Écarts-types par rapport au championnat ; à droite = plus de possession, de domination, de pressing, de construction, de verticalité, un jeu plus haut.</p>
+                <p className="text-2xs text-ink-3 mt-3">Écarts-types par rapport au championnat ; à droite = plus de possession, de domination, de pressing, de construction, de verticalité, un jeu plus haut.</p>
               </div>
             )}
           </Panel>

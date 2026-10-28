@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel } from '../types';
 import { Star, Trash2, Eye, Download, Search, X, MessageSquare, Tag, Clock, Filter } from 'lucide-react';
 import { 
   getWatchlist, 
@@ -10,7 +10,8 @@ import {
 } from '../services/storageService';
 import { exportToCSV } from '../utils/exportUtils';
 import { positionLabel } from '../utils/labels';
-import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
+import { PlayerAvatar, TeamLine } from './Media';
+import { EmptyState, PageHeader, PercentileValue } from './ui';
 
 interface WatchlistProps {
   onSelectPlayer: (player: PlayerData) => void;
@@ -83,201 +84,116 @@ const Watchlist: React.FC<WatchlistProps> = ({ onSelectPlayer }) => {
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
-      {/* Header */}
-      <div className="p-6 border-b border-line bg-surface/50">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-warn/10 rounded-md flex items-center justify-center">
-              <Star className="w-6 h-6 text-warn" />
+      <div className="px-5 pt-4 pb-3 border-b border-line space-y-3">
+        <PageHeader
+          title="Liste de suivi"
+          icon={Star}
+          description={`${watchlist.length} joueur${watchlist.length > 1 ? 's' : ''} suivi${watchlist.length > 1 ? 's' : ''}, enregistrés dans ce navigateur. Cliquez sur une note pour la modifier.`}
+          actions={
+            <>
+              <button onClick={handleExport} disabled={watchlist.length === 0} className="sv-btn sv-btn-secondary">
+                <Download className="w-3.5 h-3.5" /> Exporter
+              </button>
+              <button onClick={handleClearAll} disabled={watchlist.length === 0} className="sv-btn sv-btn-ghost hover:!text-neg">
+                <Trash2 className="w-3.5 h-3.5" /> Tout vider
+              </button>
+            </>
+          }
+        />
+        {watchlist.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <div className="relative w-full sm:w-80">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
+              <input type="text" placeholder="Rechercher dans la liste" className="sv-input pl-8"
+                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} aria-label="Rechercher dans la liste" />
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-ink">Ma liste de suivi</h1>
-              <p className="text-sm text-ink-3">{watchlist.length} joueurs suivis</p>
-            </div>
+            {allTags.length > 0 && (
+              <select className="sv-select" value={filterTag} onChange={(e) => setFilterTag(e.target.value)} aria-label="Tag">
+                <option value="">Tous les tags</option>
+                {allTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+              </select>
+            )}
           </div>
-          
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleExport}
-              disabled={watchlist.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-accent/10 hover:bg-accent/20 text-accent rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Exporter</span>
-            </button>
-            <button
-              onClick={handleClearAll}
-              disabled={watchlist.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-neg/10 hover:bg-neg/20 text-neg rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="hidden sm:inline">Tout vider</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Search & Filters */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3" />
-            <input
-              type="text"
-              placeholder="Rechercher dans la liste..."
-              className="w-full bg-raised border border-line-strong rounded-md pl-10 pr-4 py-2 text-sm text-ink placeholder-ink-4 focus:outline-none focus:border-accent"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          
-          {allTags.length > 0 && (
-            <select
-              className="bg-raised border border-line-strong rounded-md px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent"
-              value={filterTag}
-              onChange={(e) => setFilterTag(e.target.value)}
-            >
-              <option value="">Tous les tags</option>
-              {allTags.map(tag => (
-                <option key={tag} value={tag}>{tag}</option>
-              ))}
-            </select>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 min-h-0 overflow-auto">
         {watchlist.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-20 h-20 bg-overlay/50 rounded-full flex items-center justify-center mb-4">
-              <Star className="w-10 h-10 text-ink-4" />
-            </div>
-            <h3 className="text-xl font-bold text-ink mb-2">Aucun joueur suivi</h3>
-            <p className="text-ink-3 max-w-md">
-              Cliquez sur l'étoile d'un joueur pour l'ajouter à votre liste de suivi.
-            </p>
-          </div>
+          <EmptyState icon={Star} className="h-full" title="Aucun joueur suivi">
+            Cliquez sur l'étoile d'un joueur (base joueurs, chasseur de pépites) pour l'ajouter à la liste.
+          </EmptyState>
         ) : filteredWatchlist.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <Filter className="w-10 h-10 text-ink-4 mb-4" />
-            <h3 className="text-lg font-bold text-ink mb-2">Aucun résultat</h3>
-            <p className="text-ink-3">Modifiez la recherche ou les filtres.</p>
-          </div>
+          <EmptyState icon={Filter} title="Aucun résultat">Modifiez la recherche ou les filtres.</EmptyState>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filteredWatchlist.map((item) => {
-              const player = item.player;
-              const pSeason = extractSeason(player.League);
-              const pSeasonColors = getSeasonColor(pSeason);
-              const isEditing = editingNotes === getPlayerSeasonId(player);
-
-              return (
-                <div 
-                  key={getPlayerSeasonId(player)} 
-                  className="bg-surface border border-line rounded-lg overflow-hidden hover:border-line-strong transition-all group"
-                >
-                  {/* Card Header */}
-                  <div className="p-4 border-b border-line/50 bg-raised/30">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <div className="relative overflow-hidden w-12 h-12 rounded-full bg-overlay flex items-center justify-center text-sm font-bold text-ink-2 border border-line-strong">
-                            {(player.Player || '??').substring(0, 2).toUpperCase()}
-                            <PhotoOverlay src={player.Image} alt={player.Player} />
-                          </div>
-                          <div className={`absolute -bottom-1 -right-1 px-1.5 py-0 rounded text-[8px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text} border ${pSeasonColors.border}`}>
-                            {getSeasonShortLabel(pSeason)}
-                          </div>
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-ink">{player.Player}</h3>
-                          <p className="text-xs text-ink-3"><TeamLine player={player} /></p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleRemove(player)}
-                        className="p-1.5 text-ink-3 hover:text-neg hover:bg-neg/10 rounded-md transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
+          <table className="sv-table">
+            <thead>
+              <tr>
+                <th className="pl-5">Joueur</th>
+                <th>Poste</th>
+                <th className="text-right">Âge</th>
+                <th className="text-right">Min</th>
+                <th className="text-right">Note</th>
+                <th className="text-right">Valeur</th>
+                <th className="text-right">Contrat</th>
+                <th className="w-[32%]">Notes de scouting</th>
+                <th className="text-right">Ajouté le</th>
+                <th className="pr-5"><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredWatchlist.map((item) => {
+                const player = item.player;
+                const id = getPlayerSeasonId(player);
+                const isEditing = editingNotes === id;
+                return (
+                  <tr key={id} className="group align-top">
+                    <td className="pl-5">
+                      <button onClick={() => onSelectPlayer(player)} className="flex items-center gap-2.5 text-left">
+                        <PlayerAvatar player={player} size="sm" />
+                        <span className="min-w-0">
+                          <span className="block text-[13px] font-medium text-ink hover:text-accent transition-colors">{player.Player}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(extractSeason(player.League))}</span></span>
+                          <span className="block text-2xs text-ink-3 max-w-[14rem]"><TeamLine player={player} /></span>
+                        </span>
                       </button>
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div className="p-4 space-y-3">
-                    {/* Stats Row */}
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="px-2 py-1 bg-overlay rounded text-ink-2">{positionLabel(player.Position)}</span>
-                      <span className="px-2 py-1 bg-overlay rounded text-ink-2">{player.Age ?? '–'} ans</span>
-                      <span className="px-2 py-1 bg-accent/10 rounded text-accent font-mono">
-                        €{typeof player["Market value"] === 'number' ? (player["Market value"]/1000000).toFixed(1) + 'M' : '-'}
-                      </span>
-                    </div>
-
-                    {/* Notes */}
-                    <div className="bg-raised/50 rounded-md p-3">
-                      <div className="flex items-center gap-2 text-xs text-ink-3 mb-2">
-                        <MessageSquare className="w-3 h-3" />
-                        Notes
-                      </div>
+                    </td>
+                    <td><span className="sv-tag">{positionLabel(player.Position)}</span></td>
+                    <td className="text-right text-ink-2">{player.Age ?? '–'}</td>
+                    <td className="text-right text-ink-3">{Number(player['Minutes played'] || 0).toLocaleString('fr-FR')}</td>
+                    <td className="text-right">{typeof player['Rating pct'] === 'number' ? <PercentileValue value={player['Rating pct'] as number} className="text-xs" /> : <span className="text-ink-4">–</span>}</td>
+                    <td className="text-right text-ink font-medium">
+                      {typeof player['Market value'] === 'number' ? `€${(player['Market value'] / 1000000).toFixed(1)}M` : '–'}
+                    </td>
+                    <td className="text-right text-xs text-ink-3">{player['Contract expires'] ? String(player['Contract expires']).slice(0, 7).split('-').reverse().join('/') : '–'}</td>
+                    <td>
                       {isEditing ? (
-                        <div className="space-y-2">
-                          <textarea
-                            className="w-full bg-overlay border border-line-strong rounded p-2 text-sm text-ink resize-none focus:outline-none focus:border-accent"
-                            rows={3}
-                            value={tempNotes}
-                            onChange={(e) => setTempNotes(e.target.value)}
-                            placeholder="Ajoutez vos notes..."
-                            autoFocus
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleSaveNotes(player)}
-                              className="flex-1 py-1.5 bg-accent hover:bg-accent text-accent-ink text-xs font-bold rounded transition-colors"
-                            >
-                              Enregistrer
-                            </button>
-                            <button
-                              onClick={() => setEditingNotes(null)}
-                              className="flex-1 py-1.5 bg-line-strong hover:bg-ink-4 text-ink text-xs rounded transition-colors"
-                            >
-                              Annuler
-                            </button>
+                        <div className="space-y-1.5">
+                          <textarea className="sv-input !h-auto py-1.5 resize-none" rows={3} value={tempNotes}
+                            onChange={(e) => setTempNotes(e.target.value)} placeholder="Points forts, réserves, matchs à revoir…" autoFocus />
+                          <div className="flex gap-1.5">
+                            <button onClick={() => handleSaveNotes(player)} className="sv-btn sv-btn-primary sv-btn-sm">Enregistrer</button>
+                            <button onClick={() => setEditingNotes(null)} className="sv-btn sv-btn-ghost sv-btn-sm">Annuler</button>
                           </div>
                         </div>
                       ) : (
-                        <p 
-                          className="text-sm text-ink-2 cursor-pointer hover:text-ink transition-colors min-h-[40px]"
-                          onClick={() => {
-                            setEditingNotes(getPlayerSeasonId(player));
-                            setTempNotes(item.notes || '');
-                          }}
-                        >
-                          {item.notes || <span className="text-ink-4 italic">Cliquez pour ajouter des notes...</span>}
-                        </p>
+                        <button className="w-full text-left text-xs text-ink-2 hover:text-ink flex items-start gap-1.5 min-h-[1.5rem]"
+                          onClick={() => { setEditingNotes(id); setTempNotes(item.notes || ''); }}>
+                          <MessageSquare className="w-3 h-3 mt-0.5 shrink-0 text-ink-4" />
+                          {item.notes || <span className="text-ink-4">Ajouter une note</span>}
+                        </button>
                       )}
-                    </div>
-
-                    {/* Added Date */}
-                    <div className="flex items-center gap-2 text-xs text-ink-3">
-                      <Clock className="w-3 h-3" />
-                      Ajouté le {formatDate(item.addedAt)}
-                    </div>
-                  </div>
-
-                  {/* Card Footer */}
-                  <div className="p-3 border-t border-line bg-raised/30">
-                    <button
-                      onClick={() => onSelectPlayer(player)}
-                      className="w-full flex items-center justify-center gap-2 py-2 bg-overlay hover:bg-line-strong text-ink text-sm rounded-md transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                      Voir la fiche
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                    </td>
+                    <td className="text-right text-2xs text-ink-3 whitespace-nowrap"><Clock className="w-3 h-3 inline mr-1 -mt-px" />{formatDate(item.addedAt)}</td>
+                    <td className="pr-5">
+                      <div className="flex justify-end gap-0.5">
+                        <button onClick={() => onSelectPlayer(player)} className="sv-icon-btn" title="Voir la fiche"><Eye className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => handleRemove(player)} className="sv-icon-btn hover:!text-neg" title="Retirer de la liste"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     </div>

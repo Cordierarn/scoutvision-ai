@@ -31,20 +31,20 @@ const RefereesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
       right={<VerdictBadge verdict={lab.experiments.referees.verdicts.cards} />}
     >
       <div className="flex flex-wrap items-end gap-3 mb-4">
-        <label className="text-[11px] text-ink-3">Championnat
+        <label className="text-2xs text-ink-3">Championnat
           <select value={comp} onChange={e => setComp(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
             <option value="">Tous</option>
             {comps.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
-        <label className="text-[11px] text-ink-3">Ordre
+        <label className="text-2xs text-ink-3">Ordre
           <select value={order} onChange={e => setOrder(e.target.value as typeof order)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
             <option value="strict">Les plus sévères</option>
             <option value="lenient">Les plus cléments</option>
             <option value="matches">Les plus expérimentés</option>
           </select>
         </label>
-        <div className="flex gap-4 text-[11px] text-ink-3 pb-1">
+        <div className="flex gap-4 text-2xs text-ink-3 pb-1">
           <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: DIVERGING.above }} /> Plus de cartons que la moyenne</span>
           <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: DIVERGING.below }} /> Moins</span>
         </div>
@@ -52,7 +52,7 @@ const RefereesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-[11px] text-ink-3 uppercase tracking-wider border-b border-line">
+            <tr className="text-2xs text-ink-3 uppercase tracking-wider border-b border-line">
               <th className="text-left font-semibold py-2 pr-3">Arbitre</th>
               <th className="text-left font-semibold py-2 px-3">Saisons</th>
               <th className="text-right font-semibold py-2 px-3">Matchs</th>
@@ -85,7 +85,7 @@ const RefereesTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-ink-3 mt-3">Arbitres avec au moins 15 matchs de championnat. Ramener l'écart vers zéro évite qu'un arbitre peu vu paraisse extrême par hasard.</p>
+      <p className="text-2xs text-ink-3 mt-3">Arbitres avec au moins 15 matchs de championnat. Ramener l'écart vers zéro évite qu'un arbitre peu vu paraisse extrême par hasard.</p>
     </Panel>
   );
 };

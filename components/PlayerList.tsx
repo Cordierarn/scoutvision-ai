@@ -337,9 +337,9 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer }) => {
                 >
                   <td className="pl-5">
                     <div className="flex items-center gap-2.5 min-w-[13rem]">
-                      <PlayerAvatar player={player} size="sm" season={multiSeason ? getSeasonShortLabel(season) : undefined} />
+                      <PlayerAvatar player={player} size="sm" />
                       <div className="min-w-0">
-                        <div className="text-[13px] font-medium text-ink truncate group-hover:text-accent transition-colors">{player.Player}</div>
+                        <div className="text-[13px] font-medium text-ink truncate group-hover:text-accent transition-colors">{player.Player}{multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getSeasonShortLabel(season)}</span>}</div>
                         {player['Passport country'] && (
                           <div className="flex items-center gap-1 text-2xs text-ink-4">
                             <CountryFlag code={String(player['Passport country'])} className="w-3 h-2" />

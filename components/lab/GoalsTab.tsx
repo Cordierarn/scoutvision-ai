@@ -3,6 +3,7 @@
  * Probabilité de victoire minute par minute ; chaque but vaut les points attendus qu'il rapporte.
  */
 
+import { INK } from '../../theme/charts';
 import React, { useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LabExperiments, labData } from '../../services/labData';
@@ -24,10 +25,10 @@ const ValueChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
   const last = data.length - 1;
   const endLabel = (text: string) => (props: { x?: number; y?: number; index?: number }) =>
     props.index === last && props.x !== undefined && props.y !== undefined
-      ? <text x={props.x + 6} y={props.y} dy={4} fill="#cbd5e1" fontSize={11}>{text}</text> : null;
+      ? <text x={props.x + 6} y={props.y} dy={4} fill={INK.secondary} fontSize={11}>{text}</text> : null;
   return (
     <div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-ink-3 mb-2">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-2xs text-ink-3 mb-2">
         {STATES.map((s, i) => (
           <span key={s.key} className="inline-flex items-center gap-1.5"><span className="w-4 h-0.5" style={{ backgroundColor: SERIES[i] }} /> {s.label}</span>
         ))}
@@ -35,10 +36,10 @@ const ValueChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 800, height: 288 }}>
           <LineChart data={data} margin={{ top: 10, right: 90, bottom: 24, left: 0 }}>
-            <CartesianGrid stroke="#1e293b" vertical={false} />
-            <XAxis dataKey="minute" type="number" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }}
-              label={{ value: 'Minute du but', position: 'insideBottom', offset: -14, fill: '#64748b', fontSize: 11 }} />
-            <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} width={40} domain={[0, 2]} ticks={[0, 0.5, 1, 1.5, 2]}
+            <CartesianGrid stroke={INK.grid} vertical={false} />
+            <XAxis dataKey="minute" type="number" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} stroke={INK.axis} tick={{ fill: INK.muted, fontSize: 11 }}
+              label={{ value: 'Minute du but', position: 'insideBottom', offset: -14, fill: INK.muted, fontSize: 11 }} />
+            <YAxis stroke={INK.axis} tick={{ fill: INK.muted, fontSize: 11 }} width={40} domain={[0, 2]} ticks={[0, 0.5, 1, 1.5, 2]}
               tickFormatter={(v: number) => frNumber(v, 1)} />
             <Tooltip
               content={({ payload, label }) => !payload?.length ? null : (
@@ -61,7 +62,7 @@ const ValueChart: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-[11px] text-ink-3 mt-1">
+      <p className="text-2xs text-ink-3 mt-1">
         Points attendus gagnés par l'équipe qui marque, entre deux équipes de force moyenne. À la 90e, un but qui donne l'avance vaut
         {' '}{frNumber(c.byScore['0'][last], 1)} point, une égalisation {frNumber(c.byScore['-1'][last], 1)}, un but du break {frNumber(c.byScore['1'][last], 1)}.
       </p>
@@ -100,10 +101,10 @@ const GoalsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
             <p>Être décisif est en partie un trait du joueur : r = {frNumber(gv.perGoalReliability.r, 2)} d'une saison à l'autre pour les points par but ({gv.perGoalReliability.pairs} joueurs à 6 buts ou plus). Le reste tient au contexte de son équipe.</p>
             {cal && (
               <div>
-                <div className="text-[11px] text-ink-3 mb-1">Calibration à la 70e minute : victoires à domicile observées (en haut) et prévues (en bas)</div>
+                <div className="text-2xs text-ink-3 mb-1">Calibration à la 70e minute : victoires à domicile observées (en haut) et prévues (en bas)</div>
                 <div className="grid grid-cols-5 gap-1 text-center">
                   {cal.bins.map((b, i) => (
-                    <div key={i} className="whitespace-nowrap"><div className="text-xs text-ink tabular-nums">{frPercent(b.observed)}</div><div className="text-[10px] text-ink-3 tabular-nums">{frPercent(b.predicted)}</div></div>
+                    <div key={i} className="whitespace-nowrap"><div className="text-xs text-ink tabular-nums">{frPercent(b.observed)}</div><div className="text-2xs text-ink-3 tabular-nums">{frPercent(b.predicted)}</div></div>
                   ))}
                 </div>
               </div>
@@ -115,18 +116,18 @@ const GoalsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
       {!rows ? <Missing what="des buts" /> : (
         <Panel title="Les buteurs qui rapportent des points" subtitle="Points apportés = somme, pour chacun de ses buts en championnat, des points attendus gagnés par son équipe. Décisif : but qui égalise ou donne l'avance ; de confort : quand l'équipe mène déjà de deux buts.">
           <div className="flex flex-wrap items-end gap-3 mb-4">
-            <label className="text-[11px] text-ink-3">Saison
+            <label className="text-2xs text-ink-3">Saison
               <select value={current} onChange={e => setSeason(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                 {seasons.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
-            <label className="text-[11px] text-ink-3">Championnat
+            <label className="text-2xs text-ink-3">Championnat
               <select value={comp} onChange={e => setComp(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                 <option value="">Tous</option>
                 {comps.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
-            <label className="text-[11px] text-ink-3">Trier par
+            <label className="text-2xs text-ink-3">Trier par
               <select value={sort} onChange={e => setSort(e.target.value as Sort)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
                 <option value="points">Points apportés</option>
                 <option value="goals">Buts</option>
@@ -137,7 +138,7 @@ const GoalsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[11px] text-ink-3 uppercase tracking-wider border-b border-line">
+                <tr className="text-2xs text-ink-3 uppercase tracking-wider border-b border-line">
                   <th className="text-left font-semibold py-2 pr-3">Joueur</th>
                   <th className="text-left font-semibold py-2 px-3">Club</th>
                   <th className="text-right font-semibold py-2 px-3">Buts</th>

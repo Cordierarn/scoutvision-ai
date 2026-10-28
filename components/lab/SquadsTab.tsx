@@ -32,12 +32,12 @@ const SquadsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="text-[11px] text-ink-3">Saison
+        <label className="text-2xs text-ink-3">Saison
           <select value={current} onChange={e => setSeason(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
             {seasons.map(s => <option key={s} value={s}>{s}{s === lab.current ? ' (en cours)' : ''}</option>)}
           </select>
         </label>
-        <label className="text-[11px] text-ink-3">Championnat
+        <label className="text-2xs text-ink-3">Championnat
           <select value={comp} onChange={e => setComp(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
             {comps.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
@@ -49,7 +49,7 @@ const SquadsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           subtitle={`Effet attendu du seul vieillissement sur l'xGD par match de la saison suivante, par rapport à un effectif d'âge moyen : âge de chaque joueur (courbes d'âge de la note globale), pondéré par ses minutes ; ${frNumber(data.coef, 3, true)} xGD par point d'effet d'âge (IC 95 % [${frNumber(data.ci[0], 3, true)} ; ${frNumber(data.ci[1], 3, true)}]), à niveau égal.`}
           right={<VerdictBadge verdict={ex.clock.verdict} />}
         >
-          <div className="flex gap-4 text-[11px] text-ink-3 mb-3">
+          <div className="flex gap-4 text-2xs text-ink-3 mb-3">
             <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: DIVERGING.above }} /> À l'âge où l'on progresse</span>
             <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: DIVERGING.below }} /> Vieillissant</span>
           </div>
