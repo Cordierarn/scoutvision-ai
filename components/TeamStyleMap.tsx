@@ -11,11 +11,12 @@ import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, Cartes
 import { TeamStats } from '../types';
 import { dataLoader } from '../services/dataLoader';
 import { styleLabel } from '../utils/labels';
+import { CONTEXT, DIVERGING, INK, SERIES, tooltipProps } from '../theme/charts';
 
 // Palette catégorielle de référence (fond sombre), 2 séries + gris neutre
-const SELECTED = '#3987e5';
-const SAME_STYLE = '#d95926';
-const OTHER = '#64748b';
+const SELECTED = SERIES[0];
+const SAME_STYLE = SERIES[1];
+const OTHER = CONTEXT;
 
 const PROFILE_LABELS: Record<string, string> = {
   possession: 'Possession',
@@ -51,17 +52,17 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
   if (!style) return null;
 
   return (
-    <div className="bg-surface border border-line rounded-lg p-6 ">
-      <h3 className="text-xl font-bold text-ink mb-1 flex items-center gap-2">
-        <Compass className="w-5 h-5 text-accent" /> Style de jeu : {styleLabel(style)}
+    <div className="sv-panel p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink mb-1 flex items-center gap-1.5">
+        <Compass className="w-3.5 h-3.5 text-ink-3" /> Style de jeu : {styleLabel(style)}
       </h3>
       <p className="text-xs text-ink-3 mb-4">
         Axe horizontal : contrôle du jeu ; axe vertical : pressing et verticalité. Six styles issus d'un k-means sur la possession, le territoire, le pressing (PPDA), la hauteur de ligne, le jeu direct et la construction, ajusté sur toutes les équipes-saisons de toutes les compétitions.
       </p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <div className="flex items-center gap-4 text-xs text-ink-3 mb-2">
+          <div className="flex items-center gap-4 text-2xs text-ink-3 mb-2">
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SELECTED }} />{team.team}</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SAME_STYLE }} />Même style</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: OTHER }} />Autres équipes</span>
@@ -69,22 +70,22 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis type="number" dataKey="x" tick={false} axisLine={{ stroke: '#334155' }}
-                  label={{ value: 'Direct  ←  contrôle du jeu  →  Dominant', fill: '#94a3b8', fontSize: 11, position: 'bottom' }} />
-                <YAxis type="number" dataKey="y" tick={false} axisLine={{ stroke: '#334155' }} width={20}
-                  label={{ value: 'Construction ↔ Pressing', fill: '#94a3b8', fontSize: 11, angle: -90, position: 'insideLeft' }} />
+                <CartesianGrid stroke={INK.grid} />
+                <XAxis type="number" dataKey="x" tick={false} axisLine={{ stroke: INK.axis }}
+                  label={{ value: 'Direct  ←  contrôle du jeu  →  Dominant', fill: INK.muted, fontSize: 11, position: 'bottom' }} />
+                <YAxis type="number" dataKey="y" tick={false} axisLine={{ stroke: INK.axis }} width={20}
+                  label={{ value: 'Construction ↔ Pressing', fill: INK.muted, fontSize: 11, angle: -90, position: 'insideLeft' }} />
                 <ZAxis range={[70, 70]} />
-                <ReferenceLine x={0} stroke="#334155" />
-                <ReferenceLine y={0} stroke="#334155" />
+                <ReferenceLine x={0} stroke={INK.axis} />
+                <ReferenceLine y={0} stroke={INK.axis} />
                 <Tooltip
                   cursor={false}
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+                  contentStyle={tooltipProps.contentStyle}
                   content={({ payload }) => {
                     const p = payload?.[0]?.payload as Point | undefined;
                     if (!p) return null;
                     return (
-                      <div className="bg-raised border border-line-strong rounded-md px-3 py-2 text-xs">
+                      <div className="sv-tooltip">
                         <div className="text-ink font-bold">{p.team}</div>
                         <div className="text-ink-3">{styleLabel(p.styleName)}</div>
                       </div>
@@ -92,9 +93,9 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
                   }}
                 />
                 <Scatter data={others} fill={OTHER} fillOpacity={0.7} />
-                <Scatter data={same} fill={SAME_STYLE} stroke="#0f172a" strokeWidth={2} />
-                <Scatter data={selected} fill={SELECTED} stroke="#0f172a" strokeWidth={2}>
-                  <LabelList dataKey="team" position="top" fill="#e2e8f0" fontSize={12} fontWeight={600} />
+                <Scatter data={same} fill={SAME_STYLE} stroke={INK.surface} strokeWidth={2} />
+                <Scatter data={selected} fill={SELECTED} stroke={INK.surface} strokeWidth={2}>
+                  <LabelList dataKey="team" position="top" fill={INK.primary} fontSize={12} fontWeight={600} />
                 </Scatter>
               </ScatterChart>
             </ResponsiveContainer>
@@ -103,7 +104,7 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
 
         {profile && (
           <div>
-            <h4 className="text-sm font-bold text-ink-3 uppercase tracking-wider mb-3">Profil du style</h4>
+            <h4 className="sv-label mb-1">Profil du style</h4>
             <p className="text-xs text-ink-3 mb-3">Moyenne des équipes de ce style, en écarts-types par rapport à toutes les équipes</p>
             <div className="space-y-2.5">
               {Object.entries(profile).map(([key, z]) => (
@@ -113,12 +114,12 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[] }> = ({ team,
                     <span className="text-ink-3 font-mono">{z > 0 ? '+' : ''}{z.toFixed(1)}</span>
                   </div>
                   {/* Barre divergente centrée sur 0, bornée à ±2 écarts-types */}
-                  <div className="relative h-1.5 bg-raised rounded-full">
+                  <div className="relative h-1.5 bg-raised rounded-sm">
                     <div className="absolute top-0 bottom-0 left-1/2 w-px bg-ink-4" />
                     <div
-                      className="absolute top-0 bottom-0 rounded-full"
+                      className="absolute top-0 bottom-0 rounded-sm"
                       style={{
-                        background: z >= 0 ? SELECTED : SAME_STYLE,
+                        background: z >= 0 ? DIVERGING.above : DIVERGING.below,
                         left: z >= 0 ? '50%' : `${50 - (Math.min(2, -z) / 2) * 50}%`,
                         width: `${(Math.min(2, Math.abs(z)) / 2) * 50}%`,
                       }}

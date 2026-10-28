@@ -3,7 +3,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PlayerData, extractSeason, getPlayerSeason, getSeasonShortLabel, getSeasonLabel } from '../types';
 import { useShots } from '../hooks/useShots';
 import PlayerHeatmap from './PlayerHeatmap';
-import { metricLabel, positionName, roleLabel, styleLabel, footLabel, shotResultLabel, shotTypeLabel } from '../utils/labels';
+import { metricLabel, positionName, roleLabel, styleLabel, footLabel } from '../utils/labels';
 import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsights';
 import { dataLoader } from '../services/dataLoader';
 import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
@@ -17,7 +17,8 @@ import { jsPDF } from 'jspdf';
 import { getFlagUrl } from '../utils/flags';
 import { TeamLogo, CompetitionBadge, CountryFlag, PlayerAvatar } from './Media';
 import { Panel, Stat, PercentileRow, PercentileValue, PercentileBar, PercentileLegend, LegendItem, EmptyState, Delta, PolarTick } from './ui';
-import { BRAND, CONTEXT, INK, SHOT, polarGridProps } from '../theme/charts';
+import { BRAND, CONTEXT, INK, polarGridProps } from '../theme/charts';
+import ShotPitch, { ShotLegend } from './ShotPitch';
 
 interface PlayerCardProps {
   player: PlayerData;
@@ -629,13 +630,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
               <Stat label="Buts − xG" value={<Delta value={shotStats.goals - shotStats.xG} digits={2} />} />
             </div>
           }>
-          <ShotPitch shots={playerShots} />
-          <div className="mt-2 flex flex-wrap gap-4">
-            <LegendItem color={SHOT.goal}>But</LegendItem>
-            <LegendItem color={SHOT.saved}>Arrêté</LegendItem>
-            <LegendItem color={SHOT.missed}>Manqué ou contré</LegendItem>
-            <span className="text-2xs text-ink-4">Taille du point = xG · moitié offensive</span>
-          </div>
+          <ShotPitch shots={playerShots} emptyText="Aucune donnée de tir pour ce joueur." />
+          <div className="mt-2"><ShotLegend /></div>
         </Panel>
 
         {/* Rapport IA : fonctionnalité secondaire, en appui des données */}
@@ -694,49 +690,6 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
       </Panel>
 
       </div>
-    </div>
-  );
-};
-
-/**
- * Terrain horizontal (attaque vers la droite) et tirs du joueur, taille du point = xG
- */
-const ShotPitch: React.FC<{ shots: ReturnType<typeof useShots>['shots'] }> = ({ shots }) => {
-  const [hover, setHover] = useState<number | null>(null);
-  const W = 105, H = 68;
-  const line = 'rgba(137,150,167,0.35)';
-  return (
-    <div className="relative w-full aspect-[52.5/68] max-w-[340px] mx-auto bg-raised/60 rounded-md border border-line overflow-hidden">
-      {/* Moitié offensive : les tirs viennent presque tous de là */}
-      <svg viewBox={`${W / 2} 0 ${W / 2} ${H}`} className="absolute inset-0 w-full h-full" fill="none" stroke={line} strokeWidth="0.3">
-        <rect x="0.3" y="0.3" width={W - 0.6} height={H - 0.6} />
-        <line x1={W / 2} y1="0.3" x2={W / 2} y2={H - 0.3} />
-        <circle cx={W / 2} cy={H / 2} r="9.15" />
-        <rect x={W - 16.5} y={(H - 40.32) / 2} width="16.2" height="40.32" />
-        <rect x={W - 5.5} y={(H - 18.32) / 2} width="5.2" height="18.32" />
-        <rect x="0.3" y={(H - 40.32) / 2} width="16.2" height="40.32" />
-        <rect x="0.3" y={(H - 18.32) / 2} width="5.2" height="18.32" />
-        <circle cx={W - 11} cy={H / 2} r="0.4" fill={line} />
-        {shots.map((shot, i) => {
-          const color = shot.result === 'Goal' ? SHOT.goal : shot.result === 'SavedShot' ? SHOT.saved : SHOT.missed;
-          const r = Math.max(0.7, Math.min(2.6, Math.sqrt(shot.xG) * 3.2));
-          return (
-            <circle key={i} cx={shot.X * W} cy={shot.Y * H} r={r} fill={color} fillOpacity={shot.result === 'Goal' ? 0.95 : 0.7}
-              stroke={INK.surface} strokeWidth="0.25" style={{ cursor: 'pointer' }}
-              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
-          );
-        })}
-      </svg>
-      {hover !== null && shots[hover] && (
-        <div className="sv-tooltip absolute pointer-events-none z-10"
-          style={{ left: `${Math.min(Math.max((shots[hover].X - 0.5) * 200, 0), 60)}%`, top: `${Math.max(shots[hover].Y * 100 - 14, 2)}%` }}>
-          <div className="text-ink font-medium">{shotResultLabel(shots[hover].result)}</div>
-          <div>xG {shots[hover].xG.toFixed(2)} · {shots[hover].minute}e min · {shotTypeLabel(shots[hover].shotType)}</div>
-        </div>
-      )}
-      {shots.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-ink-4">Aucune donnée de tir pour ce joueur.</div>
-      )}
     </div>
   );
 };
