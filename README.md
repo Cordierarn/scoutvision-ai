@@ -31,6 +31,25 @@ A modern, data-driven scouting application for football analytics with AI-powere
 - 🗓️ **Forecasts** - Win / draw / loss probabilities of upcoming matches
 - 🧪 **Laboratory** - New ideas tested on match-by-match data (coaches, momentum, goal value, pass chemistry, referees, transfers), each with a verdict
 
+## 📸 Screenshots
+
+Taken from the app with real data (season 2026-27). The PitchAPI data is private: player and
+club names, photos, logos, market values, contracts and birth dates are blurred.
+
+**Player database** — dense sortable table, configurable stat columns, percentiles
+
+![Player database](docs/screenshots/base-joueurs.png)
+
+**Player card** — key figures, radar linked to percentiles, best roles, impact and value models,
+development projection, shot map and heatmap
+
+![Player card](docs/screenshots/fiche-joueur.png)
+
+**Gem Hunter** — role profile and criteria, constraints, selection funnel, role index and its
+breakdown (“why this player?”)
+
+![Gem Hunter](docs/screenshots/chasseur-de-pepites.png)
+
 ## 🚀 Getting Started
 
 ### Prerequisites
