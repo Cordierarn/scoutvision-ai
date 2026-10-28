@@ -82,14 +82,15 @@ export const Stat: React.FC<{
   tone?: 'default' | 'accent' | 'pos' | 'warn' | 'neg';
   title?: string;
   help?: string;             // aide détaillée : icône (i) à côté du libellé
+  wrapSub?: boolean;         // précision sur deux lignes au lieu d'être tronquée
   className?: string;
-}> = ({ label, value, sub, tone = 'default', title, help, className = '' }) => {
+}> = ({ label, value, sub, tone = 'default', title, help, wrapSub = false, className = '' }) => {
   const color = tone === 'accent' ? 'text-accent' : tone === 'pos' ? 'text-pos' : tone === 'warn' ? 'text-warn' : tone === 'neg' ? 'text-neg' : 'text-ink';
   return (
     <div className={`min-w-0 ${className}`} title={title}>
       <div className="sv-label flex items-center gap-1 min-w-0"><span className="truncate">{label}</span>{help && <InfoTip text={help} />}</div>
       <div className={`mt-0.5 text-base font-semibold leading-tight num ${color}`}>{value}</div>
-      {sub && <div className="text-2xs text-ink-3 mt-0.5 truncate">{sub}</div>}
+      {sub && <div className={`text-2xs text-ink-3 mt-0.5 ${wrapSub ? 'leading-snug' : 'truncate'}`}>{sub}</div>}
     </div>
   );
 };

@@ -398,11 +398,12 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   const matches = Number(player['Matches played']) || 0;
   const minutes = Number(player['Minutes played']) || 0;
   const coverage = typeof player['Analytics coverage'] === 'number' ? player['Analytics coverage'] : undefined;
+  // Deux notions distinctes : la taille de l'échantillon de la saison, et la fiabilité propre à chaque indicateur
   const sampleHelp = [
-    `Saison en cours : données arrêtées au ${dataIndex?.generatedAt ? new Date(dataIndex.generatedAt).toLocaleDateString('fr-FR') : '—'}. Échantillon : ${matches} matchs, ${minutes.toLocaleString('fr-FR')} minutes.`,
-    'Avec peu de matchs, les valeurs par 90 et les percentiles sont plus instables ; les valeurs par 90 sont ramenées vers la moyenne du rôle quand les minutes sont faibles.',
-    `Indicateurs avancés soumis à des seuils : réseau de passes à partir de ${MIN_NETWORK_MATCHES} matchs, percentile RAPM à partir de ${MIN_RAPM_MINUTES} minutes (fenêtre de deux saisons).`,
+    `Échantillon limité : saison en cours, ${matches} matchs et ${minutes.toLocaleString('fr-FR')} minutes au ${dataIndex?.generatedAt ? new Date(dataIndex.generatedAt).toLocaleDateString('fr-FR') : '—'}.`,
+    'Les valeurs par 90 et les percentiles peuvent encore varier sensiblement (les valeurs par 90 sont ramenées vers la moyenne du rôle quand les minutes sont faibles). Un petit échantillon rend la mesure moins stable ; il n\'indique pas une performance moins bonne.',
     ...(coverage !== undefined && coverage < 1 ? [`Statistiques avancées disponibles sur ${Math.round(coverage * 100)} % des minutes du joueur.`] : []),
+    `Fiabilité propre à chaque indicateur, indépendante de la saison en cours : réseau de passes à partir de ${MIN_NETWORK_MATCHES} matchs, percentile RAPM à partir de ${MIN_RAPM_MINUTES} minutes sur deux saisons, finition mesurée sur la carrière. Voir chaque carte d'« Impact et valeur ».`,
   ].join('\n');
 
   // Radar : percentile du joueur et repère de la médiane du groupe (50)
@@ -468,7 +469,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 <span className="sv-tag" title="Saison">{getPlayerSeasonTag(player)}</span>
                 {seasonInProgress && (
                   <span className="sv-tag !font-normal text-ink-2 cursor-help" tabIndex={0} data-tip={sampleHelp} data-tip-wide="" data-tip-pos="bottom" data-tip-align="start">
-                    <span className="w-1.5 h-1.5 rounded-full bg-warn" aria-hidden />
+                    <span className="w-1.5 h-1.5 rounded-full bg-ink-3" aria-hidden />
                     Saison en cours · {matches} match{matches > 1 ? 's' : ''}
                   </span>
                 )}
@@ -502,9 +503,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           <div className="grid grid-cols-3 lg:w-[26rem] shrink-0 border border-line rounded-md divide-x divide-line">
             <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Marché" full="Valeur marché" />} value={market !== undefined ? formatCurrency(market) : 'N/D'}
               sub={market !== undefined ? 'Transfermarkt, actuelle' : isCurrentSeason ? 'Hors Transfermarkt' : 'Saison en cours seulement'} />
-            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Modèle" full="Valeur modèle" />} value={estimate !== undefined ? formatCurrency(estimate) : 'N/D'}
-              sub={market && estimate ? `×${fixed(estimate / market, 1)} du marché` : estimate !== undefined ? 'Estimée par la performance' : isCurrentSeason ? 'Sans valeur de marché' : 'Saison en cours seulement'}
-              help={`Valeur attendue d'après la performance (modèle ridge du pipeline) : une indication, pas un prix.${valuation ? ` R² hors échantillon ${fixed(valuation.r2_cv, 2)}, erreur typique ×${fixed(valuation.median_error_factor, 2)}.` : ''} Un écart avec le marché est une piste à vérifier.`} />
+            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Estimée" full="Valeur estimée" />} value={estimate !== undefined ? formatCurrency(estimate) : 'N/D'}
+              wrapSub
+              sub={market && estimate ? <MobileLabel short={`${Math.round((estimate / market) * 100)} % du marché`} full={`${Math.round((estimate / market) * 100)} % de la valeur de marché`} /> : estimate !== undefined ? 'Estimation statistique' : isCurrentSeason ? 'Sans valeur de marché' : 'Saison en cours seulement'}
+              help={`Valeur estimée par le modèle statistique du pipeline : régression ridge sur le log de la valeur Transfermarkt (âge, minutes, rôle, compétition, note, percentiles du rôle, RAPM), chaque joueur étant prédit par un modèle entraîné sans lui. C'est une estimation statistique, ni un prix ni la valeur « réelle » du joueur.${valuation ? ` R² hors échantillon ${fixed(valuation.r2_cv, 2)}, erreur typique ×${fixed(valuation.median_error_factor, 2)}.` : ''} Un écart avec la valeur de marché est un élément à examiner, pas un verdict.`} />
             <Stat className="px-2.5 sm:px-3 py-2.5" label="Contrat" value={contract ? contract.slice(0, 7).split('-').reverse().join('/') : 'N/D'}
               tone={contractMonths !== undefined && contractMonths <= 12 ? 'warn' : 'default'}
               sub={contractMonths !== undefined ? (contractMonths <= 0 ? 'Échu' : `${contractMonths} mois restants`) : 'Inconnu'} />
@@ -710,8 +712,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
       </div>
 
       {/* ===== Évolution et rapport ===== */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        <Panel className="xl:col-span-5" title="Évolution sur un an" icon={TrendingUp}
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+        <Panel className="xl:col-span-2" title="Évolution sur un an" icon={TrendingUp}
           subtitle={hasEvolution
             ? `${getSeasonLabel(extractSeason(playerSeasons[1].League))} → ${getSeasonLabel(extractSeason(playerSeasons[0].League))}, métriques du radar`
             : undefined}
@@ -764,7 +766,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
         </Panel>
 
         {/* Rapport IA : fonctionnalité secondaire, en appui des statistiques ScoutVision */}
-        <Panel className="xl:col-span-7" title="Rapport rédigé" icon={FileText}
+        <Panel className="xl:col-span-3 flex flex-col" bodyClassName="flex-1 min-h-0 flex flex-col" title="Rapport rédigé" icon={FileText}
           subtitle="Synthèse textuelle générée par IA (Gemini) à partir des statistiques de cette fiche. À relire : elle ne remplace pas l'analyse."
           right={!report && (
             <button onClick={handleGenerateReport} disabled={loadingReport} className="sv-btn sv-btn-secondary sv-btn-sm">
@@ -773,7 +775,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
             </button>
           )}>
           {report ? (
-            <div className="max-h-[520px] overflow-y-auto pr-1 text-[13px]">
+            <div className="flex-1 min-h-0 max-h-[520px] overflow-y-auto pr-1 text-[13px]">
               <ReactMarkdown
                 components={{
                   h1: ({node, ...props}) => <h1 className="text-base font-semibold text-ink mb-3" {...props} />,
@@ -799,7 +801,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           ) : reportError ? (
             <LoadError message={reportError} onRetry={handleGenerateReport} />
           ) : (
-            <p className="text-2xs text-ink-4">Contenu : rôle tactique, forces et faiblesses, projection, à partir des percentiles, du RAPM et des courbes d'âge.</p>
+            <div className="flex-1 flex items-center justify-center rounded-md border border-dashed border-line px-4 py-6">
+              <p className="text-xs text-ink-4 text-center max-w-md leading-relaxed">
+                Aucun rapport généré. Contenu : rôle tactique, forces et faiblesses, projection, à partir des percentiles, du RAPM et des courbes d'âge.
+              </p>
+            </div>
           )}
         </Panel>
       </div>

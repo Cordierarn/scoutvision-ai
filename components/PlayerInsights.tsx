@@ -146,15 +146,15 @@ export const ImpactPanel: React.FC<{ player: PlayerData }> = ({ player }) => {
         </Card>
 
         <Card icon={<Coins className="w-3.5 h-3.5" />} title="Valeur et performance"
-          help="Valeur attendue d'après la performance (modèle ridge du pipeline), comparée à la valeur Transfermarkt actuelle. Un écart signale une piste à vérifier, pas une erreur de prix.">
+          help="Valeur estimée par le modèle statistique du pipeline (régression ridge sur le log de la valeur Transfermarkt : âge, minutes, rôle, compétition, note, percentiles du rôle, RAPM ; prédiction hors échantillon), rapportée à la valeur Transfermarkt actuelle. Un écart est un élément à examiner, pas un verdict sur le prix ou le joueur.">
           {ratio !== null ? (
             <>
-              <Primary value={`×${fr(ratio, 1)}`} unit="modèle / marché" />
-              <Reading>{ratio >= 1.5 ? 'Sous-coté selon le modèle' : ratio <= 0.67 ? 'Plus cher que sa performance' : 'Valeur cohérente'}</Reading>
-              <Context>Transfermarkt {formatEuro(market as number)} · modèle {formatEuro(estimate as number)}</Context>
+              <Primary value={`${Math.round(ratio * 100)} %`} unit="estimation / valeur de marché" />
+              <Reading>{ratio >= 1.5 ? 'Estimation statistique supérieure à la valeur marché' : ratio <= 0.67 ? 'Valeur marché supérieure à l\'estimation statistique' : 'Estimation statistique proche de la valeur marché'}</Reading>
+              <Context>Valeur marché (Transfermarkt) {formatEuro(market as number)} · estimation {formatEuro(estimate as number)}</Context>
               {valuation && (
                 <Limit>
-                  R² hors échantillon {fr(valuation.r2_cv, 2)}, erreur typique ×{fr(valuation.median_error_factor, 2)} : une indication, pas un prix
+                  R² hors échantillon {fr(valuation.r2_cv, 2)}, erreur typique ×{fr(valuation.median_error_factor, 2)} : une estimation, pas un prix
                 </Limit>
               )}
             </>
@@ -235,14 +235,15 @@ export const DevelopmentPanel: React.FC<{ player: PlayerData; metrics: string[] 
                     <div key={p.metric} className="flex items-center gap-2 h-6 text-xs">
                       <span className="text-ink-2 flex-1 truncate" title={metricLabel(p.metric)}>{metricLabel(p.metric)}</span>
                       <span className="text-ink-3 num w-9 text-right">P{p.current}</span>
-                      <Icon className={`w-3.5 h-3.5 ${diff > 1 ? 'text-pos' : diff < -1 ? 'text-neg' : 'text-ink-4'}`} />
+                      <Icon className={`w-3.5 h-3.5 ${diff > 1 ? 'text-accent' : diff < -1 ? 'text-warn' : 'text-ink-4'}`} aria-label={diff > 1 ? 'hausse projetée' : diff < -1 ? 'baisse projetée' : 'variation faible'} />
                       <PercentileValue value={p.projected} className="w-11 text-xs" />
                     </div>
                   );
                 })}
               </div>
               <p className="text-2xs text-ink-4 mt-2 leading-relaxed">
-                Calculé sur {curves.pairs.toLocaleString('fr-FR')} paires de saisons consécutives. Seuls les joueurs restés au-dessus du seuil de minutes sont observés.
+                Estimation statistique (retour vers la moyenne et effet de l'âge), pas un verdict sur le joueur : un percentile très élevé tend mécaniquement à baisser.
+                Calculé sur {curves.pairs.toLocaleString('fr-FR')} paires de saisons consécutives ; seuls les joueurs restés au-dessus du seuil de minutes sont observés.
               </p>
             </div>
           )}
