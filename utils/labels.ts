@@ -159,7 +159,7 @@ const POSITIONS: Record<string, { short: string; long: string }> = {
  * Abréviation française d'un poste (rôle PitchAPI : GK, CB, FB, WB, DM, CM, AM, W, ST)
  */
 export function positionLabel(position: string | undefined): string {
-  if (!position) return '';
+  if (!position) return '–';
   return POSITIONS[position]?.short ?? position;
 }
 
@@ -167,7 +167,7 @@ export function positionLabel(position: string | undefined): string {
  * Nom complet français d'un poste
  */
 export function positionName(position: string | undefined): string {
-  if (!position) return '';
+  if (!position) return 'Poste inconnu';
   return POSITIONS[position]?.long ?? position;
 }
 
@@ -204,6 +204,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 /**
  * Libellé français d'un rôle tactique (clé de ROLE_DEFINITIONS)
+ * @deprecated Les rôles affichés viennent de utils/rolePresets.json, déjà nommés en français.
  */
 export function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role;

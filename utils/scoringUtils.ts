@@ -11,6 +11,11 @@ import { PlayerData, RoleDefinition, RoleScoreResult, RoleCategory, MetricBounds
 
 /**
  * Définitions complètes des rôles avec métriques pondérées
+ *
+ * @deprecated Ancien système de rôles, conservé pour comparaison. La source de vérité des
+ * rôles tactiques est utils/rolePresets.json (rolePresets.ts : roleIndex, roleIndexBreakdown,
+ * rankPresets), utilisée par la fiche joueur, le Chasseur de pépites, le recrutement et
+ * scripts/models.py. Plus aucun écran n'affiche ces scores.
  */
 export const ROLE_DEFINITIONS: Record<string, RoleDefinition> = {
   // ========== GOALKEEPERS ==========
@@ -485,6 +490,8 @@ function metricPercentile(player: PlayerData, metric: string, weight: number): n
  * Moyenne pondérée des percentiles par rôle et par niveau : les métriques
  * sont comparables quelle que soit leur échelle. Les métriques sans
  * percentile (analytics absente) sont ignorées et les poids renormalisés.
+ *
+ * @deprecated Ancien système de rôles (ROLE_DEFINITIONS) : utiliser utils/rolePresets.ts.
  */
 export function calculateRoleScore(player: PlayerData, role: string): number {
   const definition = ROLE_DEFINITIONS[role];
@@ -505,6 +512,8 @@ export function calculateRoleScore(player: PlayerData, role: string): number {
 
 /**
  * Calcule le score détaillé avec breakdown
+ *
+ * @deprecated Ancien système de rôles (ROLE_DEFINITIONS) : utiliser utils/rolePresets.ts.
  */
 export function calculateDetailedRoleScore(
   player: PlayerData,
@@ -544,6 +553,8 @@ export function calculateDetailedRoleScore(
 
 /**
  * Retourne les meilleurs rôles pour un joueur
+ *
+ * @deprecated Ancien système de rôles (ROLE_DEFINITIONS) : utiliser utils/rolePresets.ts.
  */
 export function getBestRoles(
   player: PlayerData,
@@ -601,6 +612,8 @@ export function getAvailablePositions(data: PlayerData[]): string[] {
 
 /**
  * Filtre les joueurs par position compatible avec un rôle
+ *
+ * @deprecated Ancien système de rôles (ROLE_DEFINITIONS) : utiliser utils/rolePresets.ts.
  */
 export function filterPlayersByRole(
   data: PlayerData[],

@@ -48,16 +48,17 @@ export function exportToCSV(
 }
 
 /**
- * Export players with specific columns for Prospects/Gem Hunter
+ * Export du Chasseur de pépites : rang, rôle et indice du rôle, puis les colonnes habituelles
+ * et les critères éliminatoires du rôle
  */
 export function exportProspects(
-  players: PlayerData[],
+  rows: { player: PlayerData; rank: number; index: number }[],
   roleName: string,
   metricColumns: string[]
 ): void {
   const baseColumns = ['Player', 'Team', 'Position', 'Age', 'Minutes played', 'Market value', 'League'];
-  const columns = [...baseColumns, ...metricColumns];
-  
+  const columns = ['Rang', 'Rôle', 'Indice du rôle', ...baseColumns, ...metricColumns];
+  const records = rows.map(({ player, rank, index }) => ({ ...player, 'Rang': rank, 'Rôle': roleName, 'Indice du rôle': index } as PlayerData));
   const sanitizedRole = roleName.replace(/[^a-zA-Z0-9]/g, '_');
-  exportToCSV(players, `prospects_${sanitizedRole}`, columns);
+  exportToCSV(records, `prospects_${sanitizedRole}`, columns);
 }

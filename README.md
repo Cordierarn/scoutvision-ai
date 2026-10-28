@@ -23,13 +23,32 @@ A modern, data-driven scouting application for football analytics with AI-powere
 - 💎 **Gem Hunter (Prospects)** - Scout prospects with 27 percentile-based role presets
 - ⚽ **Team Analysis** - Squad depth, tactical profiles, shot maps and recruitment
 - 🧩 **Data-driven recruitment** - Team needs by position, squad profile, and player suggestions projected into the team (league level, team context, adaptation), with complementarity and a value-for-money frontier
-- 📝 **AI Scout Reports** - Generate AI-powered scouting reports with Gemini
-- 🌙 **Modern Dark UI** - Glassmorphism design with premium aesthetics
+- 📝 **AI Scout Reports** - Scouting reports written by Gemini through a server endpoint (the API key stays on the server)
+- 🌙 **Analyst UI** - Dense dark design system built from the ScoutVision logo (tokens, percentile tiers, colour-blind-checked chart palette)
 - 📈 **Impact & value** - RAPM (regularized plus-minus), finishing skill, pass-network role, performance-based value vs Transfermarkt
 - 🌱 **Development** - Age curves by role and one-year percentile projection (regression to the mean separated from age)
 - 🧭 **Playing styles** - Team styles (PCA + k-means) and style map per competition
 - 🗓️ **Forecasts** - Win / draw / loss probabilities of upcoming matches
 - 🧪 **Laboratory** - New ideas tested on match-by-match data (coaches, momentum, goal value, pass chemistry, referees, transfers), each with a verdict
+
+## 📸 Screenshots
+
+Taken from the app with real data (season 2026-27). The PitchAPI data is private: player and
+club names, photos, logos, market values, contracts and birth dates are blurred.
+
+**Player database** — dense sortable table, configurable stat columns, percentiles
+
+![Player database](docs/screenshots/base-joueurs.png)
+
+**Player card** — key figures, radar linked to percentiles, best roles, impact and value models,
+development projection, shot map and heatmap
+
+![Player card](docs/screenshots/fiche-joueur.png)
+
+**Gem Hunter** — role profile and criteria, constraints, selection funnel, role index and its
+breakdown (“why this player?”)
+
+![Gem Hunter](docs/screenshots/chasseur-de-pepites.png)
 
 ## 🚀 Getting Started
 
@@ -52,12 +71,16 @@ A modern, data-driven scouting application for football analytics with AI-powere
    npm install
    ```
 
-3. **Set up environment variables**
-   
-   Create a `.env.local` file:
+3. **Set up environment variables** (server side only)
+
+   Create a `.env.local` file (git-ignored):
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
+
+   The key is read by the `/api/scout-report` endpoint only and is never sent to the
+   browser (see [AI scout reports](#-ai-scout-reports-server-endpoint)). Without it the app
+   works, only the report generation answers "unavailable".
 
 4. **Get the data** (PitchAPI, 2021-22 → current season)
 
@@ -67,7 +90,7 @@ A modern, data-driven scouting application for football analytics with AI-powere
    read access to that repo (`gh auth login`).
 
    ```bash
-   npm run data:pull        # download the data prepared by CI (~35 MB), no Python needed
+   npm run data:pull        # download the data prepared by CI (~60 MB), no Python needed
    ```
 
    Or build it yourself from the PitchAPI releases:
@@ -86,6 +109,20 @@ A modern, data-driven scouting application for football analytics with AI-powere
    ```bash
    npm run dev
    ```
+
+## 🎨 Design system
+
+The interface follows the logo: background `#0B111A`, ink `#F8FAFC`, accent cyan `#00E5FF`, short angular radii.
+
+| Where | What |
+|---|---|
+| `styles/index.css` | colour tokens (CSS variables), base styles and primitives: `sv-panel`, `sv-label`, `sv-input`, `sv-select`, `sv-btn-*`, `sv-chip`, `sv-tag`, `sv-seg`, `sv-tabs`, `sv-table`, `sv-tooltip`, `sv-menu` |
+| `tailwind.config.js` | token names for Tailwind: `canvas`, `surface`, `raised`, `overlay`, `line`, `ink`/`ink-2..4`, `accent`, `pos`, `neg`, `warn` |
+| `components/ui` | `PageHeader`, `Panel`, `Stat`, `PercentileBar`, `PercentileRow`, `PercentileValue`, `PercentileLegend`, `LegendItem`, `Delta`, `EmptyState`, `PolarTick` |
+| `theme/charts.ts` | chart identity: series order (cyan, orange, violet, yellow; checked for colour blindness on the panel surface), context grey, diverging pair, cyan sequential ramp, reserved status colours, Recharts axis/grid/tooltip props |
+| `theme/percentile.ts` | percentile tiers: elite ≥ 90, above 70-89, average 31-69, below 11-30, weak ≤ 10 |
+
+Colour never carries meaning alone: percentiles show their value (P92), verdicts and needs keep their icon and label.
 
 ## 📁 Data Format
 
@@ -140,10 +177,16 @@ from the PitchApi-big-5 analyses in `global.tar/reports/`:
 | **Model vs market** | Forecasts page | odds from football-data.co.uk (27 competitions): pipeline backtest vs margin-free closing odds (power de-vig) — RPS, log-loss, model weight in a logarithmic pool, simulated value bets judged by closing line value. Oct. 2026: RPS 0.2102 vs 0.2034, weight 0.00, CLV −10.5 % on 1,702 bets: no edge |
 
 **Recruitment validation** (Oct. 2026, test season 2025-26, absent from the fit, 405 league
-changes): mean absolute error of the role index 12.3 points with the transfer model, 14.0 with
-the age curves alone, 16.9 when the current index is kept; rank correlation with the index
-actually reached 0.53 vs 0.35; bias of players moving up a level +1.4 points vs +10.0 (moving
-down: −0.3 vs −7.1). Per metric: 21.7 vs 26.2 percentile points, bias moving up +0.0 vs +6.6.
+changes, role presets of the Oct. 2026 calibration): mean absolute error of the role index 12.18
+points with the transfer model, 13.88 with the age curves alone, 16.79 when the current index is
+kept; rank correlation with the index actually reached 0.525 vs 0.347; bias of players moving up a
+level +1.33 points vs +9.81 (moving down: −0.18 vs −6.99). Per metric (does not depend on the
+presets): 21.7 vs 26.1 percentile points, bias moving up +0.0 vs +6.7. With the previous presets:
+12.25 / 13.96 / 16.88, rank 0.529, bias +1.38 / −0.27. Per role the error is uneven (about 8 to 16
+points on 37 to 111 movers per role, so differences under about 1 point are noise); it rose for
+*Créateur excentré* (15.2 → 16.2) and *Faux neuf* (12.9 → 13.5), now evaluated on wingers and
+strikers only (52 and 54 movers instead of 82 and 84), and for *Gardien libéro* (11.7 → 12.3,
+42 goalkeepers); it fell for *Gardien relanceur* (15.9 → 14.6) and *Neuf et demi* (15.5 → 14.6).
 A role index still moves by about 12 points from one season to the next: suggestions are a
 shortlist for video and scouting, not a verdict. Recomputed by every `prepare_data.py` run
 (`models/transfer.json`, shown in the app under *Méthode et fiabilité*).
@@ -190,7 +233,7 @@ go to `public/data/lab/` and to the *Laboratoire* page; every number is recomput
 
 `.github/workflows/update-data.yml` runs every Monday and Friday at 10:30 UTC
 (after the PitchApi-big-5 update at 08:00) and on demand (*Actions* > *Run workflow*).
-It runs `scripts/prepare_data.py` and uploads `scoutvision-data.tar.gz` to the
+It runs `scripts/prepare_data.py` then `scripts/prepare_lab.py` and uploads `scoutvision-data.tar.gz` to the
 **private** release `scoutvision-data` of PitchApi-big-5. Nothing is committed
 to this public repo, and no artifact or cache holds the data.
 
@@ -216,6 +259,35 @@ fine-grained PAT on `Cordierarn/scoutvision-ai` with *Contents: Read and write*)
         env:
           GH_TOKEN: ${{ secrets.SCOUTVISION_DISPATCH_TOKEN }}
 ```
+
+## 🤖 AI scout reports (server endpoint)
+
+The browser never calls Gemini. The "Générer" button of the player profile posts the player
+row and the computed indicators to `POST /api/scout-report`; the server validates the input,
+builds the prompt and calls Gemini with `GEMINI_API_KEY`.
+
+```
+Frontend (PlayerCard) → POST /api/scout-report (server/) → Gemini API
+```
+
+| | |
+|---|---|
+| Variable | `GEMINI_API_KEY`, server environment only (`.env.local` locally). Never prefix it with `VITE_`: the build stops if a `VITE_` variable looks like a secret |
+| Code | `server/scoutReport.ts` (validation, prompt, handler), `server/scoutReportPlugin.ts` (Node middleware, Vite plugin), `services/scoutReportService.ts` (client) |
+| Limits | JSON only, body ≤ 128 KB (413 above), 20 reports per 10 min per client (429), 60 s Gemini timeout |
+| Errors | 400 invalid input, 503 key not configured, 502 Gemini failure; messages are generic, the key is masked in server logs |
+
+**Deployment.** The repository has no hosting configuration: the app is a Vite single-page app
+whose server already proxies `/cdn` (images). The endpoint is mounted on the same Vite servers:
+
+- `npm run dev` (development) and `npm run build && npm run preview` (production build) serve
+  `/api/scout-report` and `/cdn` with no extra service. This is the supported way to run the app.
+- On a static host (plain `dist/` on a CDN), the endpoint does not exist: the report shows
+  "endpoint absent", the rest of the app works. To enable it, run `scoutReportMiddleware`
+  (`server/scoutReportPlugin.ts`, signature `(req, res, next)`) on any Node server (http,
+  Express, Connect) next to `dist/`, or wrap `handleScoutReport` (`server/scoutReport.ts`) in the
+  serverless function of your platform, and set `GEMINI_API_KEY` in its environment. The same
+  host must rewrite `/cdn/*` (see below).
 
 ## 🖼️ Images
 
@@ -244,10 +316,27 @@ eliminatory criteria (minimum role percentile, weight 1.5 in the index) and rank
 | Striker | Renard des surfaces, Pivot, Faux neuf, Attaquant de profondeur, Attaquant presseur |
 | Specialist | Créateur sur coups de pied arrêtés |
 
+A low "floor" criterion (e.g. *Neuf et demi*: key passes ≥ P40) is eliminatory but carries its
+own small ranking weight (0.5), so it does not count 1.5 like a defining criterion. The player
+card (best roles, header), the Gem Hunter, recruitment and the AI report all use these presets and
+the same index (`roleIndex`, explained by `roleIndexBreakdown`). The former `ROLE_DEFINITIONS`
+(`utils/scoringUtils.ts`) are deprecated and no longer displayed.
+
+**Calibration of Oct. 2026** (audit of the 27 roles on 2025-26 and 2026-27): *Gardien libéro*,
+*Gardien relanceur*, *Défenseur porteur*, *Milieu percuteur*, *Numéro 10*, *Neuf et demi*,
+*Créateur excentré* (wingers only), *Faux neuf* (strikers only) and *Attaquant presseur* were
+recalibrated; *Attaquant de profondeur* and *Créateur sur coups de pied arrêtés* only changed
+description (off-ball runs and set pieces are not in the data). Revalidated with the full pipeline
+(Oct. 28): the transfer model's coefficients do not depend on the presets and the recruitment
+validation above barely moves (index error 12.25 → 12.18, rank 0.529 → 0.525). The published
+`scoutvision-data` archive was rebuilt by the data workflow with these presets; its validation is
+identical to the local run.
+
 ## 🧪 Tests
 
 ```bash
-npm test               # Vitest: role index, starting eleven, projections, recruitment
+npm test               # Vitest: role index, starting eleven, projections, recruitment,
+                       # /api/scout-report (validation, size and rate limits, key never returned)
 npm run test:data      # Python (unittest): transfer model (parameter recovery on simulated data), lineups, market,
                        # lab experiments (each one must find a simulated effect, or its absence)
 ```
@@ -256,9 +345,9 @@ npm run test:data      # Python (unittest): transfer model (parameter recovery o
 
 - **Frontend**: React 19, TypeScript
 - **Build Tool**: Vite
-- **Styling**: Tailwind CSS
+- **Styling**: Tailwind CSS 3 (compiled with PostCSS), design tokens in `styles/index.css` and `tailwind.config.js`
 - **Charts**: Recharts
-- **AI**: Google Gemini API
+- **AI**: Google Gemini API, called server side only (`server/`)
 - **PDF Export**: jsPDF, html2canvas
 - **Data pipeline**: Python (pandas, pyarrow), GitHub Actions
 

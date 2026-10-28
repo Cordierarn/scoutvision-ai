@@ -1,741 +1,708 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
-import { getAvailableLeagues } from '../utils/scoringUtils';
-import { RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, roleIndex } from '../utils/rolePresets';
-import { Filter, Gem, Sliders, ChevronRight, Trophy, Coins, TrendingUp, Eye, Minus, Plus, RefreshCw, AlertCircle, Save, Trash2, X, Check, Download, Star, Hand, Shield, MoveHorizontal, Anchor, Repeat, Wand2, Zap, Crosshair, Flag, Scale, Wrench } from 'lucide-react';
-import { queryService } from '../services/queryService';
+/**
+ * ScoutVision - Chasseur de pépites
+ * Profil recherché → contraintes → entonnoir → résultats → décomposition de l'indice → fiche.
+ * Filtrage : utils/prospects.ts ; indice et décomposition : utils/rolePresets.ts (roleIndex,
+ * roleIndexBreakdown), le même calcul que la fiche joueur.
+ */
+
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import { PlayerData, extractSeason, getPlayerSeasonId, getPlayerSeasonTag, getSeasonLabel } from '../types';
+import {
+  RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, ROLE_CORE_WEIGHT, roleIndex, roleIndexBreakdown,
+} from '../utils/rolePresets';
+import {
+  DEFAULT_CONSTRAINTS, ESTIMATE_RATIO_MIN, ProspectConstraints, filterProspects, seasonCapabilities, effectiveThresholds,
+} from '../utils/prospects';
+import {
+  POSITIONS, THRESHOLD_MAX, loadCustomPresets, parseThreshold, presetNameError, saveCustomPresets,
+} from '../utils/customPresets';
+import { isSeasonInProgress, roleIndexHelp, PIPELINE_PERCENTILE_HELP } from '../utils/sampleContext';
+import {
+  Gem, Plus, Minus, RotateCcw, Save, Trash2, X, Download, Star, Eye, ListTree, SlidersHorizontal, ChevronDown, Search, ArrowRight,
+} from 'lucide-react';
 import { exportProspects } from '../utils/exportUtils';
-import { metricLabel, positionLabel } from '../utils/labels';
+import { metricLabel, positionLabel, positionName } from '../utils/labels';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
-import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
+import { dataLoader } from '../services/dataLoader';
+import { TeamLine, PlayerAvatar } from './Media';
+import { Panel, EmptyState, InfoTip, IndexBar, PercentileValue } from './ui';
 
 interface ProspectsProps {
   data: PlayerData[];
   onSelectPlayer: (player: PlayerData) => void;
+  selectedId?: string;               // dernier joueur consulté, mis en évidence au retour
 }
 
-// v2 : seuils en percentiles (les presets v1 étaient en valeurs absolues Wyscout)
-// Valeur du modèle au moins égale à ce multiple de la valeur Transfermarkt
-const UNDERVALUED_RATIO = 1.5;
+// Recherche retrouvée au retour d'une fiche ou après un changement de saison
+const memory = {
+  role: '',
+  strictness: 1,
+  constraints: { ...DEFAULT_CONSTRAINTS } as ProspectConstraints,
+  constraintsOpen: false,
+  scrollTop: 0,
+  pageScrollTop: 0,
+  signature: '',
+};
 
-const LS_KEY = 'scoutvision_role_presets_v2';
+const VALUE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 50, 75, 100].map(m => m * 1_000_000);
+const CONTRACT_OPTIONS = [0, 6, 12, 18, 24];
+const STRICTNESS_STEP = 0.1;
 
-// Icône de chaque catégorie de rôle (utils/rolePresets.ts)
-const CATEGORY_ICONS = { Hand, Shield, MoveHorizontal, Anchor, Repeat, Wand2, Zap, Crosshair, Flag };
+const fr = (v: number, digits: number) => v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer }) => {
-  // --- General Filters ---
-  const [ageLimit, setAgeLimit] = useState<number>(23);
-  const [marketValueLimit, setMarketValueLimit] = useState<number>(30000000); // 30M default
-  const [contractMonths, setContractMonths] = useState<number>(0);       // 0 = any contract end
-  const [undervaluedOnly, setUndervaluedOnly] = useState<boolean>(false); // model value >= 1.5x market
-  const [minMinutesPlayed, setMinMinutesPlayed] = useState<number>(500); // Min 500 minutes
-  const [selectedLeague, setSelectedLeague] = useState<string>('');
-  
-  // --- Watchlist State ---
-  const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set());
-  
-  // Update watchlist IDs for UI
-  useEffect(() => {
-    const updateWatchlistIds = () => {
-      // Une seule lecture du localStorage, au lieu d'une par joueur
-      setWatchlistIds(new Set(getWatchlist().map(w => getPlayerSeasonId(w.player))));
-    };
-    updateWatchlistIds();
+const formatEuro = (val: number) => {
+  if (val >= 1_000_000) return `€${fr(val / 1_000_000, val % 1_000_000 ? 1 : 0)}M`;
+  if (val >= 1000) return `€${Math.round(val / 1000)}K`;
+  return `€${val}`;
+};
+
+const shortMetric = (key: string) => metricLabel(key).replace(/ par 90$/, ' /90').replace(/, %$/, ' %');
+
+// Valeur brute d'une métrique : par 90 et pourcentages avec leur unité, format français
+const formatRaw = (key: string, v: unknown) => {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return '–';
+  if (key.endsWith(', %')) return `${fr(v, 1)} %`;
+  if (key.endsWith(' per 90')) return `${fr(v, 2)} /90`;
+  return fr(v, 2);
+};
+
+const contractLabel = (c?: string) => (c ? c.slice(0, 7).split('-').reverse().join('/') : undefined);
+
+// Postes d'un rôle : « DM, CM »
+const positionsText = (preset: RolePreset) => preset.positions.map(positionLabel).join(', ');
+
+const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId }) => {
+  // ---------- Rôles : officiels (rolePresets.json) et personnalisés (navigateur) ----------
+  const [customPresets, setCustomPresets] = useState<Record<string, RolePreset>>(() => loadCustomPresets(DEFAULT_ROLE_PRESETS));
+  const presets = useMemo(() => ({ ...DEFAULT_ROLE_PRESETS, ...customPresets }), [customPresets]);
+  const [roleName, setRoleName] = useState<string>(presets[memory.role] ? memory.role : '');
+  const [strictness, setStrictness] = useState<number>(memory.strictness);
+  const preset: RolePreset | undefined = roleName ? presets[roleName] : undefined;
+
+  // ---------- Contraintes ----------
+  const caps = useMemo(() => seasonCapabilities(data), [data]);
+  const competitions = useMemo(() => {
+    const keys = Array.from(new Set(data.map(p => p.Competition).filter((c): c is string => typeof c === 'string' && c !== '')));
+    return keys
+      .map(key => ({ key, info: dataLoader.getCompetition(key) }))
+      .sort((a, b) => (a.info?.tier ?? 9) - (b.info?.tier ?? 9) || (a.info?.name ?? a.key).localeCompare(b.info?.name ?? b.key, 'fr'));
   }, [data]);
+  const [constraints, setConstraints] = useState<ProspectConstraints>(() => ({
+    ...memory.constraints,
+    // Compétition absente de la saison chargée : toutes
+    competition: competitions.some(c => c.key === memory.constraints.competition) ? memory.constraints.competition : '',
+  }));
+  const [constraintsOpen, setConstraintsOpen] = useState(memory.constraintsOpen);
+  const [detailsOpen, setDetailsOpen] = useState(false);     // critères du rôle, sur téléphone
+  const setConstraint = <K extends keyof ProspectConstraints>(key: K, value: ProspectConstraints[K]) =>
+    setConstraints(prev => ({ ...prev, [key]: value }));
 
+  useEffect(() => {
+    Object.assign(memory, { role: roleName, strictness, constraints, constraintsOpen });
+  }, [roleName, strictness, constraints, constraintsOpen]);
+
+  // ---------- Saison ----------
+  const seasons = useMemo(() => Array.from(new Set(data.map(p => extractSeason(p.League)))), [data]);
+  const multiSeason = seasons.length > 1;
+  const seasonText = seasons.length === 1 ? getSeasonLabel(seasons[0]) : 'Toutes les saisons';
+  const dataIndex = dataLoader.getCachedIndex();
+  const latestSeason = dataIndex?.seasons[dataIndex.seasons.length - 1]?.id;
+  const inProgress = seasons.length === 1 && seasons[0] === latestSeason && isSeasonInProgress(seasons[0], seasons[0], dataIndex?.generatedAt);
+  const generatedOn = dataIndex?.generatedAt ? new Date(dataIndex.generatedAt).toLocaleDateString('fr-FR') : '—';
+
+  // ---------- Recherche ----------
+  const search = useMemo(
+    () => (preset ? filterProspects(data, preset, strictness, constraints, caps) : null),
+    [data, preset, strictness, constraints, caps],
+  );
+  const rows = useMemo(() => (search && preset
+    ? search.players.map((player, i) => ({ player, rank: i + 1, index: roleIndex(player, preset), id: getPlayerSeasonId(player) }))
+    : []), [search, preset]);
+  const thresholdKeys = search ? Object.keys(search.thresholds) : [];
+
+  // ---------- Liste de suivi ----------
+  const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set());
+  useEffect(() => { setWatchlistIds(new Set(getWatchlist().map(w => getPlayerSeasonId(w.player)))); }, [data]);
   const toggleWatchlist = (player: PlayerData, e: React.MouseEvent) => {
     e.stopPropagation();
-    const playerId = getPlayerSeasonId(player);
-    
-    if (watchlistIds.has(playerId)) {
+    const id = getPlayerSeasonId(player);
+    if (watchlistIds.has(id)) {
       removeFromWatchlist(player);
-      setWatchlistIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(playerId);
-        return newSet;
-      });
+      setWatchlistIds(prev => { const next = new Set(prev); next.delete(id); return next; });
     } else {
       addToWatchlist(player);
-      setWatchlistIds(prev => new Set(prev).add(playerId));
+      setWatchlistIds(prev => new Set(prev).add(id));
     }
   };
-  
-  // --- Role Engine State ---
-  const [presets, setPresets] = useState<Record<string, RolePreset>>(() => {
-    try {
-        const saved = localStorage.getItem(LS_KEY);
-        if (saved) {
-            return { ...DEFAULT_ROLE_PRESETS, ...JSON.parse(saved) };
-        }
-    } catch (e) {
-        console.error("Échec du chargement des presets", e);
-    }
-    return DEFAULT_ROLE_PRESETS;
-  });
 
-  const [selectedRole, setSelectedRole] = useState<string>('');
-  const [strictnessMultiplier, setStrictnessMultiplier] = useState<number>(1.0); // 1.0 = 100% (Base values)
+  // ---------- Décomposition de l'indice (une ligne ouverte à la fois) ----------
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  // --- Custom Preset Builder State ---
-  const [isCreatorMode, setIsCreatorMode] = useState(false);
-  const [newPresetName, setNewPresetName] = useState('');
-  const [newPresetPositions, setNewPresetPositions] = useState<string[]>([]);
-  const [newPresetMetrics, setNewPresetMetrics] = useState<{key: string, value: number}[]>([]);
-  const [metricSearch, setMetricSearch] = useState('');
-
-  // Derived Data
-  // Utiliser queryService pour les listes pré-calculées
-  const leagues = useMemo(() => queryService.getAvailableLeagues(), []);
-  const roles = Object.keys(presets);
-  
-  // Get all available numeric keys for the builder
-  const availableMetrics = useMemo(() => {
-    if (data.length === 0) return [];
-    // Métriques ayant un percentile par rôle : le seuil d'un preset est un percentile
-    return Object.keys(data[0])
-      .filter(key => key.endsWith(' pct'))
-      .map(key => key.slice(0, -4))
-      .sort();
-  }, [data]);
-
-  const availablePositions = useMemo(() => {
-      return queryService.getAvailablePositions();
+  // ---------- Défilement : conservé au retour d'une fiche, remis à zéro si la recherche change ----------
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const signature = JSON.stringify([roleName, strictness, constraints, data.length]);
+  useEffect(() => {
+    if (memory.signature === signature) return;
+    memory.signature = signature;
+    memory.scrollTop = 0;
+    scrollRef.current?.scrollTo({ top: 0 });
+    setExpanded(null);
+  }, [signature]);
+  useLayoutEffect(() => {
+    if (scrollRef.current && memory.scrollTop) scrollRef.current.scrollTop = memory.scrollTop;
+    if (pageRef.current && memory.pageScrollTop) pageRef.current.scrollTop = memory.pageScrollTop;
   }, []);
 
-  // --- Handlers ---
-  const handleRoleChange = (role: string) => {
-    setSelectedRole(role);
-    setStrictnessMultiplier(1.0); // Reset to base strictness on change
+  // ---------- Création d'un rôle personnalisé ----------
+  const [creating, setCreating] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const [draftPositions, setDraftPositions] = useState<string[]>([]);
+  const [draftMetrics, setDraftMetrics] = useState<{ key: string; raw: string }[]>([]);
+  const [metricSearch, setMetricSearch] = useState('');
+  const availableMetrics = useMemo(() => {
+    const keys = new Set<string>();
+    data.slice(0, 800).forEach(p => Object.keys(p).forEach(k => { if (k.endsWith(' pct')) keys.add(k.slice(0, -4)); }));
+    return Array.from(keys).sort((a, b) => metricLabel(a).localeCompare(metricLabel(b), 'fr'));
+  }, [data]);
+  const nameError = draftName ? presetNameError(draftName, DEFAULT_ROLE_PRESETS, Object.keys(customPresets)) : null;
+  const draftValues = draftMetrics.map(m => ({ key: m.key, value: parseThreshold(m.raw) }));
+  const draftValid = !!draftName && !nameError && draftPositions.length > 0 && draftValues.length > 0 && draftValues.every(m => m.value !== null);
+
+  const saveDraft = () => {
+    if (!draftValid) return;
+    const metrics: Record<string, number> = {};
+    draftValues.forEach(m => { metrics[m.key] = m.value as number; });
+    const name = draftName.trim();
+    const next = { ...customPresets, [name]: { positions: draftPositions, metrics, custom: true } };
+    setCustomPresets(next);
+    saveCustomPresets(next);
+    setRoleName(name);
+    setStrictness(1);
+    setCreating(false);
+    setDraftName(''); setDraftPositions([]); setDraftMetrics([]);
   };
 
-  const adjustStrictness = (delta: number) => {
-    setStrictnessMultiplier(prev => {
-      const newVal = prev + delta;
-      return Math.max(0.1, parseFloat(newVal.toFixed(1))); // Min 10%, round to 1 decimal
-    });
+  const deleteCustom = (name: string) => {
+    const next = { ...customPresets };
+    delete next[name];
+    setCustomPresets(next);
+    saveCustomPresets(next);
+    if (roleName === name) setRoleName('');
   };
 
-  const persistPresets = (currentPresets: Record<string, RolePreset>) => {
-      // Extract only custom presets to save
-      const customOnly: Record<string, RolePreset> = {};
-      Object.entries(currentPresets).forEach(([key, val]) => {
-          if (val.custom) customOnly[key] = val;
-      });
-      localStorage.setItem(LS_KEY, JSON.stringify(customOnly));
+  const chooseRole = (name: string) => {
+    setRoleName(name);
+    setStrictness(1);
   };
 
-  const deletePreset = (roleName: string) => {
-      const newPresets = { ...presets };
-      delete newPresets[roleName];
-      setPresets(newPresets);
-      persistPresets(newPresets);
-      if (selectedRole === roleName) setSelectedRole('');
-  };
+  // ---------- Contraintes actives (puces) ----------
+  const chips: { key: string; label: string; onRemove?: () => void }[] = [
+    { key: 'age', label: `≤ ${constraints.ageMax} ans` },
+    { key: 'min', label: `≥ ${constraints.minutesMin.toLocaleString('fr-FR')} min` },
+    ...(caps.marketValue && constraints.valueMax !== null
+      ? [{ key: 'value', label: `Valeur ≤ ${formatEuro(constraints.valueMax)}`, onRemove: () => setConstraint('valueMax', null) }] : []),
+    ...(caps.contract && constraints.contractMonths > 0
+      ? [{ key: 'contract', label: `Contrat ≤ ${constraints.contractMonths} mois`, onRemove: () => setConstraint('contractMonths', 0) }] : []),
+    ...(constraints.competition
+      ? [{ key: 'comp', label: dataLoader.getCompetition(constraints.competition)?.name ?? constraints.competition, onRemove: () => setConstraint('competition', '') }] : []),
+    ...(caps.estimate && constraints.estimateAboveMarket
+      ? [{ key: 'estimate', label: `Estimation ≥ ${fr(ESTIMATE_RATIO_MIN * 100, 0)} % du marché`, onRemove: () => setConstraint('estimateAboveMarket', false) }] : []),
+  ];
+  const marketHelp = caps.marketValue ? null
+    : 'Indisponible pour cette saison : la valeur de marché, le contrat et l\'estimation viennent de l\'instantané Transfermarkt actuel, qui ne couvre que la saison en cours.';
 
-  const saveCustomPreset = () => {
-      if (!newPresetName || newPresetPositions.length === 0 || newPresetMetrics.length === 0) return;
-      
-      const metricsObj: Record<string, number> = {};
-      newPresetMetrics.forEach(m => metricsObj[m.key] = m.value);
+  // ---------- Rendu : profil recherché ----------
+  const thresholds = preset ? effectiveThresholds(preset, strictness) : {};
+  const breakdownWeights = preset ? Object.entries(preset.weights ?? {}) : [];
 
-      const newPreset: RolePreset = {
-          positions: newPresetPositions,
-          metrics: metricsObj,
-          custom: true
-      };
+  const profile = (
+    <Panel title="Profil recherché" icon={Gem} className="min-w-0"
+      right={!creating && (
+        <button onClick={() => setCreating(true)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6 !px-1.5"><Plus className="w-3 h-3" /> Créer un rôle</button>
+      )}>
+      <label className="block">
+        <span className="sr-only">Rôle recherché</span>
+        <select className="sv-select w-full" value={roleName} onChange={e => chooseRole(e.target.value)} aria-label="Rôle recherché">
+          <option value="">Choisir un rôle…</option>
+          {ROLE_CATEGORIES.map(cat => {
+            const names = Object.entries(DEFAULT_ROLE_PRESETS).filter(([, p]) => p.category === cat.key).map(([n]) => n);
+            return names.length === 0 ? null : (
+              <optgroup key={cat.key} label={cat.label}>
+                {names.map(n => <option key={n} value={n}>{n}</option>)}
+              </optgroup>
+            );
+          })}
+          {Object.keys(customPresets).length > 0 && (
+            <optgroup label="Mes rôles">
+              {Object.keys(customPresets).map(n => <option key={n} value={n}>{n}</option>)}
+            </optgroup>
+          )}
+        </select>
+      </label>
 
-      const updatedPresets = { ...presets, [newPresetName]: newPreset };
-      setPresets(updatedPresets);
-      persistPresets(updatedPresets);
-      
-      setSelectedRole(newPresetName);
-      setIsCreatorMode(false);
-      // Reset form
-      setNewPresetName('');
-      setNewPresetPositions([]);
-      setNewPresetMetrics([]);
-  };
-
-  const togglePosition = (pos: string) => {
-      if (newPresetPositions.includes(pos)) {
-          setNewPresetPositions(newPresetPositions.filter(p => p !== pos));
-      } else {
-          setNewPresetPositions([...newPresetPositions, pos]);
-      }
-  };
-
-  const addMetricToPreset = (key: string) => {
-      if (!newPresetMetrics.find(m => m.key === key)) {
-          setNewPresetMetrics([...newPresetMetrics, { key, value: 0 }]);
-      }
-      setMetricSearch('');
-  };
-
-  const updateMetricValue = (key: string, val: number) => {
-      setNewPresetMetrics(newPresetMetrics.map(m => m.key === key ? { ...m, value: val } : m));
-  };
-  
-  const removeMetric = (key: string) => {
-      setNewPresetMetrics(newPresetMetrics.filter(m => m.key !== key));
-  };
-
-  // Fin de contrat au plus tard dans `contractMonths` mois
-  const contractDeadline = useMemo(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + contractMonths);
-    return d;
-  }, [contractMonths]);
-
-  // --- Core Filtering Logic ---
-  const { filteredPlayers, effectiveThresholds } = useMemo(() => {
-    if (!selectedRole || !presets[selectedRole]) return { filteredPlayers: [], effectiveThresholds: {} };
-
-    const preset = presets[selectedRole];
-    
-    // 1. Calculate Effective Thresholds (Base * Multiplier)
-    const currentThresholds: Record<string, number> = {};
-    Object.entries(preset.metrics).forEach(([key, baseVal]) => {
-      // Percentile minimum, plafonné à 99
-      currentThresholds[key] = Math.min(99, Math.round(baseVal * strictnessMultiplier));
-    });
-
-    // 2. Filter Players
-    const players = data.filter(p => {
-      // A. General Filters
-      if ((Number(p.Age) || 100) > ageLimit) return false;
-      if ((Number(p["Market value"]) || 0) > marketValueLimit) return false;
-      if (contractMonths > 0) {
-        const end = p["Contract expires"] ? new Date(p["Contract expires"]) : null;
-        if (!end || end > contractDeadline) return false;
-      }
-      if (undervaluedOnly) {
-        const market = Number(p["Market value"]);
-        const estimate = Number(p["Estimated value"]);
-        if (!market || !estimate || estimate / market < UNDERVALUED_RATIO) return false;
-      }
-      if ((Number(p["Minutes played"]) || 0) < minMinutesPlayed) return false;
-      if (selectedLeague && p.League !== selectedLeague) return false;
-
-      // B. Strict Position Check
-      if (!preset.positions.includes(p.Position)) return false;
-
-      // C. Role Metric Check (Strict: Must pass ALL percentile thresholds)
-      for (const [key, minPct] of Object.entries(currentThresholds)) {
-        const playerPct = Number(p[`${key} pct`]) || 0;
-        if (playerPct < minPct) return false;
-      }
-
-      return true;
-    });
-
-    // 3. Sort by "Performance Score" (mean percentile on the role metrics)
-    // This sorts "Best" candidates to the top
-    players.sort((a, b) => roleIndex(b, preset) - roleIndex(a, preset));
-
-    return { filteredPlayers: players, effectiveThresholds: currentThresholds };
-  }, [data, presets, selectedRole, strictnessMultiplier, ageLimit, marketValueLimit, minMinutesPlayed, selectedLeague,
-      contractMonths, undervaluedOnly, contractDeadline]);
-
-
-  const formatCurrency = (val: number) => {
-    if (!val) return '–';
-    if (val >= 1000000) return `€${(val / 1000000).toFixed(1)}M`;
-    if (val >= 1000) return `€${(val / 1000).toFixed(0)}K`;
-    return `€${val}`;
-  };
-
-  return (
-    <div className="flex h-full animate-fade-in relative bg-slate-900">
-      
-      {/* --- Sidebar Filters --- */}
-      <div className="w-96 bg-slate-950 border-r border-slate-800 flex flex-col h-full overflow-hidden shrink-0 transition-all">
-        <div className="p-6 border-b border-slate-800 bg-slate-950/50">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Gem className="w-5 h-5 text-emerald-400" /> Chasseur de pépites
-            </h2>
-            <p className="text-slate-500 text-xs mt-1">Scouting automatique par rôle</p>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-            
-            {/* 1. Role Selection or Builder Toggle */}
-            <div className="space-y-4">
-                 <div className="flex items-center justify-between">
-                     <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                        <Sliders className="w-3 h-3" /> Choisir un rôle
-                    </h3>
-                    <button 
-                        onClick={() => setIsCreatorMode(!isCreatorMode)}
-                        className={`text-xs px-2 py-1 rounded border transition-colors ${isCreatorMode ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-bold' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                    >
-                        {isCreatorMode ? 'Annuler' : '+ Créer un preset'}
-                    </button>
-                 </div>
-
-                 {!isCreatorMode ? (
-                     <>
-                        <div className="space-y-3">
-                            {[...ROLE_CATEGORIES, { key: 'custom', label: 'Mes presets', icon: 'Wrench' as const }].map(cat => {
-                                const list = roles.filter(r => (presets[r].custom ? 'custom' : presets[r].category) === cat.key);
-                                if (list.length === 0) return null;
-                                const Icon = cat.key === 'custom' ? Wrench : CATEGORY_ICONS[cat.icon as keyof typeof CATEGORY_ICONS];
-                                return (
-                                    <div key={cat.key}>
-                                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 uppercase font-semibold mb-1.5">
-                                            <Icon className="w-3.5 h-3.5" /> {cat.label}
-                                        </div>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {list.map(r => (
-                                                <button
-                                                    key={r}
-                                                    onClick={() => handleRoleChange(r)}
-                                                    title={presets[r].description}
-                                                    className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${selectedRole === r ? 'bg-emerald-500 border-emerald-500 text-slate-950 font-semibold' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-white'}`}
-                                                >
-                                                    {r}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {selectedRole && (
-                            <div className="bg-slate-900 rounded-xl p-4 border border-slate-800 animate-fade-in-down">
-                                <div className="flex justify-between items-center mb-3">
-                                    <span className="text-xs text-slate-400 font-semibold uppercase">Exigence des filtres</span>
-                                    <div className="flex items-center gap-2">
-                                        <span className={`text-sm font-mono font-bold ${strictnessMultiplier > 1 ? 'text-red-400' : strictnessMultiplier < 1 ? 'text-emerald-400' : 'text-white'}`}>
-                                            {Math.round(strictnessMultiplier * 100)}%
-                                        </span>
-                                        {presets[selectedRole].custom && (
-                                            <button onClick={() => deletePreset(selectedRole)} className="text-rose-500 hover:text-rose-400 p-1">
-                                                <Trash2 className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                    <button 
-                                        onClick={() => adjustStrictness(-0.1)}
-                                        className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center gap-1 transition-colors border border-slate-700 hover:border-emerald-500/50"
-                                        title="Baisser les seuils de 10 %"
-                                    >
-                                        <Minus className="w-4 h-4" /> 10%
-                                    </button>
-                                    <button 
-                                        onClick={() => setStrictnessMultiplier(1.0)}
-                                        className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700 transition-colors"
-                                        title="Revenir aux seuils de base"
-                                    >
-                                        <RefreshCw className="w-4 h-4" />
-                                    </button>
-                                    <button 
-                                        onClick={() => adjustStrictness(0.1)}
-                                        className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center gap-1 transition-colors border border-slate-700 hover:border-red-500/50"
-                                        title="Relever les seuils de 10 %"
-                                    >
-                                        <Plus className="w-4 h-4" /> 10%
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                     </>
-                 ) : (
-                     <div className="bg-slate-900 rounded-xl p-4 border border-slate-700 space-y-4 animate-fade-in">
-                         <h4 className="text-sm font-bold text-white mb-2">Créer un preset</h4>
-                         
-                         <div>
-                             <label className="text-xs text-slate-500 uppercase font-bold">Nom du preset</label>
-                             <input 
-                                type="text" 
-                                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white mt-1"
-                                placeholder="e.g. Ball-Playing Defender"
-                                value={newPresetName}
-                                onChange={(e) => setNewPresetName(e.target.value)}
-                             />
-                         </div>
-
-                         <div>
-                             <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Postes</label>
-                             <div className="flex flex-wrap gap-2">
-                                 {availablePositions.map(pos => (
-                                     <button
-                                        key={pos}
-                                        onClick={() => togglePosition(pos)}
-                                        className={`text-xs px-2 py-1 rounded border ${newPresetPositions.includes(pos) ? 'bg-emerald-500 border-emerald-500 text-slate-950 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400'}`}
-                                     >
-                                         {positionLabel(pos)}
-                                     </button>
-                                 ))}
-                             </div>
-                         </div>
-
-                         <div>
-                             <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Seuils par métrique</label>
-                             <div className="relative mb-2">
-                                <input 
-                                    type="text" 
-                                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-white"
-                                    placeholder="Rechercher une métrique..."
-                                    value={metricSearch}
-                                    onChange={(e) => setMetricSearch(e.target.value)}
-                                />
-                                {metricSearch && (
-                                    <div className="absolute top-full left-0 right-0 max-h-40 overflow-y-auto bg-slate-800 border border-slate-700 z-10 rounded shadow-xl">
-                                        {availableMetrics.filter(k => k.toLowerCase().includes(metricSearch.toLowerCase())).map(k => (
-                                            <button 
-                                                key={k} 
-                                                onClick={() => addMetricToPreset(k)}
-                                                className="block w-full text-left px-2 py-1 text-xs text-slate-300 hover:bg-slate-700"
-                                            >
-                                                {metricLabel(k)}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                             </div>
-
-                             <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                                 {newPresetMetrics.map(m => (
-                                     <div key={m.key} className="flex items-center gap-2">
-                                         <button onClick={() => removeMetric(m.key)} className="text-slate-500 hover:text-rose-500"><X className="w-3 h-3"/></button>
-                                         <span className="text-xs text-slate-300 truncate flex-1" title={m.key}>{metricLabel(m.key)}</span>
-                                         <input 
-                                            type="number" 
-                                            min={0}
-                                            max={99}
-                                            title="Percentile minimum (0-99) parmi le même rôle et le même niveau"
-                                            className="w-16 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-xs text-right text-emerald-400"
-                                            value={m.value}
-                                            onChange={(e) => updateMetricValue(m.key, parseFloat(e.target.value))}
-                                         />
-                                     </div>
-                                 ))}
-                             </div>
-                         </div>
-
-                         <button 
-                            onClick={saveCustomPreset}
-                            disabled={!newPresetName || newPresetPositions.length === 0 || newPresetMetrics.length === 0}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg py-2 text-sm font-bold flex items-center justify-center gap-2 transition-colors"
-                         >
-                             <Save className="w-4 h-4" /> Enregistrer le preset
-                         </button>
-                     </div>
-                 )}
-            </div>
-
-            <div className="h-px bg-slate-800"></div>
-
-            {/* 2. Active Metrics Display */}
-            {!isCreatorMode && selectedRole && (
-                <div className="space-y-4">
-                    {presets[selectedRole].description && (
-                        <p className="text-sm text-slate-300">{presets[selectedRole].description}</p>
-                    )}
-                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                        <TrendingUp className="w-3 h-3" /> Critères éliminatoires
-                    </h3>
-                    <div className="space-y-2">
-                        {Object.entries(effectiveThresholds).map(([key, val]) => (
-                            <div key={key} className="flex justify-between items-center text-xs bg-slate-900/50 p-2 rounded border border-slate-800/50">
-                                <span className="text-slate-400 truncate max-w-[160px]" title={key}>{metricLabel(key)}</span>
-                                <span className="text-emerald-400 font-mono font-bold">≥ P{val}</span>
-                            </div>
-                        ))}
-                    </div>
-                    {presets[selectedRole].weights && (
-                        <>
-                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2 pt-2">
-                                <Scale className="w-3 h-3" /> Critères de classement
-                            </h3>
-                            <div className="space-y-1.5">
-                                {Object.entries(presets[selectedRole].weights!).map(([key, w]) => (
-                                    <div key={key} className="flex justify-between items-center text-xs px-2">
-                                        <span className="text-slate-400 truncate max-w-[180px]" title={metricLabel(key)}>{metricLabel(key)}</span>
-                                        <span className="text-slate-500 font-mono">{w < 0 ? 'moins = mieux' : `×${w}`}</span>
-                                    </div>
-                                ))}
-                                {presets[selectedRole].midfieldProfiles && (
-                                    <div className="flex justify-between items-center text-xs px-2">
-                                        <span className="text-slate-400">Profil de milieu : {presets[selectedRole].midfieldProfiles!.join(', ')}</span>
-                                        <span className="text-slate-500 font-mono">+{MIDFIELD_PROFILE_BONUS}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <p className="text-[11px] text-slate-500">L'indice du rôle (0-100) est la moyenne pondérée des percentiles de tous ces critères ; il ordonne les résultats.</p>
-                        </>
-                    )}
+      {preset && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-ink">{roleName}</div>
+                <div className="flex flex-wrap items-center gap-1 mt-1">
+                  {preset.positions.map(p => <span key={p} className="sv-tag" title={positionName(p)}>{positionLabel(p)}</span>)}
+                  {preset.custom && <span className="sv-tag !font-normal text-ink-3">Personnalisé</span>}
                 </div>
-            )}
-
-            {/* 3. General Constraints */}
-            <div className="space-y-4 pt-4 border-t border-slate-800">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                    <Filter className="w-3 h-3" /> Contraintes
-                </h3>
-                
-                {/* Age */}
-                <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                        <span>Âge max</span>
-                        <span className="text-emerald-400 font-bold">{ageLimit}</span>
-                    </div>
-                    <input 
-                        type="range" min="16" max="30" step="1"
-                        value={ageLimit}
-                        onChange={(e) => setAgeLimit(Number(e.target.value))}
-                        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                    />
-                </div>
-
-                {/* Market Value */}
-                <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                        <span>Valeur max</span>
-                        <span className="text-emerald-400 font-bold">{formatCurrency(marketValueLimit)}</span>
-                    </div>
-                    <input 
-                        type="range" min="0" max="100000000" step="500000"
-                        value={marketValueLimit}
-                        onChange={(e) => setMarketValueLimit(Number(e.target.value))}
-                        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                    />
-                </div>
-
-                {/* Minutes Played */}
-                <div>
-                    <div className="flex justify-between text-sm text-slate-300 mb-2">
-                        <span>Minutes min</span>
-                        <span className="text-emerald-400 font-bold">{minMinutesPlayed.toLocaleString()}'</span>
-                    </div>
-                    <input 
-                        type="range" min="0" max="3000" step="100"
-                        value={minMinutesPlayed}
-                        onChange={(e) => setMinMinutesPlayed(Number(e.target.value))}
-                        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                    />
-                </div>
-
-                {/* Contract end (Transfermarkt, current season) */}
-                <div>
-                    <label className="text-sm text-slate-300 mb-2 block">Fin de contrat sous</label>
-                    <select
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:ring-emerald-500 focus:border-emerald-500"
-                        value={contractMonths}
-                        onChange={(e) => setContractMonths(Number(e.target.value))}
-                    >
-                        <option value={0}>Indifférent</option>
-                        <option value={6}>6 mois</option>
-                        <option value={12}>12 mois</option>
-                        <option value={18}>18 mois</option>
-                        <option value={24}>24 mois</option>
-                    </select>
-                </div>
-
-                {/* Value vs performance model */}
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={undervaluedOnly}
-                        onChange={(e) => setUndervaluedOnly(e.target.checked)}
-                        className="accent-emerald-500"
-                    />
-                    Sous-coté par le modèle (≥ ×{UNDERVALUED_RATIO})
-                </label>
-
-                {/* Shortcut: young players whose contract is ending */}
-                <button
-                    onClick={() => { setAgeLimit(23); setContractMonths(12); }}
-                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-400 transition-colors"
-                >
-                    U23 · contrat finissant sous 12 mois
-                </button>
-                <p className="text-[11px] text-slate-500 -mt-2">Les filtres de contrat et de valeur utilisent l'instantané Transfermarkt actuel : ils ne concernent que la saison en cours.</p>
-
-                {/* League */}
-                <div>
-                    <label className="text-sm text-slate-300 mb-2 block">Compétition</label>
-                    <select 
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:ring-emerald-500 focus:border-emerald-500"
-                        value={selectedLeague}
-                        onChange={(e) => setSelectedLeague(e.target.value)}
-                    >
-                        <option value="">Toutes les compétitions</option>
-                        {leagues.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                </div>
-            </div>
-        </div>
-        
-        <div className="p-4 bg-slate-950 border-t border-slate-800">
-             <div className="bg-slate-900 rounded-lg p-3 flex items-center justify-between border border-slate-800">
-                <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Joueurs trouvés</div>
-                <div className="text-xl font-bold text-emerald-400">{filteredPlayers.length}</div>
-             </div>
-        </div>
-      </div>
-
-      {/* --- Main Content: Results Table --- */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-900">
-         
-         <div className="p-6 pb-2">
-            <div className="flex items-center justify-between mb-2">
-              <h1 className="text-2xl font-bold text-white">Résultats</h1>
-              {filteredPlayers.length > 0 && (
-                <button
-                  onClick={() => exportProspects(filteredPlayers, selectedRole, Object.keys(effectiveThresholds))}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors text-sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Exporter ({filteredPlayers.length})
+              </div>
+              {preset.custom && (
+                <button onClick={() => deleteCustom(roleName)} className="sv-icon-btn hover:!text-neg" data-tip="Supprimer ce rôle" data-tip-pos="left" aria-label="Supprimer ce rôle personnalisé">
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2 text-sm text-slate-400 items-center">
-                {selectedRole ? (
-                    <>
-                        Recherche : <span className="text-emerald-400 font-semibold">{selectedRole}</span>
-                        <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        Exigence : <span className="text-white font-mono">{Math.round(strictnessMultiplier * 100)}%</span>
-                        <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        Postes : <span className="text-slate-300 font-mono">[{presets[selectedRole].positions.map(positionLabel).join(', ')}]</span>
-                    </>
-                ) : (
-                    <span>Choisissez un rôle tactique dans le panneau de gauche pour lancer la recherche.</span>
-                )}
-            </div>
-         </div>
+            {preset.description && <p className="text-xs text-ink-3 mt-1.5 leading-relaxed">{preset.description}</p>}
+          </div>
 
-         <div className="flex-1 p-6 pt-2 overflow-hidden flex flex-col">
-            {filteredPlayers.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center bg-slate-950/50 rounded-2xl border border-slate-800 border-dashed">
-                     <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mb-4">
-                        {selectedRole ? <AlertCircle className="w-10 h-10 text-red-400" /> : <Gem className="w-10 h-10 text-slate-600" />}
-                     </div>
-                     <h3 className="text-xl font-bold text-white mb-2">
-                         {selectedRole ? "Aucun joueur trouvé" : "Choisissez un rôle"}
-                     </h3>
-                     <p className="text-slate-400 max-w-md text-center">
-                         {selectedRole 
-                            ? "Aucun joueur ne passe les seuils actuels. Baissez l'exigence avec le bouton [-] ou élargissez l'âge et la valeur."
-                            : "Choisissez un rôle pour appliquer ses seuils et trouver des pépites."}
-                     </p>
+          {/* Exigence : multiplicateur des seuils, montré par ses effets */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="sv-label flex items-center gap-1">Exigence
+              <InfoTip text={`Multiplie les seuils de base : à 90 %, P70 devient P63 (arrondi, plafonné à P${THRESHOLD_MAX}). Les critères de classement ne changent pas.`} />
+            </span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setStrictness(s => Math.max(0.1, Number((s - STRICTNESS_STEP).toFixed(1))))} className="sv-icon-btn !w-7 !h-7 border border-line"
+                data-tip="Seuils × 0,9" aria-label="Baisser l'exigence de 10 %"><Minus className="w-3 h-3" /></button>
+              <span className="w-12 text-center text-xs font-semibold text-ink num" aria-live="polite">{Math.round(strictness * 100)} %</span>
+              <button onClick={() => setStrictness(s => Number((s + STRICTNESS_STEP).toFixed(1)))} className="sv-icon-btn !w-7 !h-7 border border-line"
+                data-tip="Seuils × 1,1" aria-label="Relever l'exigence de 10 %"><Plus className="w-3 h-3" /></button>
+              <button onClick={() => setStrictness(1)} disabled={strictness === 1} className="sv-icon-btn !w-7 !h-7 disabled:opacity-30"
+                data-tip="Seuils de base" data-tip-pos="left" aria-label="Revenir aux seuils de base"><RotateCcw className="w-3 h-3" /></button>
+            </div>
+          </div>
+
+          {/* Critères : toujours visibles sur grand écran, repliables sur téléphone */}
+          <button onClick={() => setDetailsOpen(o => !o)} aria-expanded={detailsOpen}
+            className="lg:hidden w-full flex items-center justify-between gap-2 min-h-7 py-1 px-2 rounded border border-line text-xs text-ink-2 text-left">
+            <span>Critères du rôle · {Object.keys(preset.metrics).length} éliminatoires, {breakdownWeights.length} de classement</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`${detailsOpen ? '' : 'hidden'} lg:block space-y-3`}>
+          <div>
+            <div className="sv-label flex items-center justify-between pb-1 border-b border-line-strong">
+              <span className="flex items-center gap-1">Critères éliminatoires
+                <InfoTip text={`Percentile minimum (${PIPELINE_PERCENTILE_HELP.split('\n')[0].replace('Percentile (0-100) ', '')}) Un percentile absent rend le joueur non éligible : il est compté à part, en données insuffisantes.`} />
+              </span>
+              <span className="normal-case tracking-normal font-normal">seuil</span>
+            </div>
+            {Object.entries(preset.metrics).map(([key, base]) => (
+              <div key={key} className="flex items-center justify-between gap-2 h-7 border-b border-line/60 text-xs">
+                <span className="text-ink-2 truncate" title={metricLabel(key)}>{metricLabel(key)}</span>
+                <span className="num shrink-0">
+                  {strictness !== 1 && <span className="text-ink-4">P{fr(base, 0)} → </span>}
+                  <span className="text-ink font-semibold">≥ P{thresholds[key]}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {(breakdownWeights.length > 0 || preset.midfieldProfiles) && (
+            <div>
+              <div className="sv-label flex items-center justify-between pb-1 border-b border-line-strong">
+                <span className="flex items-center gap-1">Critères de classement
+                  <InfoTip text={roleIndexHelp(ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS)} />
+                </span>
+                <span className="normal-case tracking-normal font-normal">poids</span>
+              </div>
+              {Object.keys(preset.metrics).filter(k => !(k in (preset.weights ?? {}))).length > 0 && (
+                <div className="flex items-center justify-between gap-2 h-7 border-b border-line/60 text-xs">
+                  <span className="text-ink-3">Critères éliminatoires</span>
+                  <span className="text-ink-2 num">×{fr(ROLE_CORE_WEIGHT, 1)}</span>
                 </div>
-            ) : (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-2xl h-full">
-                    {/* Table Header */}
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm whitespace-nowrap">
-                            <thead className="bg-slate-900 border-b border-slate-800 text-xs uppercase font-semibold text-slate-400">
-                                <tr>
-                                    <th className="p-4 w-12 sticky left-0 bg-slate-900 z-10">#</th>
-                                    <th className="p-4 sticky left-12 bg-slate-900 z-10">Joueur</th>
-                                    <th className="p-4 text-right" title="Indice du rôle : moyenne pondérée des percentiles des critères">Indice</th>
-                                    <th className="p-4">Âge</th>
-                                    <th className="p-4">Poste</th>
-                                    <th className="p-4 text-right">Minutes</th>
-                                    <th className="p-4 text-right">Valeur</th>
-                                    {/* Dynamic Metric Headers */}
-                                    {Object.keys(effectiveThresholds).map(key => (
-                                        <th key={key} className="p-4 text-emerald-500/80 font-bold text-right" title={metricLabel(key)}>
-                                            {metricLabel(key).replace(' par 90', '')}
-                                        </th>
-                                    ))}
-                                    <th className="p-4 text-center">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800">
-                                {filteredPlayers.map((player, idx) => {
-                                    const pSeason = extractSeason(player.League);
-                                    const pSeasonColors = getSeasonColor(pSeason);
-                                    return (
-                                    <tr key={getPlayerSeasonId(player)} className="hover:bg-slate-900/50 transition-colors group">
-                                        <td className="p-4 text-slate-500 font-mono sticky left-0 bg-slate-950 group-hover:bg-slate-900 transition-colors z-10">
-                                            {idx + 1}
-                                        </td>
-                                        <td className="p-4 sticky left-12 bg-slate-950 group-hover:bg-slate-900 transition-colors z-10">
-                                            <div className="flex items-center gap-3">
-                                                <div className="relative">
-                                                  <div className="relative overflow-hidden w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 border border-slate-700">
-                                                      {(player.Player || '??').substring(0, 2).toUpperCase()}
-                                                      <PhotoOverlay src={player.Image} alt={player.Player} />
-                                                  </div>
-                                                  <div className={`absolute -bottom-1 -right-1 px-1 py-0 rounded text-[7px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text} border ${pSeasonColors.border}`}>
-                                                    {getSeasonShortLabel(pSeason)}
-                                                  </div>
-                                                </div>
-                                                <div>
-                                                    <div className="font-bold text-slate-200">{player.Player || 'Inconnu'}</div>
-                                                    <div className="text-xs text-slate-500"><TeamLine player={player} /></div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-right">
-                                            <span className="font-mono font-bold text-white">{roleIndex(player, presets[selectedRole])}</span>
-                                        </td>
-                                        <td className="p-4 text-slate-300">{player.Age}</td>
-                                        <td className="p-4">
-                                            <span className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-xs text-slate-400 font-mono">
-                                                {positionLabel(player.Position)}
-                                            </span>
-                                        </td>
-                                        <td className="p-4 text-right font-mono text-slate-400">
-                                            {Number(player["Minutes played"]).toLocaleString()}'
-                                        </td>
-                                        <td className="p-4 text-right font-mono text-slate-300">
-                                            {formatCurrency(Number(player["Market value"]))}
-                                            {typeof player["Estimated value"] === 'number' && Number(player["Market value"]) > 0 && (
-                                              <div className="text-[10px] text-slate-500 font-normal">
-                                                modèle {formatCurrency(player["Estimated value"])} (×{(player["Estimated value"] / Number(player["Market value"])).toFixed(1)})
-                                              </div>
-                                            )}
-                                            {player["Contract expires"] && (
-                                              <div className="text-[10px] text-slate-500 font-normal">jusqu'à {String(player["Contract expires"]).slice(0, 7)}</div>
-                                            )}
-                                        </td>
-                                        {/* Dynamic Metric Cells */}
-                                        {Object.keys(effectiveThresholds).map(key => (
-                                            <td key={key} className="p-4 text-right font-mono text-emerald-400 font-medium bg-emerald-500/5">
-                                                {Number(player[key]).toFixed(2)}
-                                                <span className="ml-1 text-[10px] text-slate-500">P{player[`${key} pct`] ?? '–'}</span>
-                                            </td>
-                                        ))}
-                                        <td className="p-4 text-center">
-                                            <div className="flex items-center justify-center gap-1">
-                                              <button 
-                                                  onClick={(e) => toggleWatchlist(player, e)}
-                                                  className={`p-2 rounded-lg transition-all ${
-                                                    watchlistIds.has(getPlayerSeasonId(player))
-                                                      ? 'bg-yellow-500/20 text-yellow-400'
-                                                      : 'hover:bg-yellow-500/10 text-slate-500 hover:text-yellow-400'
-                                                  }`}
-                                                  title={watchlistIds.has(getPlayerSeasonId(player)) ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}
-                                              >
-                                                  <Star className={`w-4 h-4 ${watchlistIds.has(getPlayerSeasonId(player)) ? 'fill-yellow-400' : ''}`} />
-                                              </button>
-                                              <button 
-                                                  onClick={() => onSelectPlayer(player)}
-                                                  className="p-2 hover:bg-emerald-500/20 rounded-lg text-slate-400 hover:text-emerald-400 transition-all"
-                                                  title="Voir la fiche"
-                                              >
-                                                  <Eye className="w-4 h-4" />
-                                              </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
+              )}
+              {breakdownWeights.map(([key, w]) => (
+                <div key={key} className="flex items-center justify-between gap-2 h-7 border-b border-line/60 text-xs">
+                  <span className="text-ink-2 truncate" title={metricLabel(key)}>{metricLabel(key)}</span>
+                  <span className="text-ink-2 num shrink-0">{w < 0 ? <span data-tip="Moins c'est mieux : compté 100 − percentile" data-tip-pos="left">×{fr(Math.abs(w), 1)} inversé</span> : `×${fr(w, 1)}`}</span>
                 </div>
+              ))}
+              {preset.midfieldProfiles && (
+                <div className="flex items-center justify-between gap-2 h-7 text-xs">
+                  <span className="text-ink-3 truncate">Bonus profil de milieu : {preset.midfieldProfiles.join(', ')}</span>
+                  <span className="text-ink-2 num shrink-0">+{MIDFIELD_PROFILE_BONUS}</span>
+                </div>
+              )}
+            </div>
+          )}
+          </div>
+        </div>
+      )}
+      {!preset && <p className="text-2xs text-ink-4 mt-2 leading-relaxed">Chaque rôle élimine sur des seuils de percentile, puis classe par indice du rôle.</p>}
+    </Panel>
+  );
+
+  // ---------- Rendu : création d'un rôle (action secondaire) ----------
+  const creator = creating && (
+    <Panel title="Nouveau rôle" icon={Plus} right={
+      <button onClick={() => setCreating(false)} className="sv-icon-btn" aria-label="Fermer"><X className="w-3.5 h-3.5" /></button>
+    }>
+      <div className="space-y-3">
+        <label className="block">
+          <span className="sv-label">Nom</span>
+          <input type="text" className="sv-input sv-input-sm mt-1" placeholder="ex. Défenseur relanceur gaucher" maxLength={60}
+            value={draftName} onChange={e => setDraftName(e.target.value)} aria-invalid={!!nameError} />
+          {nameError && <span className="block text-2xs text-warn mt-1">{nameError}</span>}
+        </label>
+        <div>
+          <span className="sv-label">Postes</span>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {POSITIONS.map(pos => (
+              <button key={pos} onClick={() => setDraftPositions(prev => (prev.includes(pos) ? prev.filter(p => p !== pos) : [...prev, pos]))}
+                className={`sv-chip !h-6 !px-2 ${draftPositions.includes(pos) ? 'sv-chip-on' : ''}`} aria-pressed={draftPositions.includes(pos)} title={positionName(pos)}>
+                {positionLabel(pos)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <span className="sv-label">Seuils (percentile minimum, 0-{THRESHOLD_MAX})</span>
+          <div className="relative mt-1 mb-2">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-ink-4" aria-hidden />
+            <input type="text" className="sv-input sv-input-sm pl-7" placeholder="Ajouter une métrique" value={metricSearch} onChange={e => setMetricSearch(e.target.value)} />
+            {metricSearch && (
+              <div className="sv-menu absolute top-full left-0 right-0 mt-1 max-h-40 overflow-y-auto z-20">
+                {availableMetrics
+                  .filter(k => !draftMetrics.some(m => m.key === k) && (k.toLowerCase().includes(metricSearch.toLowerCase()) || metricLabel(k).toLowerCase().includes(metricSearch.toLowerCase())))
+                  .map(k => (
+                    <button key={k} onClick={() => { setDraftMetrics(prev => [...prev, { key: k, raw: '60' }]); setMetricSearch(''); }} className="sv-menu-item !text-xs">{metricLabel(k)}</button>
+                  ))}
+              </div>
             )}
-         </div>
+          </div>
+          <div className="space-y-1">
+            {draftMetrics.map(m => {
+              const invalid = parseThreshold(m.raw) === null;
+              return (
+                <div key={m.key} className="flex items-center gap-1.5">
+                  <button onClick={() => setDraftMetrics(prev => prev.filter(x => x.key !== m.key))} className="sv-icon-btn !w-5 !h-5 hover:!text-neg" aria-label={`Retirer ${metricLabel(m.key)}`}><X className="w-3 h-3" /></button>
+                  <span className="text-xs text-ink-2 truncate flex-1" title={metricLabel(m.key)}>{metricLabel(m.key)}</span>
+                  <input type="number" min={0} max={THRESHOLD_MAX} step={1} inputMode="numeric" aria-invalid={invalid}
+                    className={`sv-input sv-input-sm !w-16 text-right ${invalid ? '!border-warn' : ''}`} value={m.raw}
+                    onChange={e => setDraftMetrics(prev => prev.map(x => (x.key === m.key ? { ...x, raw: e.target.value } : x)))}
+                    onBlur={() => { const v = parseThreshold(m.raw); if (v !== null) setDraftMetrics(prev => prev.map(x => (x.key === m.key ? { ...x, raw: String(v) } : x))); }}
+                    aria-label={`Seuil ${metricLabel(m.key)}`} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <button onClick={saveDraft} disabled={!draftValid} className="sv-btn sv-btn-primary sv-btn-sm w-full">
+          <Save className="w-3.5 h-3.5" /> Enregistrer le rôle
+        </button>
+        <p className="text-2xs text-ink-4 leading-relaxed">Enregistré dans ce navigateur. L'indice d'un rôle personnalisé est la moyenne de ses critères (même calcul que les rôles officiels).</p>
+      </div>
+    </Panel>
+  );
+
+  // ---------- Rendu : contraintes ----------
+  const constraintControls = (
+    <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+      <label className="flex flex-col gap-1">
+        <span className="sv-label">Âge max</span>
+        <input type="number" min={16} max={40} className="sv-input sv-input-sm !w-20" value={constraints.ageMax}
+          onChange={e => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) setConstraint('ageMax', Math.round(v)); }} aria-label="Âge maximum" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="sv-label">Minutes min</span>
+        <input type="number" min={0} max={5000} step={100} className="sv-input sv-input-sm !w-24" value={constraints.minutesMin}
+          onChange={e => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) setConstraint('minutesMin', Math.round(v)); }} aria-label="Minutes minimum" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="sv-label flex items-center gap-1">Valeur max {marketHelp
+          ? <InfoTip text={marketHelp} />
+          : <InfoTip text="Valeur Transfermarkt actuelle. Avec une limite, un joueur sans valeur connue est exclu (et compté à part) ; « Sans limite » le garde." />}</span>
+        <select className="sv-select sv-select-sm" disabled={!caps.marketValue} value={constraints.valueMax ?? ''}
+          onChange={e => setConstraint('valueMax', e.target.value === '' ? null : Number(e.target.value))} aria-label="Valeur de marché maximum">
+          <option value="">Sans limite</option>
+          {VALUE_OPTIONS.map(v => <option key={v} value={v}>≤ {formatEuro(v)}</option>)}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="sv-label flex items-center gap-1">Contrat {!caps.contract && <InfoTip text={marketHelp ?? 'Indisponible pour cette saison.'} />}</span>
+        <select className="sv-select sv-select-sm" disabled={!caps.contract} value={constraints.contractMonths}
+          onChange={e => setConstraint('contractMonths', Number(e.target.value))} aria-label="Fin de contrat">
+          {CONTRACT_OPTIONS.map(m => <option key={m} value={m}>{m === 0 ? 'Indifférent' : `Fin sous ${m} mois`}</option>)}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 min-w-0">
+        <span className="sv-label">Compétition</span>
+        <select className="sv-select sv-select-sm max-w-[12rem]" value={constraints.competition}
+          onChange={e => setConstraint('competition', e.target.value)} aria-label="Compétition">
+          <option value="">Toutes</option>
+          {competitions.map(c => <option key={c.key} value={c.key}>{c.info?.name ?? c.key}</option>)}
+        </select>
+      </label>
+      <label className={`flex items-center gap-2 h-7 text-xs ${caps.estimate ? 'text-ink-2 cursor-pointer' : 'text-ink-4'}`}>
+        <input type="checkbox" disabled={!caps.estimate} checked={caps.estimate && constraints.estimateAboveMarket}
+          onChange={e => setConstraint('estimateAboveMarket', e.target.checked)} />
+        Estimation ≥ {fr(ESTIMATE_RATIO_MIN * 100, 0)} % du marché
+        <InfoTip text={caps.estimate
+          ? 'Estimation statistique du pipeline (régression ridge hors échantillon) au moins égale à 1,5 fois la valeur Transfermarkt. Une piste à examiner, pas un verdict sur le prix.'
+          : marketHelp ?? 'Indisponible pour cette saison.'} />
+      </label>
+      <button onClick={() => setConstraints({ ...DEFAULT_CONSTRAINTS })} className="sv-btn sv-btn-ghost sv-btn-sm" data-tip="U23, ≤ €30M, ≥ 500 min">
+        <RotateCcw className="w-3 h-3" /> Réinitialiser
+      </button>
+    </div>
+  );
+
+  // ---------- Rendu : entonnoir ----------
+  const f = search?.funnel;
+  const funnel = f && (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3" aria-label="Entonnoir de sélection">
+      <span><span className="text-ink-2 font-semibold num">{f.total.toLocaleString('fr-FR')}</span> joueurs</span>
+      <ArrowRight className="w-3 h-3 text-ink-4" aria-hidden />
+      <span><span className="text-ink-2 font-semibold num">{f.position.toLocaleString('fr-FR')}</span> compatibles avec le poste</span>
+      <ArrowRight className="w-3 h-3 text-ink-4" aria-hidden />
+      <span><span className="text-ink-2 font-semibold num">{f.constraints.toLocaleString('fr-FR')}</span> après contraintes</span>
+      <ArrowRight className="w-3 h-3 text-ink-4" aria-hidden />
+      <span><span className="text-accent font-semibold num">{f.eligible.toLocaleString('fr-FR')}</span> répondent aux critères du rôle</span>
+      {(f.insufficientData > 0 || f.noMarketValue > 0) && <span className="text-ink-4" aria-hidden>·</span>}
+      {f.insufficientData > 0 && (
+        <span className="inline-flex items-center gap-1 text-ink-3">
+          <span className="num">{f.insufficientData.toLocaleString('fr-FR')}</span> données insuffisantes
+          <InfoTip text="Joueurs retenus par les contraintes, sans percentile connu sous un seuil, mais auxquels il manque au moins un percentile éliminatoire (statistique non couverte). Non éligibles ; ce n'est pas un P0." />
+        </span>
+      )}
+      {f.noMarketValue > 0 && (
+        <span className="inline-flex items-center gap-1 text-ink-3">
+          <span className="num">{f.noMarketValue.toLocaleString('fr-FR')}</span> valeur de marché indisponible
+          <InfoTip text="Joueurs compatibles qui respectent les autres contraintes mais sans valeur de marché connue : exclus tant qu'une valeur maximum est fixée. « Sans limite » les réintègre." />
+        </span>
+      )}
+    </div>
+  );
+
+  // ---------- Rendu : résultats ----------
+  const colCount = 9 + thresholdKeys.length;
+  const results = !preset ? (
+    <EmptyState icon={Gem} title="Choisissez un profil recherché" className="h-full">
+      Le rôle fixe les postes et les seuils de percentile ; les contraintes ciblent l'âge, le temps de jeu, la valeur et la compétition.
+    </EmptyState>
+  ) : rows.length === 0 ? (
+    <EmptyState icon={SlidersHorizontal} title="Aucun joueur ne répond aux critères" className="h-full">
+      {f && f.constraints === 0
+        ? `Les contraintes excluent les ${f.position.toLocaleString('fr-FR')} joueurs compatibles avec le poste : élargissez l'âge, les minutes ou la valeur.`
+        : f && `${f.belowThreshold.toLocaleString('fr-FR')} joueurs sous au moins un seuil${f.insufficientData ? `, ${f.insufficientData.toLocaleString('fr-FR')} avec des données insuffisantes` : ''} : baissez l'exigence ou élargissez les contraintes.`}
+    </EmptyState>
+  ) : (
+    <table className="sv-table">
+      <thead>
+        <tr>
+          <th className="!pl-4 sm:!pl-5 sticky left-0 !z-20 min-w-[12rem] sm:min-w-[15rem]"><span className="inline-block w-6 text-right mr-2.5">#</span>Joueur</th>
+          <th className="text-right whitespace-nowrap">
+            <span className="inline-flex items-center gap-1">Indice du rôle <InfoTip text={roleIndexHelp(ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS)} align="end" /></span>
+          </th>
+          <th className="text-right">Âge</th>
+          <th>Poste</th>
+          <th>Club</th>
+          <th className="text-right">Min</th>
+          <th className="text-right">Valeur</th>
+          <th className="text-right">Contrat</th>
+          {thresholdKeys.map(key => (
+            <th key={key} className="text-right whitespace-nowrap" title={metricLabel(key)}>
+              <div className="max-w-[8rem] truncate ml-auto">{shortMetric(key)}</div>
+              <div className="normal-case tracking-normal font-normal text-ink-4">≥ P{search!.thresholds[key]}</div>
+            </th>
+          ))}
+          <th className="w-[100px] !pr-4 sm:!pr-5"><span className="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ player, rank, index, id }) => {
+          const watched = watchlistIds.has(id);
+          const selected = id === selectedId;
+          const open = expanded === id;
+          const market = player['Market value'];
+          const estimate = player['Estimated value'];
+          const breakdown = open ? roleIndexBreakdown(player, preset) : null;
+          return (
+            <React.Fragment key={id}>
+              <tr
+                className={`group cursor-pointer [&:hover>td]:!bg-raised focus-visible:outline-none [&:focus-visible>td]:!bg-raised ${selected ? 'sv-row-selected' : ''}`}
+                onClick={() => onSelectPlayer(player)}
+                onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelectPlayer(player); } }}
+                tabIndex={0}
+                aria-label={`${rank}. ${player.Player}, indice ${index} : ouvrir la fiche`}
+                aria-current={selected ? 'true' : undefined}
+              >
+                <td className="!pl-4 sm:!pl-5 sticky left-0 z-[1] bg-canvas">
+                  <div className="flex items-center gap-2.5 min-w-[11rem] sm:min-w-[13rem] max-w-[12.5rem] sm:max-w-[18rem]">
+                    <span className="w-6 shrink-0 text-right text-ink-4 text-xs num">{rank}</span>
+                    <PlayerAvatar player={player} size="sm" />
+                    <div className="min-w-0 flex items-center gap-1.5">
+                      <span className="text-[13px] font-medium text-ink truncate group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}</span>
+                      {multiSeason && <span className="sv-tag !h-4 !px-1 !text-[9px] !font-medium shrink-0">{getPlayerSeasonTag(player)}</span>}
+                    </div>
+                  </div>
+                </td>
+                <td className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <IndexBar value={index} className="w-12 hidden sm:block" />
+                    <span className="text-ink font-semibold num w-7 text-right">{index}</span>
+                  </div>
+                </td>
+                <td className="text-right text-ink-2 num">{typeof player.Age === 'number' ? player.Age : <span className="text-ink-4">–</span>}</td>
+                <td><span className="sv-tag" title={positionName(player.Position)}>{positionLabel(player.Position)}</span></td>
+                <td className="text-ink-2"><TeamLine player={player} className="max-w-[9.5rem]" /></td>
+                <td className="text-right text-ink-3 num whitespace-nowrap">{Number(player['Minutes played']).toLocaleString('fr-FR')}</td>
+                <td className="text-right whitespace-nowrap">
+                  {typeof market === 'number'
+                    ? <>
+                        <div className="text-accent font-semibold num">{formatEuro(market)}</div>
+                        {typeof estimate === 'number' && market > 0 && (
+                          <div className="text-2xs text-ink-4 num" data-tip="Estimation statistique / valeur de marché" data-tip-pos="left">estim. {Math.round((estimate / market) * 100)} %</div>
+                        )}
+                      </>
+                    : <span className="text-ink-4" title="Valeur de marché indisponible">–</span>}
+                </td>
+                <td className="text-right text-xs text-ink-3 num whitespace-nowrap">{contractLabel(player['Contract expires']) ?? <span className="text-ink-4">–</span>}</td>
+                {thresholdKeys.map(key => (
+                  <td key={key} className="text-right whitespace-nowrap">
+                    <PercentileValue value={Number(player[`${key} pct`])} className="text-xs justify-end" />
+                    <div className="text-2xs text-ink-4 num">{formatRaw(key, player[key])}</div>
+                  </td>
+                ))}
+                <td className="!pr-4 sm:!pr-5">
+                  <div className="flex justify-end gap-0.5">
+                    <button onClick={e => { e.stopPropagation(); setExpanded(open ? null : id); }} aria-expanded={open}
+                      className={`sv-icon-btn ${open ? '!text-accent' : 'opacity-50 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                      data-tip="Pourquoi ce joueur ?" data-tip-pos="left" aria-label={`Décomposition de l'indice de ${player.Player}`}>
+                      <ListTree className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={e => toggleWatchlist(player, e)} aria-pressed={watched}
+                      className={`sv-icon-btn ${watched ? '!text-accent' : 'opacity-50 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                      data-tip={watched ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'} data-tip-pos="left"
+                      aria-label={watched ? 'Retirer de la liste de suivi' : 'Ajouter à la liste de suivi'}>
+                      <Star className={`w-3.5 h-3.5 ${watched ? 'fill-accent' : ''}`} />
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); onSelectPlayer(player); }}
+                      className="sv-icon-btn opacity-50 group-hover:opacity-100 focus-visible:opacity-100"
+                      data-tip="Voir la fiche" data-tip-pos="left" aria-label={`Voir la fiche de ${player.Player}`}>
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {breakdown && (
+                <tr className="!cursor-default">
+                  <td colSpan={colCount} className="!p-0 bg-surface">
+                    <div className="sticky left-0 w-[min(calc(100vw-5rem),46rem)] px-4 sm:px-5 py-3">
+                      <div className="sv-label mb-1.5 flex items-center gap-1">Pourquoi {player.Player} ? Décomposition de l'indice du rôle
+                        <InfoTip text={roleIndexHelp(ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS)} />
+                      </div>
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-2xs text-ink-4 text-left [&>th]:whitespace-nowrap">
+                            <th className="font-normal py-1">Métrique</th>
+                            <th className="font-normal py-1 text-right">Percentile</th>
+                            <th className="font-normal py-1 text-right">Poids</th>
+                            <th className="font-normal py-1 text-right">Compté</th>
+                            <th className="font-normal py-1 text-right">Part</th>
+                            <th className="font-normal py-1 text-right">Contribution</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...breakdown.terms].sort((a, b) => b.contribution - a.contribution).map(t => (
+                            <tr key={t.metric} className="border-t border-line/60 h-6">
+                              <td className="text-ink-2 pr-2">
+                                <span className="truncate">{metricLabel(t.metric)}</span>
+                                <span className="text-ink-4 text-2xs ml-1.5">{t.eliminatory ? (t.ranking ? 'éliminatoire · classement' : 'éliminatoire') : 'classement'}</span>
+                              </td>
+                              <td className="text-right whitespace-nowrap pl-3">{t.percentile === undefined ? <span className="text-ink-4">absent</span> : <PercentileValue value={t.percentile} className="text-xs justify-end" />}</td>
+                              <td className="text-right whitespace-nowrap pl-3 text-ink-3 num">×{fr(Math.abs(t.weight), 1)}{t.inverted && <span className="text-ink-4"> inversé</span>}</td>
+                              <td className="text-right whitespace-nowrap pl-3 text-ink-3 num">{t.scored === undefined ? '–' : t.inverted ? `100 − ${t.percentile} = ${t.scored}` : t.scored}</td>
+                              <td className="text-right whitespace-nowrap pl-3 text-ink-3 num">{fr(t.share * 100, 0)} %</td>
+                              <td className="text-right whitespace-nowrap pl-3 text-ink font-medium num">{fr(t.contribution, 1)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-line-strong h-7">
+                            <td colSpan={5} className="text-ink-3">
+                              Moyenne pondérée {breakdown.weightedScore !== undefined ? fr(breakdown.weightedScore, 1) : '–'}
+                              {breakdown.bonus > 0 && <> + bonus profil de milieu {breakdown.bonus}</>}
+                              {breakdown.weightedScore !== undefined && breakdown.weightedScore + breakdown.bonus > 100 && ' (plafonné à 100)'}, arrondi
+                            </td>
+                            <td className="text-right text-accent font-semibold num">{breakdown.total}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  return (
+    <div ref={pageRef} className="flex flex-col h-full min-h-0 overflow-y-auto lg:overflow-hidden"
+      onScroll={e => { memory.pageScrollTop = e.currentTarget.scrollTop; }}>
+      {/* En-tête compact */}
+      <div className="px-4 sm:px-5 py-3 border-b border-line bg-surface/40 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 className="flex items-center gap-1.5 text-sm font-semibold text-ink whitespace-nowrap">
+          <Gem className="w-4 h-4 text-accent" aria-hidden /> Chasseur de pépites
+        </h1>
+        <span className="text-2xs text-ink-3 whitespace-nowrap">{seasonText}</span>
+        {inProgress && (
+          <span className="sv-tag !font-normal text-ink-2 cursor-help" tabIndex={0} data-tip-wide="" data-tip-pos="bottom" data-tip-align="start"
+            data-tip={`Échantillon limité : saison en cours, données au ${generatedOn}. En début de saison, les percentiles reposent sur peu de matchs et peuvent encore varier ; un petit échantillon n'indique pas une performance moins bonne. Relevez les minutes minimum pour stabiliser la sélection.`}>
+            <span className="w-1.5 h-1.5 rounded-full bg-ink-3" aria-hidden /> Saison en cours
+          </span>
+        )}
+        <span className="hidden md:inline text-2xs text-ink-4">Profil recherché → contraintes → joueurs correspondants → pourquoi ils ressortent → fiche</span>
+        {rows.length > 0 && (
+          <button onClick={() => exportProspects(rows, roleName, thresholdKeys)} className="sv-btn sv-btn-secondary ml-auto"
+            data-tip="Rang, rôle et indice du rôle inclus" data-tip-pos="left">
+            <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Exporter</span> ({rows.length})
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0">
+        {/* Profil recherché */}
+        <aside className="lg:w-[22rem] shrink-0 p-4 sm:px-5 lg:pr-4 lg:border-r border-b lg:border-b-0 border-line space-y-4 lg:overflow-y-auto">
+          {profile}
+          {creator}
+        </aside>
+
+        {/* Contraintes, entonnoir, résultats */}
+        <section className="flex-1 min-w-0 flex flex-col lg:min-h-0">
+          <div className="px-4 sm:px-5 py-3 border-b border-line space-y-2.5">
+            <div className="flex items-center justify-between gap-2 lg:hidden">
+              <button onClick={() => setConstraintsOpen(o => !o)} aria-expanded={constraintsOpen} className="sv-btn sv-btn-secondary sv-btn-sm">
+                <SlidersHorizontal className="w-3.5 h-3.5" /> Contraintes
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${constraintsOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+            <div className={`${constraintsOpen ? '' : 'hidden'} lg:block`}>{constraintControls}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {chips.map(c => c.onRemove ? (
+                <button key={c.key} onClick={c.onRemove} className="sv-chip sv-chip-on !h-6" aria-label={`Retirer : ${c.label}`}>
+                  {c.label} <X className="w-3 h-3" />
+                </button>
+              ) : (
+                <span key={c.key} className="sv-chip sv-chip-on !h-6 !cursor-default">{c.label}</span>
+              ))}
+            </div>
+            {funnel}
+          </div>
+
+          <div ref={scrollRef} className="overflow-auto max-h-[75vh] lg:max-h-none lg:flex-1 lg:min-h-0"
+            onScroll={e => { memory.scrollTop = e.currentTarget.scrollTop; }}>
+            {results}
+          </div>
+        </section>
       </div>
     </div>
   );

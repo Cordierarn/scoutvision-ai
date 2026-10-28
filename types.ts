@@ -51,24 +51,14 @@ export function getSeasonShortLabel(season: string): string {
   return match ? `${match[1]}-${match[2]}` : season;
 }
 
-const SEASON_COLORS = [
-  { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30' },
-  { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' },
-  { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/30' },
-  { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/30' },
-  { bg: 'bg-rose-500/20', text: 'text-rose-400', border: 'border-rose-500/30' },
-  { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30' },
-];
+// Badges de saison neutres : le libellé (24-25) suffit, la couleur reste réservée aux données
+const SEASON_STYLE = { bg: 'bg-raised', text: 'text-ink-2', border: 'border-line-strong' };
 
 /**
- * Retourne la couleur associée à une saison (cycle sur l'année de début)
+ * Style du badge d'une saison (neutre, identique pour toutes les saisons)
  */
-export function getSeasonColor(season: string): { bg: string; text: string; border: string } {
-  const year = parseInt(season.slice(0, 4));
-  if (isNaN(year)) {
-    return { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500/30' };
-  }
-  return SEASON_COLORS[year % SEASON_COLORS.length];
+export function getSeasonColor(_season: string): { bg: string; text: string; border: string } {
+  return SEASON_STYLE;
 }
 
 /**
@@ -310,7 +300,8 @@ export enum ViewState {
   PROSPECTS = 'PROSPECTS',
   WATCHLIST = 'WATCHLIST',
   FORECAST = 'FORECAST',
-  LAB = 'LAB'
+  LAB = 'LAB',
+  RECRUITMENT = 'RECRUITMENT'
 }
 
 /**
@@ -340,3 +331,12 @@ export interface MetricBounds {
   stdDev: number;
 }
 
+
+/**
+ * Saison affichée pour une ligne joueur : la saison réelle quand la compétition se joue
+ * en année civile (« 2026 »), sinon le libellé court (« 25-26 »)
+ */
+export function getPlayerSeasonTag(player: PlayerData): string {
+  const raw = String(player.Season ?? '');
+  return /^\d{4}$/.test(raw) ? raw : getSeasonShortLabel(getPlayerSeason(player));
+}

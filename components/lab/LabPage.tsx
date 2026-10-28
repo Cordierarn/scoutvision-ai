@@ -9,6 +9,7 @@ import { FlaskConical } from 'lucide-react';
 import { PlayerData } from '../../types';
 import { labData } from '../../services/labData';
 import { Loading, Missing, useLab } from './common';
+import { PageHeader } from '../ui';
 import Notebook, { LabTab } from './Notebook';
 import CoachesTab from './CoachesTab';
 import ElevatorTab from './ElevatorTab';
@@ -39,22 +40,18 @@ const LabPage: React.FC<{ playerData: PlayerData[] }> = ({ playerData }) => {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="p-6 space-y-6 max-w-[96rem] mx-auto">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2.5"><FlaskConical className="w-6 h-6 text-emerald-400" /> Laboratoire</h1>
-            <p className="text-sm text-slate-400 mt-1 max-w-3xl">
-              Des idées neuves testées sur les données match par match (compositions, buts, momentum, réseaux de passes, entraîneurs, arbitres) :
-              chacune a un verdict chiffré, et les idées reçues démenties comptent autant que les découvertes.
-            </p>
-          </div>
-          {lab && <span className="text-[11px] text-slate-500">Calculé le {new Date(lab.generatedAt).toLocaleDateString('fr-FR')} sur {lab.matches.toLocaleString('fr-FR')} matchs</span>}
-        </div>
+      <div className="p-5 space-y-4 max-w-[96rem] mx-auto">
+        <PageHeader
+          title="Laboratoire"
+          icon={FlaskConical}
+          description="Des idées testées sur les données match par match (compositions, buts, momentum, réseaux de passes, entraîneurs, arbitres). Chaque idée a un verdict chiffré : les idées reçues démenties comptent autant que les découvertes, et un résultat n'est pas une vérité définitive."
+          meta={lab ? `Calculé le ${new Date(lab.generatedAt).toLocaleDateString('fr-FR')} sur ${lab.matches.toLocaleString('fr-FR')} matchs` : undefined}
+        />
 
-        <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3" role="tablist">
+        <div className="sv-tabs" role="tablist">
           {TABS.map(t => (
             <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => open(t.key)}
-              className={`px-3.5 py-1.5 rounded-lg text-sm transition-colors ${tab === t.key ? 'bg-emerald-500 text-slate-900 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-900'}`}>
+              className={`sv-tab ${tab === t.key ? 'sv-tab-on' : ''}`}>
               {t.label}
             </button>
           ))}

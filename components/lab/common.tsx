@@ -5,11 +5,11 @@
 import React from 'react';
 import { CircleAlert, CircleCheck, CircleX, Ruler } from 'lucide-react';
 import { Verdict } from '../../services/labData';
+import { Panel as UIPanel, Skeleton } from '../ui';
 
-// Couleurs des graphiques : palette de référence dataviz validée sur le fond sombre de l'app
-export const SERIES = ['#3987e5', '#d95926', '#199e70'];      // bleu, orange, vert d'eau (ordre fixe)
-export const CONTEXT = '#78716c';                             // gris de contexte (forme « emphase »)
-export const DIVERGING = { above: '#3987e5', below: '#e66767' };
+// Couleurs des graphiques : identité ScoutVision (theme/charts), séries en ordre fixe,
+// gris de contexte pour la forme « emphase », paire divergente autour de la référence
+export { SERIES, CONTEXT, DIVERGING } from '../../theme/charts';
 // Palette de statut, réservée aux verdicts (toujours avec icône et libellé)
 const VERDICTS: Record<Verdict, { label: string; color: string; icon: React.ElementType; help: string }> = {
   validated: { label: 'Validé', color: '#0ca30c', icon: CircleCheck, help: 'Effet net : intervalle de confiance qui exclut zéro, ou gain hors échantillon' },
@@ -18,34 +18,32 @@ const VERDICTS: Record<Verdict, { label: string; color: string; icon: React.Elem
   measured: { label: 'Mesure', color: '#94a3b8', icon: Ruler, help: 'Mesure descriptive, sans hypothèse à trancher' },
 };
 
-export const VerdictBadge: React.FC<{ verdict: Verdict }> = ({ verdict }) => {
+export const VERDICT_ORDER: Verdict[] = ['validated', 'partial', 'debunked', 'measured'];
+export const verdictInfo = (v: Verdict) => VERDICTS[v];
+
+export const VerdictBadge: React.FC<{ verdict: Verdict; size?: 'sm' | 'md' }> = ({ verdict, size = 'sm' }) => {
   const v = VERDICTS[verdict];
   const Icon = v.icon;
   return (
-    <span title={v.help} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-[11px] font-semibold text-slate-200 whitespace-nowrap">
-      <Icon className="w-3.5 h-3.5" style={{ color: v.color }} aria-hidden />
+    <span title={v.help}
+      className={`inline-flex items-center gap-1 rounded border whitespace-nowrap font-semibold text-ink ${size === 'md' ? 'h-6 px-2 text-xs' : 'h-5 px-1.5 text-2xs'}`}
+      style={{ borderColor: `${v.color}66`, backgroundColor: `${v.color}14` }}>
+      <Icon className={size === 'md' ? 'w-3.5 h-3.5' : 'w-3 h-3'} style={{ color: v.color }} aria-hidden />
       {v.label}
     </span>
   );
 };
 
 export const Panel: React.FC<{ title: React.ReactNode; subtitle?: React.ReactNode; right?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, subtitle, right, className = '', children }) => (
-  <section className={`bg-slate-950 border border-slate-800 rounded-2xl p-5 ${className}`}>
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{title}</h3>
-        {subtitle && <p className="text-xs text-slate-500 mt-1 leading-relaxed">{subtitle}</p>}
-      </div>
-      {right}
-    </div>
-    <div className="mt-4">{children}</div>
-  </section>
+  <UIPanel title={title} subtitle={subtitle} right={right} className={className}>{children}</UIPanel>
 );
 
-export const Loading: React.FC = () => <div className="h-64 rounded-2xl bg-slate-900 animate-pulse" />;
+export const Loading: React.FC = () => <Skeleton className="h-64" />;
 
 export const Missing: React.FC<{ what: string }> = ({ what }) => (
-  <p className="text-sm text-slate-500">Données {what} absentes : lancez scripts/prepare_lab.py après scripts/prepare_data.py.</p>
+  <div className="sv-panel border-dashed px-4 py-3 text-xs text-ink-3">
+    Données {what} absentes : lancez <code className="text-ink-2">scripts/prepare_lab.py</code> après <code className="text-ink-2">scripts/prepare_data.py</code>.
+  </div>
 );
 
 /**

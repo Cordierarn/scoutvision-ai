@@ -32,13 +32,13 @@ const SquadsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="text-[11px] text-slate-500">Saison
-          <select value={current} onChange={e => setSeason(e.target.value)} className="block mt-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+        <label className="text-2xs text-ink-3">Saison
+          <select value={current} onChange={e => setSeason(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
             {seasons.map(s => <option key={s} value={s}>{s}{s === lab.current ? ' (en cours)' : ''}</option>)}
           </select>
         </label>
-        <label className="text-[11px] text-slate-500">Championnat
-          <select value={comp} onChange={e => setComp(e.target.value)} className="block mt-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+        <label className="text-2xs text-ink-3">Championnat
+          <select value={comp} onChange={e => setComp(e.target.value)} className="block mt-1 bg-raised border border-line-strong rounded px-2 py-1 text-xs text-ink">
             {comps.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
@@ -49,7 +49,7 @@ const SquadsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           subtitle={`Effet attendu du seul vieillissement sur l'xGD par match de la saison suivante, par rapport à un effectif d'âge moyen : âge de chaque joueur (courbes d'âge de la note globale), pondéré par ses minutes ; ${frNumber(data.coef, 3, true)} xGD par point d'effet d'âge (IC 95 % [${frNumber(data.ci[0], 3, true)} ; ${frNumber(data.ci[1], 3, true)}]), à niveau égal.`}
           right={<VerdictBadge verdict={ex.clock.verdict} />}
         >
-          <div className="flex gap-4 text-[11px] text-slate-400 mb-3">
+          <div className="flex gap-4 text-2xs text-ink-3 mb-3">
             <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: DIVERGING.above }} /> À l'âge où l'on progresse</span>
             <span className="inline-flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm" style={{ backgroundColor: DIVERGING.below }} /> Vieillissant</span>
           </div>
@@ -58,18 +58,18 @@ const SquadsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
               const above = r.effect >= 0;
               return (
                 <div key={r['Team ID']} className="grid grid-cols-[10rem_1fr_9rem] items-center gap-3 text-xs">
-                  <span className="text-slate-300 truncate">{r.team}</span>
+                  <span className="text-ink-2 truncate">{r.team}</span>
                   <div className="relative h-2.5">
-                    <div className="absolute inset-y-0 left-1/2 w-px bg-slate-600" />
+                    <div className="absolute inset-y-0 left-1/2 w-px bg-ink-4" />
                     <div className={`absolute inset-y-0 ${above ? 'left-1/2 rounded-r' : 'right-1/2 rounded-l'}`}
                       style={{ width: `${Math.abs(r.effect) / maxEffect * 50}%`, backgroundColor: above ? DIVERGING.above : DIVERGING.below }} />
                   </div>
-                  <span className="text-right font-mono text-slate-300 tabular-nums whitespace-nowrap">{frNumber(r.effect, 3, true)} · {frNumber(Number(r.age), 1)} ans</span>
+                  <span className="text-right font-mono text-ink-2 tabular-nums whitespace-nowrap">{frNumber(r.effect, 3, true)} · {frNumber(Number(r.age), 1)} ans</span>
                 </div>
               );
             })}
           </div>
-          {clock.length === 0 && <p className="text-sm text-slate-500">Pas de données pour cette sélection.</p>}
+          {clock.length === 0 && <p className="text-sm text-ink-3">Pas de données pour cette sélection.</p>}
         </Panel>
         <Panel
           title="Dépendance aux coups de pied arrêtés"
@@ -79,15 +79,15 @@ const SquadsTab: React.FC<{ lab: LabExperiments }> = ({ lab }) => {
           <div className="space-y-1.5">
             {sp.map(r => (
               <div key={r['Team ID']} className="grid grid-cols-[10rem_1fr_3.5rem] items-center gap-3 text-xs">
-                <span className="text-slate-300 truncate">{r.team}</span>
-                <div className="h-2.5 bg-slate-900 rounded-r">
+                <span className="text-ink-2 truncate">{r.team}</span>
+                <div className="h-2.5 bg-raised rounded-r">
                   <div className="h-full rounded-r" style={{ width: `${Number(r.set_pieces) / maxSp * 100}%`, backgroundColor: SERIES[0] }} />
                 </div>
-                <span className="text-right font-mono text-slate-300 tabular-nums">{frPercent(Number(r.set_pieces))}</span>
+                <span className="text-right font-mono text-ink-2 tabular-nums">{frPercent(Number(r.set_pieces))}</span>
               </div>
             ))}
           </div>
-          {sp.length === 0 && <p className="text-sm text-slate-500">Pas de données pour cette sélection.</p>}
+          {sp.length === 0 && <p className="text-sm text-ink-3">Pas de données pour cette sélection.</p>}
         </Panel>
       </div>
     </div>

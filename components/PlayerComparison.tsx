@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { PlayerData, extractSeason, getSeasonColor, getPlayerSeasonId, getSeasonShortLabel } from '../types';
-import { Search, X, Settings2, Plus, TrendingUp, Percent, Check, Users, Trash2, Calendar, ArrowRight } from 'lucide-react';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, Tooltip } from 'recharts';
+import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
+import { Search, X, Settings2, Plus, TrendingUp, Percent, Users, Trash2, ArrowLeftRight } from 'lucide-react';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { queryService } from '../services/queryService';
 import { getMetricKeys } from '../utils/positionMetrics';
 import { metricLabel, positionLabel } from '../utils/labels';
-import { PhotoOverlay, TeamLine, TeamLogo, CompetitionBadge, CountryFlag } from './Media';
+import { TeamLine, PlayerAvatar } from './Media';
+import { PageHeader, Panel, LegendItem, PercentileValue, EmptyState, PolarTick } from './ui';
+import { SERIES, polarGridProps, tooltipProps } from '../theme/charts';
 
 interface PlayerComparisonProps {
   data: PlayerData[];
@@ -16,13 +18,6 @@ const DEFAULT_METRICS = [
   'Accurate passes, %', 'Duels won, %', 'Successful defensive actions per 90'
 ];
 
-// Distinct colors for up to 4 players
-const PLAYER_COLORS = [
-  { stroke: '#10b981', fill: '#10b981', name: 'Emerald' }, // Player 1
-  { stroke: '#a855f7', fill: '#a855f7', name: 'Purple' },  // Player 2
-  { stroke: '#3b82f6', fill: '#3b82f6', name: 'Blue' },    // Player 3
-  { stroke: '#f59e0b', fill: '#f59e0b', name: 'Amber' }    // Player 4
-];
 
 const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
   const [selectedPlayers, setSelectedPlayers] = useState<PlayerData[]>([]);
@@ -93,317 +88,219 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data }) => {
         // Normalize each player's value relative to the max in the entire dataset for that metric
         const max = Math.max(...data.map(d => Number(d[key]) || 0)) || 1;
 
-        selectedPlayers.forEach(p => {
+        selectedPlayers.forEach((p, idx) => {
              const val = Number(p[key]) || 0;
              // Store normalized value (0-100) for the Radar Chart
-             item[p.Player] = Math.round((val / max) * 100);
+             item[`p${idx}`] = Math.round((val / max) * 100);
         });
 
         return item;
     });
   }, [selectedPlayers, selectedMetrics, data]);
 
+  const formatRaw = (v: number) => (v % 1 !== 0 ? v.toFixed(2) : String(v));
+  const lastName = (p: PlayerData) => (p.Player || 'Inconnu').split(' ').pop();
+
   return (
-    <div className="flex flex-col h-full animate-fade-in gap-6 max-w-7xl mx-auto pb-10">
-      
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-           <h1 className="text-3xl font-bold text-white mb-1">Comparaison de joueurs</h1>
-           <p className="text-slate-400">Comparez jusqu'à 4 joueurs ({selectedPlayers.length}/4 choisis).</p>
-        </div>
-        
-        {selectedPlayers.length > 0 && (
-           <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                <button 
-                  onClick={() => setViewMode('raw')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'raw' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                  <TrendingUp className="w-4 h-4" />
-                  Valeurs
-                </button>
-                <button 
-                  onClick={() => setViewMode('percentile')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'percentile' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                  <Percent className="w-4 h-4" />
-                  Percentiles
-                </button>
-           </div>
+    <div className="p-5 space-y-4 animate-fade-in">
+      <PageHeader
+        title="Comparaison de joueurs"
+        icon={ArrowLeftRight}
+        description="Jusqu'à 4 joueurs, toutes saisons chargées. Le même joueur peut être ajouté sur deux saisons pour mesurer sa progression."
+        actions={selectedPlayers.length > 0 && (
+          <>
+            <div className="sv-seg" role="group" aria-label="Affichage">
+              <button onClick={() => setViewMode('raw')} className={`sv-seg-btn ${viewMode === 'raw' ? 'sv-seg-on' : ''}`} aria-pressed={viewMode === 'raw'}>
+                <TrendingUp className="w-3.5 h-3.5" /> Valeurs
+              </button>
+              <button onClick={() => setViewMode('percentile')} className={`sv-seg-btn ${viewMode === 'percentile' ? 'sv-seg-on' : ''}`} aria-pressed={viewMode === 'percentile'}>
+                <Percent className="w-3.5 h-3.5" /> Percentiles
+              </button>
+            </div>
+            <button onClick={() => setShowMetricConfig(!showMetricConfig)} aria-expanded={showMetricConfig}
+              className={`sv-btn sv-btn-secondary ${showMetricConfig ? '!border-accent/60 !text-accent' : ''}`}>
+              <Settings2 className="w-3.5 h-3.5" /> Métriques ({selectedMetrics.length})
+            </button>
+          </>
+        )}
+      />
+
+      {/* Joueurs comparés : couleur fixe par emplacement */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        {selectedPlayers.map((player, idx) => {
+          const season = extractSeason(player.League);
+          return (
+            <div key={getPlayerSeasonId(player)} className="sv-panel relative flex items-center gap-3 pl-4 pr-2 py-2.5 overflow-hidden">
+              <span className="absolute left-0 inset-y-0 w-[3px]" style={{ backgroundColor: SERIES[idx] }} aria-hidden />
+              <PlayerAvatar player={player} size="md" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink truncate">{player.Player || 'Inconnu'}</div>
+                <div className="text-2xs text-ink-3 truncate"><TeamLine player={player} /></div>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="sv-tag">{positionLabel(player.Position)}</span>
+                  <span className="sv-tag !font-normal">{player.Age ?? '?'} ans</span>
+                  <span className="sv-tag !font-normal">{getPlayerSeasonTag(player)}</span>
+                </div>
+              </div>
+              <button onClick={() => removePlayer(idx)} className="sv-icon-btn self-start hover:!text-neg" title="Retirer">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          );
+        })}
+
+        {selectedPlayers.length < 4 && (
+          <div className="relative">
+            {!isSearching ? (
+              <button onClick={() => setIsSearching(true)}
+                className="w-full h-full min-h-[74px] rounded-lg border border-dashed border-line-strong hover:border-accent/60 hover:text-accent text-ink-3 flex items-center justify-center gap-2 text-sm transition-colors">
+                <Plus className="w-4 h-4" /> Ajouter un joueur
+                <span className="text-2xs text-ink-4">{selectedPlayers.length}/4</span>
+              </button>
+            ) : (
+              <div className="sv-panel !border-accent/60 p-2 min-h-[74px]">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
+                  <input autoFocus type="text" placeholder="Nom du joueur" className="sv-input pl-8 pr-8"
+                    value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setIsSearching(false); }} />
+                  <button onClick={() => setIsSearching(false)} className="absolute right-1 top-1/2 -translate-y-1/2 sv-icon-btn !w-6 !h-6" aria-label="Fermer"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                {(searchResults.length > 0 || searchTerm) && (
+                  <div className="sv-menu absolute left-0 right-0 top-full mt-1 z-30 max-h-72 overflow-y-auto">
+                    {searchResults.map(p => (
+                      <button key={getPlayerSeasonId(p)} onClick={() => addPlayer(p)} className="sv-menu-item flex items-center gap-2">
+                        <PlayerAvatar player={p} size="xs" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-xs text-ink truncate">{p.Player || 'Inconnu'}</span>
+                          <span className="block text-2xs text-ink-3 truncate"><TeamLine player={p} /></span>
+                        </span>
+                        <span className="sv-tag">{getPlayerSeasonTag(p)}</span>
+                      </button>
+                    ))}
+                    {searchTerm && searchResults.length === 0 && <div className="px-3 py-2 text-xs text-ink-4">Aucun résultat</div>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Player Selection Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-         {/* Render Selected Players */}
-         {selectedPlayers.map((player, idx) => {
-            const season = extractSeason(player.League);
-            const seasonColors = getSeasonColor(season);
-            return (
-            <div 
-               key={getPlayerSeasonId(player)} 
-               className="relative bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 group hover:border-slate-700 transition-all"
-               style={{ borderTop: `4px solid ${PLAYER_COLORS[idx].stroke}` }}
-            >
-               <button 
-                  onClick={() => removePlayer(idx)}
-                  className="absolute top-2 right-2 p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
-               >
-                  <X className="w-4 h-4" />
-               </button>
-
-               <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <div className="relative overflow-hidden w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-lg font-bold text-slate-400">
-                       {(player.Player || '??').substring(0, 2).toUpperCase()}
-                       <PhotoOverlay src={player.Image} alt={player.Player} />
-                    </div>
-                    {/* Season Badge */}
-                    <div className={`absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${seasonColors.bg} ${seasonColors.text} border ${seasonColors.border}`}>
-                      {getSeasonShortLabel(season)}
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                     <h3 className="font-bold text-slate-200 truncate pr-4">{player.Player || 'Inconnu'}</h3>
-                     <p className="text-xs text-slate-500 truncate"><TeamLine player={player} /></p>
-                  </div>
-               </div>
-
-               <div className="grid grid-cols-2 gap-2 mt-auto">
-                   <div className="px-2 py-1.5 bg-slate-950 rounded text-center">
-                      <div className="text-[10px] text-slate-500 uppercase font-bold">Âge</div>
-                      <div className="text-sm font-mono text-slate-300">{player.Age}</div>
-                   </div>
-                   <div className="px-2 py-1.5 bg-slate-950 rounded text-center">
-                      <div className="text-[10px] text-slate-500 uppercase font-bold">Poste</div>
-                      <div className="text-sm font-mono text-slate-300">{positionLabel(player.Position)}</div>
-                   </div>
-               </div>
-            </div>
-         );
-         })}
-
-         {/* Add Player Button / Search Input */}
-         {selectedPlayers.length < 4 && (
-            <div className="relative h-full min-h-[140px]">
-               {!isSearching ? (
-                  <button 
-                     onClick={() => setIsSearching(true)}
-                     className="w-full h-full border-2 border-dashed border-slate-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-500 hover:text-emerald-400 transition-all group"
-                  >
-                     <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <Plus className="w-6 h-6" />
-                     </div>
-                     <span className="font-medium">Ajouter un joueur</span>
-                  </button>
-               ) : (
-                  <div className="w-full h-full bg-slate-900 border border-emerald-500 rounded-2xl p-4 flex flex-col shadow-xl">
-                      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 mb-2">
-                         <Search className="w-4 h-4 text-emerald-500" />
-                         <input 
-                           autoFocus
-                           type="text" 
-                           placeholder="Nom du joueur..." 
-                           className="bg-transparent border-none p-0 text-sm text-white w-full focus:ring-0 placeholder-slate-600"
-                           value={searchTerm}
-                           onChange={(e) => setSearchTerm(e.target.value)}
-                         />
-                         <button onClick={() => setIsSearching(false)} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
-                      </div>
-                      <div className="flex-1 overflow-y-auto custom-scrollbar -mr-2 pr-2">
-                         {searchResults.map(p => {
-                            const pSeason = extractSeason(p.League);
-                            const pSeasonColors = getSeasonColor(pSeason);
-                            return (
-                            <button 
-                               key={getPlayerSeasonId(p)}
-                               onClick={() => addPlayer(p)}
-                               className="w-full text-left py-2 px-2 hover:bg-slate-800 rounded flex items-center gap-2 group"
-                            >
-                                <div className="relative">
-                                  <div className="relative overflow-hidden w-7 h-7 rounded bg-slate-950 flex items-center justify-center text-[10px] text-slate-400 group-hover:text-emerald-400">
-                                     {(p.Player || '?').substring(0,1)}
-                                     <PhotoOverlay src={p.Image} alt={p.Player} />
-                                  </div>
-                                  <div className={`absolute -bottom-0.5 -right-0.5 px-1 py-0 rounded text-[7px] font-bold ${pSeasonColors.bg} ${pSeasonColors.text}`}>
-                                    {getSeasonShortLabel(pSeason)}
-                                  </div>
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                   <div className="text-xs font-bold text-slate-300 truncate">{p.Player || 'Inconnu'}</div>
-                                   <div className="text-[10px] text-slate-600 truncate"><TeamLine player={p} /></div>
-                                </div>
-                            </button>
-                            );
-                         })}
-                         {searchTerm && searchResults.length === 0 && (
-                            <div className="text-center text-xs text-slate-500 py-4">Aucun résultat</div>
-                         )}
-                      </div>
-                  </div>
-               )}
-            </div>
-         )}
-      </div>
-
-      {/* Comparison Area */}
-      {selectedPlayers.length > 0 && (
-        <>
-            <div className="flex justify-end">
-                <button 
-                onClick={() => setShowMetricConfig(!showMetricConfig)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all text-sm ${showMetricConfig ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
-                >
-                    <Settings2 className="w-4 h-4" />
-                    Choisir les métriques ({selectedMetrics.length})
-                </button>
-            </div>
-
-            {/* Metric Configuration Panel */}
-            {showMetricConfig && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 animate-fade-in-down">
-                <div className="flex items-center gap-4 mb-4">
-                    <Search className="w-5 h-5 text-slate-500" />
-                    <input 
-                        type="text" 
-                        placeholder="Rechercher une métrique..." 
-                        className="bg-transparent border-none focus:ring-0 text-white placeholder-slate-600 w-full"
-                        value={metricSearch}
-                        onChange={(e) => setMetricSearch(e.target.value)}
-                    />
-                </div>
-                <div className="h-px bg-slate-800 mb-4"></div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-60 overflow-y-auto custom-scrollbar">
-                    {numericKeys
-                        .filter(k => k.toLowerCase().includes(metricSearch.toLowerCase()))
-                        .map(key => (
-                        <div 
-                            key={key} 
-                            onClick={() => toggleMetric(key)}
-                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800 cursor-pointer group transition-colors select-none"
-                        >
-                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${selectedMetrics.includes(key) ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-950 border-slate-700 group-hover:border-slate-500'}`}>
-                                {selectedMetrics.includes(key) && <Check className="w-3 h-3 text-slate-950" />}
-                            </div>
-                            <span className={`text-sm ${selectedMetrics.includes(key) ? 'text-slate-200' : 'text-slate-500'}`}>{metricLabel(key)}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Radar Chart */}
-                <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[450px]">
-                    <div className="absolute top-4 left-4 z-10">
-                        <h3 className="text-lg font-bold text-slate-300 flex items-center gap-2">
-                             <TrendingUp className="w-5 h-5 text-emerald-500" /> Radar superposé
-                        </h3>
-                    </div>
-                    
-                    <div className="w-full h-[400px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <RadarChart cx="50%" cy="50%" outerRadius="70%" data={chartData}>
-                                <PolarGrid gridType="polygon" stroke="#334155" strokeWidth={1} strokeDasharray="4 4" />
-                                <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }} />
-                                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                                
-                                {selectedPlayers.map((p, idx) => (
-                                    <Radar
-                                        key={p.Player}
-                                        name={p.Player}
-                                        dataKey={p.Player}
-                                        stroke={PLAYER_COLORS[idx].stroke}
-                                        strokeWidth={2}
-                                        fill={PLAYER_COLORS[idx].fill}
-                                        fillOpacity={0.15}
-                                    />
-                                ))}
-                                
-                                <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
-                                <Tooltip 
-                                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f1f5f9', borderRadius: '8px' }}
-                                    itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
-                                />
-                            </RadarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-                {/* Data Table */}
-                <div className="lg:col-span-2 bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden flex flex-col">
-                    <div className="flex bg-slate-900 border-b border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-400 sticky top-0 z-10">
-                        <div className="flex-1 p-4">Métrique</div>
-                        {selectedPlayers.map((p, idx) => (
-                            <div 
-                                key={p.Player || idx} 
-                                className="w-24 md:w-32 p-4 text-right truncate" 
-                                style={{ color: PLAYER_COLORS[idx].stroke }}
-                                title={p.Player || 'Inconnu'}
-                            >
-                                {(p.Player || 'Inconnu').split(' ').pop()}
-                            </div>
-                        ))}
-                    </div>
-                    
-                    <div className="overflow-y-auto flex-1 custom-scrollbar p-0">
-                        {selectedMetrics.map((key, rowIdx) => {
-                            // Determine max value for highlighting
-                            const rowValues = selectedPlayers.map(p => Number(p[key]) || 0);
-                            const maxVal = Math.max(...rowValues);
-
-                            return (
-                                <div key={key} className={`flex items-center hover:bg-slate-900/40 transition-colors border-b border-slate-800/50 py-3 ${rowIdx % 2 === 0 ? 'bg-slate-900/10' : ''}`}>
-                                    <div className="flex-1 px-4 text-sm text-slate-300 font-medium truncate flex items-center gap-2">
-                                        <button 
-                                            onClick={() => toggleMetric(key)} 
-                                            className="text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            title="Retirer la métrique"
-                                        >
-                                            <Trash2 className="w-3 h-3" />
-                                        </button>
-                                        <span title={metricLabel(key)}>{metricLabel(key)}</span>
-                                    </div>
-                                    
-                                    {selectedPlayers.map((p, idx) => {
-                                        const val = Number(p[key]) || 0;
-                                        const perc = calculatePercentile(val, key);
-                                        const isBest = val === maxVal && val !== 0;
-
-                                        return (
-                                            <div key={`${p.Player}-${key}`} className="w-24 md:w-32 px-4 text-right">
-                                                <div className={`font-mono text-sm ${isBest ? 'font-bold scale-110' : 'text-slate-400'}`} style={{ color: isBest ? PLAYER_COLORS[idx].stroke : undefined }}>
-                                                    {viewMode === 'raw' 
-                                                        ? (val % 1 !== 0 ? val.toFixed(2) : val) 
-                                                        : `${perc}%`
-                                                    }
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            );
-                        })}
-                        {selectedMetrics.length === 0 && (
-                             <div className="p-8 text-center text-slate-500 text-sm">
-                                Aucune métrique. Utilisez « Choisir les métriques » pour en ajouter.
-                             </div>
-                        )}
-                    </div>
-                </div>
-
-            </div>
-        </>
+      {/* Choix des métriques */}
+      {showMetricConfig && selectedPlayers.length > 0 && (
+        <Panel title="Métriques comparées" subtitle="Cliquez pour ajouter ou retirer une métrique."
+          right={<button onClick={() => setShowMetricConfig(false)} className="sv-icon-btn" aria-label="Fermer"><X className="w-4 h-4" /></button>}>
+          <div className="relative mb-3 max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
+            <input type="text" placeholder="Rechercher une métrique" className="sv-input sv-input-sm pl-8" value={metricSearch} onChange={(e) => setMetricSearch(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-x-4 gap-y-px max-h-56 overflow-y-auto">
+            {numericKeys
+              .filter(k => k.toLowerCase().includes(metricSearch.toLowerCase()) || metricLabel(k).toLowerCase().includes(metricSearch.toLowerCase()))
+              .map(key => {
+                const on = selectedMetrics.includes(key);
+                return (
+                  <label key={key} className="flex items-center gap-2 h-7 text-xs cursor-pointer select-none">
+                    <input type="checkbox" checked={on} onChange={() => toggleMetric(key)} />
+                    <span className={`truncate ${on ? 'text-ink' : 'text-ink-3'}`}>{metricLabel(key)}</span>
+                  </label>
+                );
+              })}
+          </div>
+        </Panel>
       )}
 
-      {selectedPlayers.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center opacity-50 p-10">
-              <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-slate-800">
-                  <Users className="w-10 h-10 text-slate-600" />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">Aucun joueur choisi</h3>
-              <p className="text-slate-400 max-w-sm">Utilisez « Ajouter un joueur » pour composer votre comparaison (4 joueurs au plus).</p>
-          </div>
+      {selectedPlayers.length > 0 ? (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+          <Panel className="xl:col-span-5" title="Radar superposé"
+            subtitle="Échelle : valeur rapportée au maximum de la base chargée (0-100) pour chaque métrique.">
+            <div className="h-[380px] -mx-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="66%" data={chartData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}>
+                  <PolarGrid {...polarGridProps} />
+                  <PolarAngleAxis dataKey="subject" tick={<PolarTick />} />
+                  <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                  {selectedPlayers.map((p, idx) => (
+                    <Radar key={getPlayerSeasonId(p)} name={`${p.Player} · ${p.Team}`} dataKey={`p${idx}`}
+                      stroke={SERIES[idx]} strokeWidth={2} fill={SERIES[idx]} fillOpacity={idx === 0 ? 0.12 : 0.05} isAnimationActive={false} />
+                  ))}
+                  <Tooltip {...tooltipProps} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {selectedPlayers.map((p, idx) => (
+                <LegendItem key={getPlayerSeasonId(p)} color={SERIES[idx]} shape="line">{p.Player} · {p.Team} · {getPlayerSeasonTag(p)}</LegendItem>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel className="xl:col-span-7" flush title={viewMode === 'raw' ? 'Valeurs' : 'Percentiles'}
+            subtitle={viewMode === 'raw'
+              ? 'Meilleure valeur de chaque ligne en gras, avec la couleur du joueur.'
+              : 'Percentile parmi tous les joueurs chargés (toutes positions).'}>
+            <div className="overflow-x-auto">
+              <table className="sv-table">
+                <thead>
+                  <tr>
+                    <th className="pl-4">Métrique</th>
+                    {selectedPlayers.map((p, idx) => (
+                      <th key={getPlayerSeasonId(p)} className="text-right" title={p.Player || 'Inconnu'}>
+                        <span className="inline-flex items-center gap-1.5 normal-case tracking-normal text-xs text-ink-2">
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: SERIES[idx] }} />{lastName(p)}
+                        </span>
+                        <span className="block normal-case tracking-normal font-normal text-2xs text-ink-4 truncate max-w-[9rem] ml-auto">{p.Team} · {getPlayerSeasonTag(p)}</span>
+                      </th>
+                    ))}
+                    <th className="w-8 pr-4"><span className="sr-only">Retirer</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedMetrics.map(key => {
+                    const rowValues = selectedPlayers.map(p => Number(p[key]) || 0);
+                    const maxVal = Math.max(...rowValues);
+                    return (
+                      <tr key={key} className="group">
+                        <td className="pl-4 text-ink-2 text-xs" title={key}>{metricLabel(key)}</td>
+                        {selectedPlayers.map((p, idx) => {
+                          const val = Number(p[key]) || 0;
+                          const isBest = val === maxVal && val !== 0 && selectedPlayers.length > 1;
+                          return (
+                            <td key={`${getPlayerSeasonId(p)}-${key}`} className="text-right text-xs num">
+                              {viewMode === 'raw' ? (
+                                <span className={`inline-flex items-center gap-1.5 ${isBest ? 'text-ink font-semibold' : 'text-ink-3'}`}>
+                                  {isBest && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: SERIES[idx] }} aria-label="meilleure valeur" />}
+                                  {formatRaw(val)}
+                                </span>
+                              ) : (
+                                <PercentileValue value={calculatePercentile(val, key)} />
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td className="pr-4">
+                          <button onClick={() => toggleMetric(key)} className="sv-icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100 hover:!text-neg" title="Retirer la métrique">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {selectedMetrics.length === 0 && (
+                <EmptyState title="Aucune métrique">Utilisez « Métriques » pour en ajouter.</EmptyState>
+              )}
+            </div>
+          </Panel>
+        </div>
+      ) : (
+        <div className="sv-panel">
+          <EmptyState icon={Users} title="Aucun joueur choisi">
+            « Ajouter un joueur » pour composer la comparaison (4 joueurs au plus). Le premier joueur sert de référence (cyan).
+          </EmptyState>
+        </div>
       )}
     </div>
   );

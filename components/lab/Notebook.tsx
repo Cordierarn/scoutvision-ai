@@ -2,11 +2,11 @@
  * ScoutVision AI - Carnet d'expériences : chaque idée testée, son verdict et ses chiffres
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { LabExperiments, Verdict } from '../../services/labData';
 import { frNumber, frPercent } from '../../utils/lab';
-import { VerdictBadge } from './common';
+import { VERDICT_ORDER, VerdictBadge, verdictInfo } from './common';
 
 export type LabTab = 'notebook' | 'coaches' | 'elevator' | 'goals' | 'duos' | 'referees' | 'squads';
 
@@ -162,34 +162,61 @@ export function cards(lab: LabExperiments): Card[] {
 
 const Notebook: React.FC<{ lab: LabExperiments; onOpen: (tab: LabTab) => void }> = ({ lab, onOpen }) => {
   const list = cards(lab);
+  const [filter, setFilter] = useState<Verdict | 'all'>('all');
   const count = (v: Verdict) => list.filter(c => c.verdict === v).length;
+  const shown = filter === 'all' ? list : list.filter(c => c.verdict === filter);
   return (
-    <div className="space-y-5">
-      <p className="text-sm text-slate-400 leading-relaxed max-w-4xl">
-        {list.length} idées testées sur {lab.matches.toLocaleString('fr-FR')} matchs de 35 compétitions : {count('validated')} validées,{' '}
-        {count('partial')} partielles, {count('debunked')} démenties, {count('measured')} mesures. Chaque test est refait à chaque mise à jour des
-        données ; quand il s'agit de prévoir, la validation se fait sur des matchs ou des saisons que le modèle n'a pas vus.
+    <div className="space-y-4">
+      {/* Bilan des verdicts : chaque catégorie a le même poids visuel */}
+      <div className="sv-panel grid grid-cols-2 md:grid-cols-5 divide-x divide-line">
+        <button onClick={() => setFilter('all')} aria-pressed={filter === 'all'}
+          className={`text-left px-4 py-3 transition-colors ${filter === 'all' ? 'bg-raised' : 'hover:bg-raised/50'}`}>
+          <div className="sv-label">Idées testées</div>
+          <div className="text-xl font-semibold text-ink num mt-0.5">{list.length}</div>
+          <div className="text-2xs text-ink-3">{lab.matches.toLocaleString('fr-FR')} matchs, 35 compétitions</div>
+        </button>
+        {VERDICT_ORDER.map(v => {
+          const info = verdictInfo(v);
+          return (
+            <button key={v} onClick={() => setFilter(filter === v ? 'all' : v)} aria-pressed={filter === v} title={info.help}
+              className={`relative text-left px-4 py-3 transition-colors ${filter === v ? 'bg-raised' : 'hover:bg-raised/50'}`}>
+              <span className="absolute left-0 right-0 top-0 h-0.5" style={{ backgroundColor: info.color }} aria-hidden />
+              <VerdictBadge verdict={v} />
+              <div className="text-xl font-semibold text-ink num mt-1">{count(v)}</div>
+              <div className="text-2xs text-ink-3 truncate">{info.help}</div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-ink-3 leading-relaxed max-w-5xl">
+        Chaque test est refait à chaque mise à jour des données ; quand il s'agit de prévoir, la validation se fait sur des matchs ou des saisons
+        que le modèle n'a pas vus. Un verdict résume l'état de la preuve sur ces données, pas une loi : intervalles et tailles d'échantillon sont donnés pour juger.
       </p>
-      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
-        {list.map(c => (
-          <article key={c.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-5 flex flex-col">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] uppercase tracking-wider text-slate-500">{c.theme}</span>
-              <VerdictBadge verdict={c.verdict} />
-            </div>
-            <h3 className="mt-3 text-base font-semibold text-white leading-snug">{c.question}</h3>
-            <div className="mt-4">
-              <div className="text-2xl font-semibold text-white">{c.figure}</div>
-              <div className="text-[11px] text-slate-500 mt-1 leading-snug">{c.caption}</div>
-            </div>
-            <p className="mt-3 text-sm text-slate-400 leading-relaxed flex-1">{c.text}</p>
-            {c.tab && (
-              <button onClick={() => onOpen(c.tab!)} className="mt-4 self-start inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300">
-                Explorer <ArrowUpRight className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </article>
-        ))}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3">
+        {shown.map(c => {
+          const info = verdictInfo(c.verdict);
+          return (
+            <article key={c.id} className="sv-panel relative overflow-hidden p-4 flex flex-col">
+              <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ backgroundColor: info.color }} aria-hidden />
+              <div className="flex items-center justify-between gap-3">
+                <span className="sv-label">{c.theme}</span>
+                <VerdictBadge verdict={c.verdict} size="md" />
+              </div>
+              <h3 className="mt-2 text-[15px] font-semibold text-ink leading-snug">{c.question}</h3>
+              <div className="mt-3 flex items-baseline gap-3">
+                <div className="text-xl font-semibold text-ink num whitespace-nowrap">{c.figure}</div>
+              </div>
+              <div className="text-2xs text-ink-3 mt-0.5 leading-snug">{c.caption}</div>
+              <p className="mt-2.5 text-[13px] text-ink-2 leading-relaxed flex-1">{c.text}</p>
+              {c.tab && (
+                <button onClick={() => onOpen(c.tab!)} className="mt-3 self-start sv-btn sv-btn-ghost sv-btn-sm -ml-2 !text-accent">
+                  Explorer <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </article>
+          );
+        })}
       </div>
     </div>
   );

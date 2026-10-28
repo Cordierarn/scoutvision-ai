@@ -373,7 +373,8 @@ class DataLoader {
     const key = `${season}/${competition}`;
     let pending = this.shots.get(key);
     if (!pending) {
-      pending = fetchJSON<Columnar>(`/data/shots/${key}.json`).then(data => expand<ShotEvent>(data));
+      // Fichier absent : la compétition n'a pas de tirs (liste vide), à distinguer d'un échec réseau
+      pending = fetchOptionalJSON<Columnar>(`/data/shots/${key}.json`).then(data => (data ? expand<ShotEvent>(data) : []));
       pending.catch(() => this.shots.delete(key));
       this.shots.set(key, pending);
     }
