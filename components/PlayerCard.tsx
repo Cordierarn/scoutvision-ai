@@ -9,7 +9,7 @@ import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsi
 import { dataLoader } from '../services/dataLoader';
 import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
-import { generateScoutReport, ScoutReportError } from '../services/scoutReportService';
+import { generateScoutReport, reportFooterLabel, ScoutReportError, ScoutReportMeta } from '../services/scoutReportService';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
 import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
@@ -69,6 +69,7 @@ const COMPARISON_SHORT_LABELS: Record<ComparisonMode, string> = {
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) => {
   const [report, setReport] = useState<string | null>(null);
+  const [reportMeta, setReportMeta] = useState<ScoutReportMeta | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('position');
@@ -88,6 +89,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   // Rapport propre au joueur affiché
   useEffect(() => {
     setReport(null);
+    setReportMeta(null);
     setReportError(null);
   }, [player]);
 
@@ -303,7 +305,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
         Object.entries(player)
           .filter(([key, value]) => key.endsWith(' pct') && typeof value === 'number')
           .map(([key, value]) => [key.slice(0, -4), value as number]));
-      const text = await generateScoutReport(player, {
+      const result = await generateScoutReport(player, {
         language: 'fr',
         percentileProfile: { player, percentiles, zScores: {}, averages: {} },
         bestRoles: bestRoles.map(r => ({ role: r.name, normalizedScore: r.index })),
@@ -315,8 +317,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           avgXG: reportShots.length > 0 ? reportXG / reportShots.length : 0,
         } : undefined,
         insights: buildReportInsights(player, curves, developmentMetrics),
+        seasonInProgress,
       });
-      setReport(text);
+      setReport(result.report);
+      setReportMeta(result.meta);
     } catch (error) {
       setReportError(error instanceof ScoutReportError ? error.message : 'Le rapport n\'a pas pu être généré. Réessayez.');
     } finally {
@@ -789,8 +793,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 {report}
               </ReactMarkdown>
               <div className="mt-4 pt-3 border-t border-line flex items-center justify-between text-2xs text-ink-4">
-                <span>Généré par Gemini 2.5 Flash</span>
-                <span>{new Date().toLocaleDateString('fr-FR')}</span>
+                <span>{reportFooterLabel(reportMeta)}</span>
+                <span>{new Date(reportMeta?.generatedAt ?? Date.now()).toLocaleDateString('fr-FR')}</span>
               </div>
             </div>
           ) : loadingReport ? (

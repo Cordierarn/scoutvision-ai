@@ -29,8 +29,8 @@ export default defineConfig(({ mode }) => {
       preview: {
         proxy: { '/cdn': cdnProxy },
       },
-      // POST /api/scout-report : rapport Gemini, clé gardée côté serveur (server/)
-      plugins: [react(), scoutReportApi(env.GEMINI_API_KEY || undefined)],
+      // POST /api/scout-report : rapport Gemini, clé et modèle (GEMINI_MODEL) gardés côté serveur (server/)
+      plugins: [react(), scoutReportApi(env.GEMINI_API_KEY || undefined, env.GEMINI_MODEL || undefined)],
       publicDir: 'public',
       resolve: {
         alias: {

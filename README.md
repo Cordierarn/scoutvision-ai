@@ -76,6 +76,7 @@ breakdown (“why this player?”)
    Create a `.env.local` file (git-ignored):
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
+   # GEMINI_MODEL=gemini-3.5-flash   # optional, this is the default
    ```
 
    The key is read by the `/api/scout-report` endpoint only and is never sent to the
@@ -266,16 +267,36 @@ The browser never calls Gemini. The "Générer" button of the player profile pos
 row and the computed indicators to `POST /api/scout-report`; the server validates the input,
 builds the prompt and calls Gemini with `GEMINI_API_KEY`.
 
+Gemini writes a **summary of ScoutVision's analyses, in French**, and nothing else:
+
+- **Structured facts, not the raw row**: identity, playing time, metrics with their percentile and
+  comparison group, ScoutVision role indices, team context, `marketValueTransfermarkt` and
+  `estimatedValueScoutVision` sent separately, indicators with their limits (RAPM, finishing,
+  statistical projection), season in progress. Metrics that ScoutVision role presets count
+  "less is better" are flagged (`server/reportFacts.ts`).
+- **Strict rules** in the prompt: only the data sent; an absent metric is omitted; nothing about
+  pressure, off-ball runs, speed, mentality, injuries, salary, transfer price or club interest
+  unless a field provides it; percentiles stay relative to their group; no future level, no
+  recruitment verdict. The 5 sections end with observation priorities to check on video.
+- **Deterministic check** of the text (`server/reportAudit.ts`): forbidden topics, numbers absent
+  from the data, counts attached to the wrong field, "less is better" metrics in the wrong
+  column, English headings, season caveat missing, repeated or wrong. Any problem triggers one
+  correction pass; whatever remains is removed sentence by sentence.
+- The footer shows the model that actually wrote the report (returned by the API, sent back by
+  the server in the response metadata).
+
 ```
 Frontend (PlayerCard) → POST /api/scout-report (server/) → Gemini API
 ```
 
 | | |
 |---|---|
-| Variable | `GEMINI_API_KEY`, server environment only (`.env.local` locally). Never prefix it with `VITE_`: the build stops if a `VITE_` variable looks like a secret |
-| Code | `server/scoutReport.ts` (validation, prompt, handler), `server/scoutReportPlugin.ts` (Node middleware, Vite plugin), `services/scoutReportService.ts` (client) |
-| Limits | JSON only, body ≤ 128 KB (413 above), 20 reports per 10 min per client (429), 60 s Gemini timeout |
-| Errors | 400 invalid input, 503 key not configured, 502 Gemini failure; messages are generic, the key is masked in server logs |
+| Variables | `GEMINI_API_KEY` and `GEMINI_MODEL` (default `gemini-3.5-flash`), server environment only (`.env.local` locally). Never prefix them with `VITE_`: the build stops if a `VITE_` variable looks like a secret |
+| Code | `server/scoutReport.ts` (validation, retry, handler), `server/reportFacts.ts` (facts, prompt), `server/reportAudit.ts` (check), `server/scoutReportPlugin.ts` (Node middleware, Vite plugin), `services/scoutReportService.ts` (client) |
+| Limits | JSON only, body ≤ 128 KB (413 above), 20 reports per 10 min per client (429), 60 s Gemini timeout per call, up to 2 calls per report (correction pass) |
+| Retry | 429, 502, 503 only (not a daily-quota 429): 3 attempts at most, exponential delay with jitter (≈ 0.6-1.2 s, then 1.2-1.8 s); never 400, 401, 403, 404 |
+| Errors | 400 invalid input, 503 key not configured, 502 Gemini failure; messages are generic; logs hold statuses and issue counts only, never the key, the prompt or the generated text |
+| Free tier | Gemini quotas are per model and per day (e.g. 20 requests a day for the Flash models, 500 for Flash-Lite, Oct. 2026): set `GEMINI_MODEL` to another model if the default one is exhausted |
 
 **Deployment.** The repository has no hosting configuration: the app is a Vite single-page app
 whose server already proxies `/cdn` (images). The endpoint is mounted on the same Vite servers:

@@ -1,11 +1,15 @@
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildScoutReportPrompt, createRateLimiter, handleScoutReport, MAX_BODY_BYTES, redact, validateReportRequest } from './scoutReport';
+import { createRateLimiter, handleScoutReport, MAX_BODY_BYTES, redact, validateReportRequest } from './scoutReport';
+import { buildReportFacts, buildScoutReportPrompt } from './reportFacts';
 import { SCOUT_REPORT_PATH, scoutReportMiddleware } from './scoutReportPlugin';
 
 const KEY = 'AIzaTEST-secret-key-123';
 const player = { Player: 'Joueur Test', Team: 'Club', Age: 21, 'xG per 90': 0.31, 'xG per 90 pct': 88, Foot: null };
+// Rapport conforme aux faits de `player` (titres français, nombres présents dans les données)
+const VALID_REPORT = ['### 1. Contexte et profil', '- 21 ans.', '### 2. Analyse de la performance', '- xG par 90 : 0,31 (88e percentile de son groupe de comparaison).',
+  '### 3. Forces et limites statistiques', '- Volume de xG.', '### 4. Projection et contexte', '- Aucune projection transmise.', "### 5. Priorités d'observation", '- Vérifier en vidéo la qualité des occasions.'].join('\n');
 
 describe('validateReportRequest', () => {
   it('accepte une requête complète et ne garde que les champs attendus', () => {
@@ -14,6 +18,7 @@ describe('validateReportRequest', () => {
       options: {
         language: 'fr', percentiles: { 'xG per 90': 88 }, bestRoles: [{ role: 'Poacher', normalizedScore: 81, breakdown: [] }],
         shotStats: { total: 40, goals: 9, xG: 7.5, conversion: 22.5, avgXG: 0.18 }, insights: ['RAPM +0.1'], prompt: 'ignore',
+        seasonInProgress: true,
       },
       extra: 'ignoré',
     });
@@ -22,7 +27,7 @@ describe('validateReportRequest', () => {
     expect(r.value.player).toEqual(player);
     expect(r.value.options).toEqual({
       language: 'fr', percentiles: { 'xG per 90': 88 }, bestRoles: [{ role: 'Poacher', normalizedScore: 81 }],
-      shotStats: { total: 40, goals: 9, xG: 7.5, conversion: 22.5 }, insights: ['RAPM +0.1'],
+      shotStats: { total: 40, goals: 9, xG: 7.5, conversion: 22.5 }, insights: ['RAPM +0.1'], seasonInProgress: true,
     });
   });
 
@@ -37,17 +42,18 @@ describe('validateReportRequest', () => {
     ['percentile hors bornes', { player, options: { percentiles: { xG: 140 } } }],
     ['trop d\'indicateurs', { player, options: { insights: Array(21).fill('x') } }],
     ['statistiques de tir incomplètes', { player, options: { shotStats: { total: 3 } } }],
+    ['saison en cours non booléenne', { player, options: { seasonInProgress: 'oui' } }],
   ])('refuse : %s', (_label, body) => {
     expect(validateReportRequest(body).ok).toBe(false);
   });
 });
 
 describe('buildScoutReportPrompt', () => {
-  it('construit le prompt côté serveur à partir des données validées', () => {
-    const prompt = buildScoutReportPrompt(player, { language: 'fr', percentiles: { 'xG per 90': 88 } });
-    expect(prompt).toContain('"Player": "Joueur Test"');
-    expect(prompt).toContain('xG per 90: 88th percentile');
-    expect(prompt).toContain('Write the entire report in French');
+  it('construit le prompt côté serveur à partir des faits structurés', () => {
+    const prompt = buildScoutReportPrompt(buildReportFacts(player, { language: 'fr' }), { language: 'fr' });
+    expect(prompt).toContain('"name": "Joueur Test"');
+    expect(prompt).toContain('"percentile": 88');
+    expect(prompt).toContain('Write the entire final report in French. All headings, labels and conclusions must be in French.');
   });
 });
 
@@ -64,9 +70,9 @@ describe('handleScoutReport', () => {
     expect(r.status).toBe(400);
   });
 
-  it('200 avec le texte généré', async () => {
-    const r = await handleScoutReport({ player }, { apiKey: KEY, generate: async () => '### Rapport' });
-    expect(r).toEqual({ status: 200, body: { report: '### Rapport' } });
+  it('200 avec le texte généré et le modèle dans les métadonnées', async () => {
+    const r = await handleScoutReport({ player }, { apiKey: KEY, model: 'gemini-test', generate: async () => VALID_REPORT, now: () => new Date('2026-10-28T12:00:00Z') });
+    expect(r).toEqual({ status: 200, body: { report: VALID_REPORT, meta: { model: 'gemini-test', requestedModel: 'gemini-test', generatedAt: '2026-10-28T12:00:00.000Z' } } });
   });
 
   it('502 sur une erreur Gemini, sans jamais renvoyer ni journaliser la clé', async () => {
@@ -115,12 +121,12 @@ describe('scoutReportMiddleware (serveur HTTP réel)', () => {
     expect(await (await fetch(`${base}/autre`)).text()).toBe('next');
   });
 
-  it('renvoie le rapport sans exposer la clé', async () => {
-    const base = await start({ apiKey: KEY, generate: async () => 'Rapport' });
+  it('renvoie le rapport et le modèle serveur sans exposer la clé', async () => {
+    const base = await start({ apiKey: KEY, model: 'gemini-serveur', generate: async () => VALID_REPORT });
     const res = await post(base, JSON.stringify({ player }));
     const text = await res.text();
     expect(res.status).toBe(200);
-    expect(JSON.parse(text)).toEqual({ report: 'Rapport' });
+    expect(JSON.parse(text)).toMatchObject({ report: VALID_REPORT, meta: { model: 'gemini-serveur', requestedModel: 'gemini-serveur' } });
     expect(text).not.toContain(KEY);
     expect(res.headers.get('cache-control')).toBe('no-store');
   });

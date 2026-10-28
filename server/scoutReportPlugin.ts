@@ -4,12 +4,13 @@
  * Middleware Node (signature connect : req, res, next) branché sur les serveurs Vite
  * de développement et de prévisualisation, comme le proxy /cdn. Il peut aussi être
  * monté tel quel sur un serveur Node (http, Express, Connect) en production.
- * GEMINI_API_KEY est lue dans l'environnement du serveur et n'est jamais envoyée au navigateur.
+ * GEMINI_API_KEY et GEMINI_MODEL sont lues dans l'environnement du serveur ; la clé n'est jamais
+ * envoyée au navigateur, qui ne reçoit que le nom du modèle ayant rédigé le rapport.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { GEMINI_MODEL, MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport } from './scoutReport';
+import { MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport, resolveGeminiModel } from './scoutReport';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
 
@@ -62,9 +63,10 @@ export function readBody(req: IncomingMessage, limit: number): Promise<string> {
 }
 
 /**
- * Appel Gemini (SDK chargé à la demande, côté serveur uniquement), borné dans le temps
+ * Appel Gemini (SDK chargé à la demande, côté serveur uniquement), borné dans le temps.
+ * Renvoie aussi le modèle qui a réellement répondu (modelVersion), qui peut différer du modèle demandé.
  */
-export function geminiGenerator(apiKey: string): GenerateText {
+export function geminiGenerator(apiKey: string, model: string): GenerateText {
   return async prompt => {
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
@@ -73,8 +75,8 @@ export function geminiGenerator(apiKey: string): GenerateText {
       timer = setTimeout(() => reject(new Error('délai dépassé')), GEMINI_TIMEOUT_MS);
     });
     try {
-      const response = await Promise.race([ai.models.generateContent({ model: GEMINI_MODEL, contents: prompt }), timeout]);
-      return response.text ?? '';
+      const response = await Promise.race([ai.models.generateContent({ model, contents: prompt }), timeout]);
+      return { text: response.text ?? '', modelVersion: response.modelVersion };
     } finally {
       clearTimeout(timer);
     }
@@ -83,6 +85,7 @@ export function geminiGenerator(apiKey: string): GenerateText {
 
 export interface ScoutReportMiddlewareOptions {
   apiKey: string | undefined;
+  model?: string;                          // GEMINI_MODEL ; modèle par défaut si absente
   generate?: GenerateText;                 // remplaçable dans les tests
   rateLimit?: { limit: number; windowMs: number };
   log?: (message: string) => void;
@@ -93,7 +96,8 @@ export interface ScoutReportMiddlewareOptions {
  */
 export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   const { apiKey, log = message => console.warn(message) } = options;
-  const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey) : async () => '');
+  const model = resolveGeminiModel(options.model);
+  const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey, model) : async () => '');
   const allow = createRateLimiter(options.rateLimit?.limit ?? RATE_LIMIT, options.rateLimit?.windowMs ?? RATE_WINDOW_MS);
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
@@ -122,7 +126,7 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
       return sendJson(res, 400, { error: 'JSON invalide.' });
     }
 
-    const result = await handleScoutReport(body, { apiKey, generate, log });
+    const result = await handleScoutReport(body, { apiKey, model, generate, log });
     sendJson(res, result.status, result.body);
   };
 }
@@ -130,14 +134,14 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
 /**
  * Plugin Vite : l'endpoint sur `vite` (développement) et `vite preview` (build de production)
  */
-export function scoutReportApi(apiKey: string | undefined): Plugin {
+export function scoutReportApi(apiKey: string | undefined, model?: string): Plugin {
   return {
     name: 'scoutvision-scout-report-api',
     configureServer(server) {
-      server.middlewares.use(scoutReportMiddleware({ apiKey }));
+      server.middlewares.use(scoutReportMiddleware({ apiKey, model }));
     },
     configurePreviewServer(server) {
-      server.middlewares.use(scoutReportMiddleware({ apiKey }));
+      server.middlewares.use(scoutReportMiddleware({ apiKey, model }));
     },
   };
 }

@@ -19,7 +19,29 @@ export interface ScoutReportOptions {
   percentileProfile?: PlayerPercentileProfile;
   bestRoles?: { role: string; normalizedScore: number }[];   // rôles officiels (rolePresets) et indice
   shotStats?: ShotStats;
-  insights?: string[];          // indicateurs avancés déjà formulés (RAPM, finition, valeur...)
+  insights?: string[];          // indicateurs avancés déjà formulés (RAPM, finition, projection...)
+  seasonInProgress?: boolean;   // saison non terminée à la date des données (échantillon partiel)
+}
+
+/**
+ * Métadonnées de génération renvoyées par le serveur
+ */
+export interface ScoutReportMeta {
+  model: string;                // modèle qui a réellement rédigé le rapport
+  requestedModel: string;       // modèle configuré côté serveur (GEMINI_MODEL)
+  generatedAt: string;
+}
+
+export interface ScoutReportResult {
+  report: string;
+  meta: ScoutReportMeta | null;
+}
+
+/**
+ * Pied du rapport : le modèle réellement utilisé, tel que renvoyé par le serveur
+ */
+export function reportFooterLabel(meta: ScoutReportMeta | null): string {
+  return meta?.model ? `Généré par ${meta.model}` : 'Généré par IA';
 }
 
 /**
@@ -35,7 +57,7 @@ export class ScoutReportError extends Error {
 /**
  * Cache pour les rapports générés
  */
-const reportCache = new Map<string, { report: string; timestamp: number }>();
+const reportCache = new Map<string, { result: ScoutReportResult; timestamp: number }>();
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
 const getCacheKey = (player: PlayerData): string => `${player.Player}_${player.Team}_${player.League}`;
@@ -60,6 +82,7 @@ export function buildReportRequest(player: PlayerData, options: ScoutReportOptio
         conversion: options.shotStats.conversion,
       },
       insights: options.insights,
+      seasonInProgress: options.seasonInProgress,
     },
   };
 }
@@ -67,11 +90,11 @@ export function buildReportRequest(player: PlayerData, options: ScoutReportOptio
 /**
  * Génère un rapport de scouting via le serveur ; lève ScoutReportError en cas d'échec
  */
-export async function generateScoutReport(player: PlayerData, options?: ScoutReportOptions): Promise<string> {
+export async function generateScoutReport(player: PlayerData, options?: ScoutReportOptions): Promise<ScoutReportResult> {
   const cacheKey = getCacheKey(player);
   const cached = reportCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.report;
+    return cached.result;
   }
 
   let response: Response;
@@ -85,7 +108,7 @@ export async function generateScoutReport(player: PlayerData, options?: ScoutRep
     throw new ScoutReportError('Serveur de rapports injoignable. Vérifiez votre connexion et réessayez.');
   }
 
-  const payload = await response.json().catch(() => null) as { report?: string; error?: string } | null;
+  const payload = await response.json().catch(() => null) as { report?: string; meta?: Partial<ScoutReportMeta>; error?: string } | null;
   if (!response.ok || typeof payload?.report !== 'string') {
     throw new ScoutReportError(
       payload?.error ?? (response.status === 404
@@ -95,6 +118,11 @@ export async function generateScoutReport(player: PlayerData, options?: ScoutRep
     );
   }
 
-  reportCache.set(cacheKey, { report: payload.report, timestamp: Date.now() });
-  return payload.report;
+  const m = payload.meta;
+  const meta = m && typeof m.model === 'string' && m.model
+    ? { model: m.model, requestedModel: typeof m.requestedModel === 'string' ? m.requestedModel : m.model, generatedAt: typeof m.generatedAt === 'string' ? m.generatedAt : new Date().toISOString() }
+    : null;
+  const result = { report: payload.report, meta };
+  reportCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
 }

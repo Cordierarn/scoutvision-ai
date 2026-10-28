@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildReportRequest, generateScoutReport, ScoutReportError, SCOUT_REPORT_ENDPOINT } from './scoutReportService';
+import { buildReportRequest, generateScoutReport, reportFooterLabel, ScoutReportError, SCOUT_REPORT_ENDPOINT } from './scoutReportService';
 
 const player = { Player: 'Joueur Service', Team: 'Club', League: 'Ligue 2025-26', Position: 'ST', 'Matches played': 10, 'Minutes played': 900 };
 
@@ -21,10 +21,14 @@ describe('buildReportRequest', () => {
 });
 
 describe('generateScoutReport', () => {
-  it('appelle l\'endpoint serveur en POST JSON et renvoie le rapport', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ report: 'OK' }), { status: 200 }));
+  it('appelle l\'endpoint serveur en POST JSON et renvoie le rapport avec le modèle utilisé', async () => {
+    const meta = { model: 'gemini-3.6-flash', requestedModel: 'gemini-3.5-flash', generatedAt: '2026-10-28T12:00:00.000Z' };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ report: 'OK', meta }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(generateScoutReport({ ...player, Player: 'Succès' })).resolves.toBe('OK');
+    const result = await generateScoutReport({ ...player, Player: 'Succès' }, { seasonInProgress: true });
+    expect(result).toEqual({ report: 'OK', meta });
+    expect(reportFooterLabel(result.meta)).toBe('Généré par gemini-3.6-flash');
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)).options.seasonInProgress).toBe(true);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(SCOUT_REPORT_ENDPOINT);
     expect(init.method).toBe('POST');
@@ -39,5 +43,12 @@ describe('generateScoutReport', () => {
   it('lève une ScoutReportError si le serveur est injoignable', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network'); }));
     await expect(generateScoutReport({ ...player, Player: 'Réseau' })).rejects.toBeInstanceOf(ScoutReportError);
+  });
+
+  it('sans métadonnées du serveur, le pied du rapport ne prétend aucun modèle', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ report: 'OK' }), { status: 200 })));
+    const result = await generateScoutReport({ ...player, Player: 'Sans meta' });
+    expect(result.meta).toBeNull();
+    expect(reportFooterLabel(result.meta)).toBe('Généré par IA');
   });
 });

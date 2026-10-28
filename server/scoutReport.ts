@@ -8,6 +8,9 @@
  * Vite (server/scoutReportPlugin.ts) et peut l'être sur n'importe quel serveur Node.
  */
 
+import { auditReport, sanitizeReport } from './reportAudit';
+import { buildCorrectionPrompt, buildReportFacts, buildScoutReportPrompt, PlayerRow, ReportOptions } from './reportFacts';
+
 // ============================================
 // LIMITES
 // ============================================
@@ -25,24 +28,20 @@ const LANGUAGES = ['en', 'fr', 'es', 'de'] as const;
 const DETAIL_LEVELS = ['brief', 'standard', 'detailed'] as const;
 const FOCUS_AREAS = ['attacking', 'defending', 'physical', 'mental'] as const;
 
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+// Modèle par défaut si GEMINI_MODEL n'est pas définie dans l'environnement du serveur
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+
+/** Modèle configuré côté serveur (GEMINI_MODEL), ou le modèle par défaut */
+export function resolveGeminiModel(configured: string | undefined): string {
+  const model = configured?.trim();
+  return model ? model : DEFAULT_GEMINI_MODEL;
+}
 
 // ============================================
 // TYPES
 // ============================================
 
-export type PlayerRow = Record<string, string | number | boolean | null>;
-
-export interface ReportOptions {
-  language?: typeof LANGUAGES[number];
-  detailLevel?: typeof DETAIL_LEVELS[number];
-  focusAreas?: typeof FOCUS_AREAS[number][];
-  targetRole?: string;
-  percentiles?: Record<string, number>;           // percentiles par rôle (0-100)
-  bestRoles?: { role: string; normalizedScore: number }[];
-  shotStats?: { total: number; goals: number; xG: number; conversion: number };
-  insights?: string[];
-}
+export type { PlayerRow, ReportOptions };
 
 export interface ReportRequest {
   player: PlayerRow;
@@ -133,147 +132,140 @@ export function validateReportRequest(body: unknown): Validation {
     }
     clean.insights = options.insights as string[];
   }
+  if (options.seasonInProgress !== undefined) {
+    if (typeof options.seasonInProgress !== 'boolean') return fail('Contexte de saison invalide.');
+    clean.seasonInProgress = options.seasonInProgress;
+  }
 
   return { ok: true, value: { player: cleanPlayer, options: clean } };
-}
-
-// ============================================
-// PROMPT
-// ============================================
-
-/**
- * Prompt du rapport de scouting (repris tel quel de l'ancien service côté client)
- */
-export function buildScoutReportPrompt(player: PlayerRow, options: ReportOptions = {}): string {
-  const statsJSON = JSON.stringify(player, null, 2);
-  const language = options.language || 'en';
-  const detailLevel = options.detailLevel || 'standard';
-
-  let additionalContext = '';
-
-  if (options.percentiles) {
-    const topPercentiles = Object.entries(options.percentiles)
-      .filter(([_, p]) => p >= 75)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([metric, percentile]) => `${metric}: ${percentile}th percentile`)
-      .join(', ');
-
-    const bottomPercentiles = Object.entries(options.percentiles)
-      .filter(([_, p]) => p <= 25)
-      .sort((a, b) => a[1] - b[1])
-      .slice(0, 5)
-      .map(([metric, percentile]) => `${metric}: ${percentile}th percentile`)
-      .join(', ');
-
-    if (topPercentiles) {
-      additionalContext += `\n**Top Percentile Metrics:** ${topPercentiles}`;
-    }
-    if (bottomPercentiles) {
-      additionalContext += `\n**Bottom Percentile Metrics:** ${bottomPercentiles}`;
-    }
-  }
-
-  if (options.bestRoles && options.bestRoles.length > 0) {
-    const rolesStr = options.bestRoles
-      .map(r => `${r.role} (${r.normalizedScore}/100)`)
-      .join(', ');
-    additionalContext += `\n**Best Suited Roles:** ${rolesStr}`;
-  }
-
-  if (options.shotStats) {
-    const stats = options.shotStats;
-    additionalContext += `\n**Shooting Profile:** ${stats.total} shots, ${stats.goals} goals, ${stats.xG.toFixed(2)} xG (${stats.conversion.toFixed(1)}% conversion)`;
-  }
-
-  if (options.insights && options.insights.length > 0) {
-    additionalContext += `\n**Advanced Indicators:**\n${options.insights.map(line => `- ${line}`).join('\n')}`;
-  }
-
-  const languageInstruction = language !== 'en'
-    ? `\n**IMPORTANT:** Write the entire report in ${language === 'fr' ? 'French' : language === 'es' ? 'Spanish' : 'German'}.`
-    : '';
-
-  const wordLimit = detailLevel === 'brief' ? 250 : detailLevel === 'detailed' ? 600 : 400;
-
-  return `
-You are a Chief Scout for a top European football club.
-Your task is to write a **Professional Data Scouting Report** based on the aggregated season statistics provided below.
-${languageInstruction}
-
-**Player Data (JSON):**
-${statsJSON}
-${additionalContext}
-
----
-
-**INSTRUCTIONS:**
-Follow the strict structure below based on professional scouting standards.
-**Reading the data:** Per-90 values are shrunk toward the role average when minutes are low. Fields ending in " pct" are percentiles (0-100) among players of the same role and the same competition level. Use the Advanced Indicators with their stated caveats: a low-reliability RAPM, a small shot sample or a model value estimate are hints, not facts. The "Rating" field is a match-rating average that over-weights attacking actions; do not base the verdict on it.
-**Crucial:** Do not use vague, subjective terms (e.g., "good technique", "nice passing", "composed").
-Instead, use **Football Action Language**: clear, specific observations derived from the data (e.g., "Progresses play via high-volume dribbling," "Effective in aerial duels but passive in ground challenges").
-
-**REPORT STRUCTURE:**
-
-### 1. Context & Profile
-*   **Context**: List League, Team, Age, Position, and Matches/Minutes Played.
-*   **Tactical Role**: Infer the player's specific tactical role based on the stats (e.g., "Ball-Playing Defender," "Box-to-Box Destroyer," "Inverted Winger").
-*   **Physical Profile**: Height and preferred foot when available.
-
-### 2. Performance Analysis
-*Analyze the data to infer on-pitch behavior. Use specific action language.*
-*   **In Possession**: Analyze passing style (volume vs risk), progression (xG/xA contribution), and ball retention.
-*   **Out of Possession**: Analyze defensive positioning, engagement (duels per 90), and success rates.
-*   **Transitions & Mentality**: Infer work rate and decision-making from efficiency metrics and activity levels.
-
-### 3. Strengths & Areas to Improve
-*Separate scalable traits from limiters.*
-*   **Key Strengths**: Specific qualities that stand out and could scale to a higher level (e.g., "Elite progressive passing volume").
-*   **Areas to Improve**: Clear tactical or technical limiters (e.g., "Low aerial win rate (30%) exposes him against direct teams").
-
-### 4. Player Ratings
-*   **Current Level**: [Tier Rating] (e.g., "Starter for current league", "Rotation option").
-*   **Potential Level**: [Tier Rating] (e.g., "Top 5 League Starter", "Elite Prospect").
-*   *Provide a brief justification for the ratings.*
-
-### 5. Final Recommendation
-*   **Verdict**: Choose ONE: [PRIORITY SIGNING | SCOUT FURTHER | PASS]
-*   **Reasoning**: A concise, decisive conclusion on whether the player fits a professional system and the risk factor.
-
----
-**Format:** Use Markdown with clear bold headers. Keep the tone objective, professional, and concise (max ${wordLimit} words).
-`;
 }
 
 // ============================================
 // HANDLER
 // ============================================
 
-export type GenerateText = (prompt: string) => Promise<string>;
+/** Texte généré et modèle ayant réellement répondu (renvoyé par l'API quand elle le donne) */
+export interface Generation { text: string; modelVersion?: string }
+export type GenerateText = (prompt: string) => Promise<Generation | string>;
+
+/** Métadonnées renvoyées au navigateur avec le rapport */
+export interface ReportMeta {
+  model: string;               // modèle qui a réellement rédigé le rapport
+  requestedModel: string;      // modèle configuré côté serveur (GEMINI_MODEL)
+  generatedAt: string;
+}
 
 export interface HandlerResult {
   status: number;
-  body: { report: string } | { error: string };
+  body: { report: string; meta: ReportMeta } | { error: string };
+}
+
+// ============================================
+// ERREURS TRANSITOIRES
+// ============================================
+
+// Seuls ces statuts sont relancés (surcharge, quota par minute, passerelle) ; jamais 400, 401, 403, 404,
+// ni un 429 de quota journalier
+const TRANSIENT_STATUSES = new Set([429, 502, 503]);
+export const MAX_ATTEMPTS = 3;
+const RETRY_BASE_MS = 600;
+
+/** Statut HTTP d'une erreur du SDK Gemini (propriété `status`, ou code cité dans le message) */
+export function errorStatus(error: unknown): number | undefined {
+  const status = (error as { status?: unknown })?.status;
+  if (typeof status === 'number') return status;
+  const message = error instanceof Error ? error.message : String(error);
+  const code = message.match(/"code"\s*:\s*(\d{3})/) ?? message.match(/^\s*(\d{3})\b/);
+  return code ? Number(code[1]) : undefined;
+}
+
+/** 429 dû au quota journalier (PerDay) : inutile de relancer avant le lendemain */
+function dailyQuota(error: unknown): boolean {
+  return /PerDay/.test(error instanceof Error ? error.message : String(error));
+}
+
+export interface RetryDeps {
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+  log?: (message: string) => void;
+}
+
+/**
+ * Appel avec au plus MAX_ATTEMPTS tentatives sur 429, 502 et 503 ; délai exponentiel court
+ * avec gigue (≈ 0,6-1,2 s puis 1,2-1,8 s). Toute autre erreur est remontée immédiatement.
+ */
+export async function generateWithRetry(generate: GenerateText, prompt: string, deps: RetryDeps = {}): Promise<Generation> {
+  const sleep = deps.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const random = deps.random ?? Math.random;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const out = await generate(prompt);
+      return typeof out === 'string' ? { text: out } : out;
+    } catch (error) {
+      const status = errorStatus(error);
+      if (attempt >= MAX_ATTEMPTS || status === undefined || !TRANSIENT_STATUSES.has(status) || dailyQuota(error)) throw error;
+      deps.log?.(`[scout-report] Gemini ${status}, tentative ${attempt + 1}/${MAX_ATTEMPTS}`);
+      await sleep(RETRY_BASE_MS * 2 ** (attempt - 1) + random() * RETRY_BASE_MS);
+    }
+  }
+}
+
+// ============================================
+// HANDLER
+// ============================================
+
+export interface HandlerDeps extends RetryDeps {
+  apiKey: string | undefined;
+  model?: string;              // GEMINI_MODEL (défaut : DEFAULT_GEMINI_MODEL)
+  generate: GenerateText;
+  now?: () => Date;
 }
 
 /**
  * Traite une requête déjà lue et décodée. `generate` appelle Gemini (injecté : testable sans réseau).
+ * Le rapport est contrôlé (reportAudit) : en cas d'écart vérifiable, une passe de correction,
+ * puis retrait des phrases encore fautives. Les journaux ne contiennent ni la clé, ni le prompt,
+ * ni le texte généré : seulement des statuts et des nombres de problèmes.
  * Les messages d'erreur renvoyés au client sont génériques : ni clé, ni détail de l'API.
  */
-export async function handleScoutReport(
-  body: unknown,
-  deps: { apiKey: string | undefined; generate: GenerateText; log?: (message: string) => void },
-): Promise<HandlerResult> {
+export async function handleScoutReport(body: unknown, deps: HandlerDeps): Promise<HandlerResult> {
   if (!deps.apiKey) {
     return { status: 503, body: { error: 'Rapports IA indisponibles : GEMINI_API_KEY n\'est pas configurée sur le serveur.' } };
   }
   const parsed = validateReportRequest(body);
   if ('error' in parsed) return { status: 400, body: { error: parsed.error } };
 
+  const { player, options } = parsed.value;
+  const language = options.language ?? 'fr';
+  const requestedModel = resolveGeminiModel(deps.model);
+  const facts = buildReportFacts(player, options);
+  const prompt = buildScoutReportPrompt(facts, options);
+
   try {
-    const text = await deps.generate(buildScoutReportPrompt(parsed.value.player, parsed.value.options));
-    if (!text.trim()) return { status: 502, body: { error: 'Le modèle n\'a renvoyé aucun texte. Réessayez.' } };
-    return { status: 200, body: { report: text } };
+    let generation = await generateWithRetry(deps.generate, prompt, deps);
+    if (!generation.text.trim()) return { status: 502, body: { error: 'Le modèle n\'a renvoyé aucun texte. Réessayez.' } };
+
+    let issues = auditReport(generation.text, facts, language);
+    if (issues.length > 0) {
+      deps.log?.(`[scout-report] passe de correction : ${issues.length} problème(s) (${[...new Set(issues.map(i => i.kind))].join(', ')})`);
+      const corrected = await generateWithRetry(deps.generate, buildCorrectionPrompt(prompt, generation.text, issues.map(i => i.rule)), deps);
+      if (corrected.text.trim()) {
+        generation = corrected;
+        issues = auditReport(generation.text, facts, language);
+      }
+    }
+    let report = generation.text;
+    if (issues.length > 0) {
+      deps.log?.(`[scout-report] phrases retirées après correction : ${issues.length} problème(s) (${[...new Set(issues.map(i => i.kind))].join(', ')})`);
+      report = sanitizeReport(report, facts, issues);
+    }
+
+    const meta: ReportMeta = {
+      model: generation.modelVersion?.trim() || requestedModel,
+      requestedModel,
+      generatedAt: (deps.now?.() ?? new Date()).toISOString(),
+    };
+    return { status: 200, body: { report, meta } };
   } catch (error) {
     deps.log?.(`[scout-report] échec de l'appel Gemini : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey)}`);
     return { status: 502, body: { error: 'Le service de génération est indisponible pour le moment. Réessayez dans quelques instants.' } };
