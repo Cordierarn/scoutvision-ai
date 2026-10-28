@@ -23,7 +23,7 @@ A modern, data-driven scouting application for football analytics with AI-powere
 - 💎 **Gem Hunter (Prospects)** - Scout prospects with 27 percentile-based role presets
 - ⚽ **Team Analysis** - Squad depth, tactical profiles, shot maps and recruitment
 - 🧩 **Data-driven recruitment** - Team needs by position, squad profile, and player suggestions projected into the team (league level, team context, adaptation), with complementarity and a value-for-money frontier
-- 📝 **AI Scout Reports** - Generate AI-powered scouting reports with Gemini
+- 📝 **AI Scout Reports** - Scouting reports written by Gemini through a server endpoint (the API key stays on the server)
 - 🌙 **Analyst UI** - Dense dark design system built from the ScoutVision logo (tokens, percentile tiers, colour-blind-checked chart palette)
 - 📈 **Impact & value** - RAPM (regularized plus-minus), finishing skill, pass-network role, performance-based value vs Transfermarkt
 - 🌱 **Development** - Age curves by role and one-year percentile projection (regression to the mean separated from age)
@@ -52,12 +52,16 @@ A modern, data-driven scouting application for football analytics with AI-powere
    npm install
    ```
 
-3. **Set up environment variables**
-   
-   Create a `.env.local` file:
+3. **Set up environment variables** (server side only)
+
+   Create a `.env.local` file (git-ignored):
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
+
+   The key is read by the `/api/scout-report` endpoint only and is never sent to the
+   browser (see [AI scout reports](#-ai-scout-reports-server-endpoint)). Without it the app
+   works, only the report generation answers "unavailable".
 
 4. **Get the data** (PitchAPI, 2021-22 → current season)
 
@@ -231,6 +235,35 @@ fine-grained PAT on `Cordierarn/scoutvision-ai` with *Contents: Read and write*)
           GH_TOKEN: ${{ secrets.SCOUTVISION_DISPATCH_TOKEN }}
 ```
 
+## 🤖 AI scout reports (server endpoint)
+
+The browser never calls Gemini. The "Générer" button of the player profile posts the player
+row and the computed indicators to `POST /api/scout-report`; the server validates the input,
+builds the prompt and calls Gemini with `GEMINI_API_KEY`.
+
+```
+Frontend (PlayerCard) → POST /api/scout-report (server/) → Gemini API
+```
+
+| | |
+|---|---|
+| Variable | `GEMINI_API_KEY`, server environment only (`.env.local` locally). Never prefix it with `VITE_`: the build stops if a `VITE_` variable looks like a secret |
+| Code | `server/scoutReport.ts` (validation, prompt, handler), `server/scoutReportPlugin.ts` (Node middleware, Vite plugin), `services/scoutReportService.ts` (client) |
+| Limits | JSON only, body ≤ 128 KB (413 above), 20 reports per 10 min per client (429), 60 s Gemini timeout |
+| Errors | 400 invalid input, 503 key not configured, 502 Gemini failure; messages are generic, the key is masked in server logs |
+
+**Deployment.** The repository has no hosting configuration: the app is a Vite single-page app
+whose server already proxies `/cdn` (images). The endpoint is mounted on the same Vite servers:
+
+- `npm run dev` (development) and `npm run build && npm run preview` (production build) serve
+  `/api/scout-report` and `/cdn` with no extra service. This is the supported way to run the app.
+- On a static host (plain `dist/` on a CDN), the endpoint does not exist: the report shows
+  "endpoint absent", the rest of the app works. To enable it, run `scoutReportMiddleware`
+  (`server/scoutReportPlugin.ts`, signature `(req, res, next)`) on any Node server (http,
+  Express, Connect) next to `dist/`, or wrap `handleScoutReport` (`server/scoutReport.ts`) in the
+  serverless function of your platform, and set `GEMINI_API_KEY` in its environment. The same
+  host must rewrite `/cdn/*` (see below).
+
 ## 🖼️ Images
 
 Player photos and club logos come from the PitchAPI CDN, flags from
@@ -261,7 +294,8 @@ eliminatory criteria (minimum role percentile, weight 1.5 in the index) and rank
 ## 🧪 Tests
 
 ```bash
-npm test               # Vitest: role index, starting eleven, projections, recruitment
+npm test               # Vitest: role index, starting eleven, projections, recruitment,
+                       # /api/scout-report (validation, size and rate limits, key never returned)
 npm run test:data      # Python (unittest): transfer model (parameter recovery on simulated data), lineups, market,
                        # lab experiments (each one must find a simulated effect, or its absence)
 ```
@@ -272,7 +306,7 @@ npm run test:data      # Python (unittest): transfer model (parameter recovery o
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS 3 (compiled with PostCSS), design tokens in `styles/index.css` and `tailwind.config.js`
 - **Charts**: Recharts
-- **AI**: Google Gemini API
+- **AI**: Google Gemini API, called server side only (`server/`)
 - **PDF Export**: jsPDF, html2canvas
 - **Data pipeline**: Python (pandas, pyarrow), GitHub Actions
 

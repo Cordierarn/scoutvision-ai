@@ -6,9 +6,9 @@ import PlayerHeatmap from './PlayerHeatmap';
 import { metricLabel, positionName, roleLabel, styleLabel, footLabel } from '../utils/labels';
 import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsights';
 import { dataLoader } from '../services/dataLoader';
-import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
-import { generateScoutReport } from '../services/geminiService';
+import { generateScoutReport, ScoutReportError } from '../services/scoutReportService';
 import { getBestRoles } from '../utils/scoringUtils';
 import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
@@ -54,6 +54,7 @@ const COMPARISON_SHORT_LABELS: Record<ComparisonMode, string> = {
 const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) => {
   const [report, setReport] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('position');
   const [isExporting, setIsExporting] = useState(false);
   
@@ -68,6 +69,12 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   const [showMetricConfig, setShowMetricConfig] = useState(false);
   const [metricSearch, setMetricSearch] = useState('');
   
+  // Rapport propre au joueur affiché
+  useEffect(() => {
+    setReport(null);
+    setReportError(null);
+  }, [player]);
+
   // Initialize metrics when player changes
   useEffect(() => {
     const positionMetrics = getRadarMetricsForPosition(player.Position);
@@ -267,26 +274,32 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
 
   const handleGenerateReport = async () => {
     setLoadingReport(true);
-    const curves = await dataLoader.loadAgeCurves().catch(() => null);
-    const percentiles = Object.fromEntries(
-      Object.entries(player)
-        .filter(([key, value]) => key.endsWith(' pct') && typeof value === 'number')
-        .map(([key, value]) => [key.slice(0, -4), value as number]));
-    const text = await generateScoutReport(player, {
-      language: 'fr',
-      percentileProfile: { player, percentiles, zScores: {}, averages: {} },
-      bestRoles,
-      shotStats: {
-        ...shotStats, xGDiff: shotStats.goals - shotStats.xG,
-        onTarget: playerShots.filter(s => s.result === 'Goal' || s.result === 'SavedShot').length,
-        blocked: playerShots.filter(s => s.result === 'BlockedShot').length,
-        conversion: shotStats.total > 0 ? (shotStats.goals / shotStats.total) * 100 : 0,
-        avgXG: shotStats.total > 0 ? shotStats.xG / shotStats.total : 0,
-      },
-      insights: buildReportInsights(player, curves, developmentMetrics),
-    });
-    setReport(text);
-    setLoadingReport(false);
+    setReportError(null);
+    try {
+      const curves = await dataLoader.loadAgeCurves().catch(() => null);
+      const percentiles = Object.fromEntries(
+        Object.entries(player)
+          .filter(([key, value]) => key.endsWith(' pct') && typeof value === 'number')
+          .map(([key, value]) => [key.slice(0, -4), value as number]));
+      const text = await generateScoutReport(player, {
+        language: 'fr',
+        percentileProfile: { player, percentiles, zScores: {}, averages: {} },
+        bestRoles,
+        shotStats: {
+          ...shotStats, xGDiff: shotStats.goals - shotStats.xG,
+          onTarget: playerShots.filter(s => s.result === 'Goal' || s.result === 'SavedShot').length,
+          blocked: playerShots.filter(s => s.result === 'BlockedShot').length,
+          conversion: shotStats.total > 0 ? (shotStats.goals / shotStats.total) * 100 : 0,
+          avgXG: shotStats.total > 0 ? shotStats.xG / shotStats.total : 0,
+        },
+        insights: buildReportInsights(player, curves, developmentMetrics),
+      });
+      setReport(text);
+    } catch (error) {
+      setReportError(error instanceof ScoutReportError ? error.message : 'Le rapport n\'a pas pu être généré. Réessayez.');
+    } finally {
+      setLoadingReport(false);
+    }
   };
 
   const handleExportPDF = async () => {
@@ -663,6 +676,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                   <span>Généré par Gemini 2.5 Flash</span>
                   <span>{new Date().toLocaleDateString('fr-FR')}</span>
                 </div>
+              </div>
+            ) : reportError ? (
+              <div role="alert" className="flex items-start gap-2 rounded-md border border-neg/40 bg-neg/10 px-3 py-2.5 text-xs text-ink-2">
+                <AlertCircle className="w-3.5 h-3.5 mt-px shrink-0 text-neg" aria-hidden />
+                <span>{reportError}</span>
               </div>
             ) : (
               <EmptyState icon={Sparkles} title="Aucun rapport généré" className="!py-8">
