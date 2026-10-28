@@ -11,7 +11,7 @@ import Prospects from './components/Prospects';
 import Watchlist from './components/Watchlist';
 import Forecast from './components/Forecast';
 import LabPage from './components/lab/LabPage';
-import { PlayerData, TeamStats, ViewState } from './types';
+import { PlayerData, TeamStats, ViewState, getPlayerSeasonId } from './types';
 import { dataLoader, DataIndex, LoadingState } from './services/dataLoader';
 import { queryService } from './services/queryService';
 
@@ -171,7 +171,11 @@ const App: React.FC = () => {
       )}
 
       {view === ViewState.DASHBOARD && (
-        <PlayerList data={players} onSelectPlayer={handleSelectPlayer} />
+        <PlayerList
+          data={players}
+          onSelectPlayer={handleSelectPlayer}
+          selectedId={selectedPlayer ? getPlayerSeasonId(selectedPlayer) : undefined}
+        />
       )}
 
       {view === ViewState.SIMILARITY && (
