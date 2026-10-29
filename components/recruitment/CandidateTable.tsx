@@ -9,7 +9,7 @@ import { positionLabel } from '../../utils/labels';
 import { isRowActivation } from '../../utils/rowKeys';
 import { CompetitionBadge, PlayerAvatar, TeamLine } from '../Media';
 import { Delta, InfoTip } from '../ui';
-import { CANDIDATE_FLAGS, EFFICIENT_TIP, GAIN_TIP, SCOUTVISION_ESTIMATE_TIP, formatEuros } from './shared';
+import { CANDIDATE_FLAGS, COMPLEMENT_TIP, EFFICIENT_TIP, GAIN_TIP, SCOUTVISION_ESTIMATE_TIP, formatEuros } from './shared';
 
 export const PAGE_SIZE = 20;
 
@@ -49,7 +49,7 @@ const CandidateTable: React.FC<CandidateTableProps> = ({ candidates, selectedId,
               <th className="text-right hidden sm:table-cell">
                 <span className="inline-flex items-center gap-1">Gain <InfoTip align="end" text={`Gain projeté vs titulaire. ${GAIN_TIP}`} /></span>
               </th>
-              {hasMarket && <th className="text-right hidden sm:table-cell">Valeur</th>}
+              {hasMarket && <th className="text-right hidden sm:table-cell"><span className="inline-flex items-center gap-1">Valeur <InfoTip align="end" text="Valeur de marché Transfermarkt au relevé." /></span></th>}
               {hasMarket && (
                 <th className="text-right hidden lg:table-cell">
                   <span className="inline-flex items-center gap-1">Estim. <InfoTip text={`Estimation ScoutVision. ${SCOUTVISION_ESTIMATE_TIP}`} align="end" /></span>
@@ -57,7 +57,7 @@ const CandidateTable: React.FC<CandidateTableProps> = ({ candidates, selectedId,
               )}
               {hasComplements && (
                 <th className="text-right hidden sm:table-cell">
-                  <span className="inline-flex items-center gap-1">Compl. <InfoTip align="end" text={`Complémentarité : percentile projeté moyen du candidat sur les points faibles de ${partnerName ?? 'son partenaire'}. Lecture séparée, hors projection.`} /></span>
+                  <span className="inline-flex items-center gap-1">Compl. <InfoTip align="end" text={`Complémentarité indicative : percentile projeté moyen du candidat sur les points faibles de ${partnerName ?? 'son partenaire'}. ${COMPLEMENT_TIP}`} /></span>
                 </th>
               )}
               <th className="pr-3 hidden sm:table-cell">Signaux</th>

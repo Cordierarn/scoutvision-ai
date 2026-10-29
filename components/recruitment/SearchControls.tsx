@@ -121,7 +121,7 @@ const SearchControls: React.FC<SearchControlsProps> = ({
       <div className="pt-3 border-t border-line">
         <div className="flex items-center gap-1.5 mb-1.5">
           <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink">Préférences</h3>
-          <InfoTip text="Les préférences changent seulement l'ordre de la liste : la sélection reste les meilleures projections sportives, et aucune projection n'est modifiée." />
+          <InfoTip text="Les préférences changent seulement l'ordre de la liste : la sélection reste les meilleures projections sportives, et aucune projection n'est modifiée. La complémentarité est indicative : elle n'entre pas dans la projection sportive et n'est pas couverte par la validation historique du modèle de transfert." />
         </div>
         <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
           <label className={`${label} min-w-0 max-w-full`}>
@@ -135,8 +135,8 @@ const SearchControls: React.FC<SearchControlsProps> = ({
             <input type="checkbox" name="preferComplement" checked={preferComplement && hasComplements} disabled={!hasComplements}
               onChange={e => onPreferComplement(e.target.checked)} />
             {hasComplements && partnerName
-              ? <>Complémentarité avec {partnerName} : ordonner par elle</>
-              : <>Complémentarité : pas de point faible marqué du partenaire de ligne</>}
+              ? <>Complémentarité indicative avec {partnerName} : ordonner par elle</>
+              : <>Complémentarité indicative : pas de point faible marqué du partenaire de ligne</>}
           </label>
         </div>
       </div>

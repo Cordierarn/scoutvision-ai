@@ -8,7 +8,7 @@ import { formationPositions, isOutOfPosition, orderFormations, recruitmentFormat
 import { seasonCapabilities } from './prospects';
 import {
   Candidate, DEFAULT_FILTERS, Models, RoleForecast, Target, complementFor, complementReading, displayIndex, forecastMetric,
-  forecastRole, incumbentForecast, isManifestlyOutOfPosition, candidateView, leagueLevel, leagueRows, markEfficient, monthsUntil, peerIndices,
+  forecastRole, incumbentForecast, isManifestlyOutOfPosition, candidateView, checkPositionData, POSITION_CONTRADICTIONS_MIN, leagueLevel, leagueRows, markEfficient, monthsUntil, peerIndices,
   percentileRank, positionFromSlot, projectionCascade, projectionError, searchCandidates, seasonMarket, slotNeeds, slotPartner,
   needOrder, slotDepth, squadProfile, teamRank, CONTEXT_EFFECT_NOTABLE,
 } from './recruitment';
@@ -671,6 +671,41 @@ describe('dossier du candidat (CandidateView)', () => {
     expect(v.sport.gain).toBeUndefined();
     expect(v.uncertainty).toBeUndefined();          // validation absente du modèle de test
   });
+});
+
+describe('qualité des données de poste (signal, jamais une correction)', () => {
+  const slots = (positions: string[]) => positions.map((_, i) => ({ slot: i, x: i === 0 ? 0.1 : 0.3 + 0.1 * Math.floor((i - 1) / 4), y: 0.1 + 0.25 * ((i - 1) % 4), players: [[`p${i}`, `J${i}`, 5]] as [string, string, number][] }));
+  const eleven = slots(Array(11).fill(''));
+  const view = { formation: '4-3-3', matches: 5, slots: eleven, invalidSlots: 0, mergedSlots: 0, status: 'complete' as const };
+  const team = (positions: string[]) => positions.map((pos, i) => player({ 'Player ID': `p${i}`, Position: pos }));
+
+  it('équipe cohérente, pistons et ailiers compris : aucune contradiction', () => {
+    const r = checkPositionData([view], team(['GK', 'WB', 'CB', 'CB', 'W', 'AM', 'CM', 'DM', 'FB', 'ST', 'W']));
+    expect(r).toEqual({ contradictions: 0, checked: 11, suspect: false });
+  });
+
+  it('joueurs de champ enregistrés gardiens : signalé à partir de 2, un gardien isolé non', () => {
+    expect(checkPositionData([view], team(['GK', 'GK', 'CB', 'CB', 'W', 'AM', 'CM', 'DM', 'FB', 'ST', 'W'])).suspect).toBe(false);
+    const r = checkPositionData([view], team(Array(11).fill('GK')));
+    expect(r.contradictions).toBe(10);
+    expect(r.suspect).toBe(true);
+    expect(POSITION_CONTRADICTIONS_MIN).toBe(2);
+    // formation incomplète ou joueur sans données : rien n'est compté
+    expect(checkPositionData([{ ...view, slots: eleven.slice(0, 9) }], team(Array(11).fill('GK'))).checked).toBe(0);
+    expect(checkPositionData([view], []).checked).toBe(0);
+  });
+
+  it.skipIf(!existsSync(lineupsDir('2026-27')))('données réelles 2026-27 : Crvena Zvezda signalée, PSG et Lazio non', () => {
+    const rows = realSeason('2026-27');
+    const check = (comp: string, team: string) => {
+      const t = rows.find(p => p.Team === team && p.Competition === comp)!;
+      const file = JSON.parse(readFileSync(`${lineupsDir('2026-27')}/${comp}.json`, 'utf8')) as Record<string, TeamLineups>;
+      return checkPositionData(orderFormations(file[t['Team ID']!]), rows.filter(p => p.Competition === comp && p['Team ID'] === t['Team ID']));
+    };
+    expect(check('SRB', 'FK Crvena Zvezda')).toMatchObject({ contradictions: 15, checked: 17, suspect: true });
+    expect(check('FRA', 'Paris Saint-Germain').contradictions).toBe(0);
+    expect(check('ITA', 'Lazio').contradictions).toBe(0);
+  }, 60_000);
 });
 
 describe('marché de la saison analysée', () => {

@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { Users } from 'lucide-react';
-import { SlotNeed, displayIndex } from '../../utils/recruitment';
+import { PositionDataCheck, SlotNeed, displayIndex } from '../../utils/recruitment';
 import { FormationView, isExploitableFormation } from '../../utils/teamLineups';
 import { positionLabel, positionName } from '../../utils/labels';
 import { PlayerAvatar } from '../Media';
@@ -16,6 +16,7 @@ export const MANUAL_POSITIONS = ['GK', 'CB', 'FB', 'DM', 'CM', 'AM', 'W', 'ST'];
 const NeedRow: React.FC<{ need: SlotNeed; selected: boolean; onSelect: () => void }> = ({ need, selected, onSelect }) => {
   const name = need.starter?.Player ?? need.placed.starter?.name ?? '—';
   const flags = need.flags.filter(f => f !== 'noStarter');
+  const detail = [need.presetName ?? positionName(need.position), ...(need.flags.includes('noStarter') ? ['aucun joueur régulier'] : []), ...flags.map(f => NEED_FLAGS[f].label)].join(' · ');
   return (
     <button
       type="button"
@@ -32,11 +33,7 @@ const NeedRow: React.FC<{ need: SlotNeed; selected: boolean; onSelect: () => voi
         <span className="min-w-0">
           <span className="sm:hidden flex items-center gap-1.5 mb-0.5"><NeedChip level={need.level} /><span className="sv-tag">{positionLabel(need.position)}</span></span>
           <span className="block text-[13px] leading-tight text-ink font-medium truncate" title={name}>{name}</span>
-          <span className="block text-2xs leading-tight text-ink-3 truncate">
-            {need.presetName ?? positionName(need.position)}
-            {need.flags.includes('noStarter') && ' · aucun joueur régulier'}
-            {flags.length > 0 && ` · ${flags.map(f => NEED_FLAGS[f].label).join(' · ')}`}
-          </span>
+          <span className="block text-2xs leading-tight text-ink-3 truncate" title={detail}>{detail}</span>
         </span>
       </span>
       <span className="text-right whitespace-nowrap">
@@ -60,7 +57,7 @@ export interface NeedsPanelProps {
   formation?: FormationView;
   onChooseFormation: (name: string) => void;
   fallbackFrom?: FormationView;
-  mislabelledKeepers: number;
+  positionData: PositionDataCheck;
   leagueName: string;
   manualPosition: string;
   onManualPosition: (position: string) => void;
@@ -71,7 +68,7 @@ export interface NeedsPanelProps {
  * projeté et rang. Sans composition exploitable : choix manuel du poste.
  */
 const NeedsPanel: React.FC<NeedsPanelProps> = ({
-  needs, order, selectedIndex, onSelectNeed, formations, formation, onChooseFormation, fallbackFrom, mislabelledKeepers,
+  needs, order, selectedIndex, onSelectNeed, formations, formation, onChooseFormation, fallbackFrom, positionData,
   leagueName, manualPosition, onManualPosition,
 }) => (
   <Panel
@@ -96,13 +93,14 @@ const NeedsPanel: React.FC<NeedsPanelProps> = ({
       </div>
     )}
   >
-    {(mislabelledKeepers >= 2 || fallbackFrom) && (
+    {(positionData.suspect || fallbackFrom) && (
       <div className="space-y-1.5 mb-2.5">
-        {mislabelledKeepers >= 2 && (
+        {positionData.suspect && (
           <Note tone="warn">
-            Postes incohérents dans les données : {mislabelledKeepers} titulaires de champ sont enregistrés gardiens dans {leagueName} cette
-            saison. Leurs percentiles sont calculés parmi les gardiens : leurs besoins ne sont pas mesurables. Les candidats restent
-            cherchés au poste de la formation.
+            Postes probablement incohérents dans les données : {positionData.contradictions} titularisations sur {positionData.checked} contredisent le
+            poste enregistré (gardien aligné en joueur de champ, ou l'inverse) dans {leagueName} cette saison. Les postes ne sont pas corrigés et
+            les percentiles restent ceux du poste enregistré : ces besoins ne sont pas mesurables. Les candidats restent cherchés au poste
+            de la formation.
           </Note>
         )}
         {fallbackFrom && formation && (

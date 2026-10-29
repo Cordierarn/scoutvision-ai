@@ -21,8 +21,8 @@ import { PlayerData, TeamStats } from '../types';
 import { AgeCurves, MarketEntry, MarketValues, TransferModel } from '../services/dataLoader';
 import { RolePreset, midfieldBonus, presetWeights, presetsForPosition, weightedRoleScore } from './rolePresets';
 import { ageEffect } from './development';
-import { PlacedSlot, SlotPlayer } from './lineup';
-import { isOutOfPosition } from './teamLineups';
+import { PlacedSlot, SlotPlayer, placeEleven } from './lineup';
+import { FormationView, formationPositions, isOutOfPosition } from './teamLineups';
 import { ESTIMATE_RATIO_MIN, SeasonCapabilities } from './prospects';
 
 export interface Models {
@@ -984,4 +984,42 @@ export function candidateView(c: Candidate, opts: {
     uncertainty: projectionError(opts.transfer, leagueChange),
     signals: c.flags.filter(f => !VALUE_FLAGS.includes(f)),
   };
+}
+
+// ============================================
+// QUALITÉ DES DONNÉES DE POSTE (signal, jamais une correction)
+// ============================================
+
+export interface PositionDataCheck {
+  contradictions: number;          // titulaires enregistrés gardiens sur une case de champ, ou l'inverse
+  checked: number;                 // titulaires avec données sur les formations complètes
+  suspect: boolean;                // contradictions >= POSITION_CONTRADICTIONS_MIN
+}
+
+// Mesuré sur 1 934 équipes-saisons (2021-22, 2024-25, 2025-26, 2026-27) : 0 contradiction partout,
+// sauf Radnički Niš 2024-25 (17 sur 21) et Crvena Zvezda 2026-27 (15 sur 17), dont les joueurs
+// de champ sont enregistrés gardiens. Le seuil de 2 écarte une erreur isolée.
+export const POSITION_CONTRADICTIONS_MIN = 2;
+
+/**
+ * Incohérence probable des postes des données d'une équipe : contradiction forte entre le poste
+ * enregistré d'un titulaire et la case qu'il occupe, limitée au cas gardien / joueur de champ sur
+ * les formations complètes. Les écarts piston, ailier ou milieu ne comptent jamais. Ne corrige
+ * rien : les percentiles de ces joueurs restent ceux de leur poste enregistré.
+ */
+export function checkPositionData(formations: FormationView[], teamPlayers: PlayerData[]): PositionDataCheck {
+  const byId = new Map(teamPlayers.filter(p => p['Player ID']).map(p => [p['Player ID']!, p]));
+  let contradictions = 0;
+  let checked = 0;
+  formations.forEach(f => {
+    const positions = formationPositions(f);
+    if (!positions) return;
+    placeEleven(f.slots).forEach(placed => {
+      const p = placed.starter ? byId.get(placed.starter.id) : undefined;
+      if (!p) return;
+      checked++;
+      if ((p.Position === 'GK') !== (positions.get(placed.slot.slot) === 'GK')) contradictions++;
+    });
+  });
+  return { contradictions, checked, suspect: contradictions >= POSITION_CONTRADICTIONS_MIN };
 }

@@ -25,7 +25,7 @@ import { isSeasonInProgress, resolveTeamLeague } from '../utils/teamContext';
 import { seasonCapabilities } from '../utils/prospects';
 import {
   Candidate, DEFAULT_FILTERS, Models, SearchFilters, SlotNeed, Target, candidateView, complementFor, incumbentForecast, leagueRows,
-  needOrder as orderNeeds, searchCandidates, seasonMarket, slotNeeds, slotPartner, squadProfile, teamRank, FEW_MINUTES,
+  checkPositionData, needOrder as orderNeeds, searchCandidates, seasonMarket, slotNeeds, slotPartner, squadProfile, teamRank, FEW_MINUTES,
 } from '../utils/recruitment';
 import { prepareComparison } from './PlayerComparison';
 import { SquadProfilePanel } from './SquadProfile';
@@ -194,7 +194,8 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
     [eleven, teamRows, leaguePool, models, seasonMkt, asOf, slotPositions],
   );
   const needOrder = useMemo(() => orderNeeds(needs), [needs]);
-  const mislabelledKeepers = useMemo(() => needs.filter(n => n.flags.includes('outOfPosition') && n.starter?.Position === 'GK').length, [needs]);
+  // Postes des données incohérents (gardiens alignés en joueurs de champ) : signal, jamais une correction
+  const positionData = useMemo(() => checkPositionData(formations, teamRows), [formations, teamRows]);
 
   // Case choisie (par défaut le besoin le plus fort), poste et rôle recherchés
   const slotIndex = (() => {
@@ -379,7 +380,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
               : (
                 <NeedsPanel needs={needs} order={needOrder} selectedIndex={slotIndex} onSelectNeed={selectNeed}
                   formations={formations} formation={formation} onChooseFormation={chooseFormation} fallbackFrom={fallbackFrom}
-                  mislabelledKeepers={mislabelledKeepers} leagueName={ready!.leagueName}
+                  positionData={positionData} leagueName={ready!.leagueName}
                   manualPosition={state.manualPosition} onManualPosition={chooseManual} />
               )}
             <div ref={summaryRef} className="scroll-mt-4">
@@ -423,8 +424,8 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
                 {search && <FunnelLine funnel={search.funnel} hasMarket={!!seasonMkt} className="px-4 pb-2" />}
                 {byComplement && (
                   <Note className="px-4 pb-2">
-                    Ordre : complémentarité avec {partnerName} (préférence activée). La liste reste les {candidates.length} meilleures
-                    projections ; aucune projection n'est modifiée.
+                    Ordre : complémentarité indicative avec {partnerName} (préférence activée). La liste reste les {candidates.length} meilleures
+                    projections ; aucune projection n'est modifiée et cette lecture n'est pas couverte par la validation historique.
                   </Note>
                 )}
                 <div className="border-t border-line">

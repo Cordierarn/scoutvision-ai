@@ -32,9 +32,10 @@ const MethodNote: React.FC<{ transfer: TransferModel | null | undefined; competi
               titulaire, projeté de la même façon sans changement de club. La cascade est affichée au dixième (arrondi cumulé).
             </p>
             <p>
-              <span className="text-ink font-semibold">Complémentarité.</span> Points faibles du partenaire de ligne et réponse du candidat,
-              en lecture séparée : rien n'est ajouté à la projection ni au classement. La préférence « complémentarité » réordonne
-              seulement les meilleures projections.
+              <span className="text-ink font-semibold">Complémentarité indicative.</span> Points faibles actuels du partenaire de ligne et
+              qualités projetées du candidat, en lecture séparée : rien n'est ajouté à la projection sportive ni au classement, et cette
+              lecture n'est pas couverte par la validation historique du modèle de transfert. La préférence « complémentarité »
+              réordonne seulement les meilleures projections.
             </p>
             <p>
               <span className="text-ink font-semibold">Contexte.</span> Sans domination territoriale connue pour l'une des deux équipes, le
@@ -43,9 +44,9 @@ const MethodNote: React.FC<{ transfer: TransferModel | null | undefined; competi
               les plus sensibles.
             </p>
             <p>
-              <span className="text-ink font-semibold">Valeur.</span> Frontière valeur / performance : un candidat est efficient si aucun
-              autre n'a une projection au moins égale pour une valeur Transfermarkt au plus égale (et strictement meilleure sur l'une des
-              deux). L'estimation ScoutVision est une estimation statistique, pas un prix de transfert. Le relevé Transfermarkt ne décrit
+              <span className="text-ink font-semibold">Valeur.</span> Frontière valeur / performance : un candidat est efficient
+              valeur-performance si aucun autre n'a une projection au moins égale pour une valeur de marché Transfermarkt au plus égale
+              (et strictement meilleure sur l'une des deux). L'estimation statistique ScoutVision n'est pas un prix de transfert. Le relevé Transfermarkt ne décrit
               que la saison en cours : il n'est jamais appliqué à une saison passée.
             </p>
             {transfer && (

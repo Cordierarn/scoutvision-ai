@@ -16,7 +16,7 @@ import { PlayerAvatar, TeamLine } from '../Media';
 import { Delta, InfoTip, Stat } from '../ui';
 import { BRAND, CONTEXT, DIVERGING } from '../../theme/charts';
 import {
-  CANDIDATE_FLAGS, EFFICIENT_TIP, FlagChip, GAIN_TIP, INTEGER, SCOUTVISION_ESTIMATE_TIP, UncertaintyNote, decimal, formatEuros,
+  CANDIDATE_FLAGS, COMPLEMENT_TIP, EFFICIENT_TIP, FlagChip, GAIN_TIP, INTEGER, SCOUTVISION_ESTIMATE_TIP, UncertaintyNote, decimal, formatEuros,
   formatMonth, signedDecimal,
 } from './shared';
 
@@ -223,7 +223,7 @@ const CandidateDossier: React.FC<CandidateDossierProps> = ({
       </Section>
 
       {/* E. Complémentarité */}
-      <Section letter="E" title="Complémentarité" help="Lecture séparée : points faibles du partenaire de ligne (sous le 35e percentile, percentile actuel) et réponse du candidat (percentile projeté chez nous). Rien n'est ajouté à la projection.">
+      <Section letter="E" title="Complémentarité indicative" help={`${COMPLEMENT_TIP} Points faibles : métriques des rôles du poste sous le 35e percentile du partenaire ; réponse : percentile projeté du candidat chez nous.`}>
         {complementarity && partner ? (
           <>
             <p className="text-xs text-ink-3 mb-1.5">Partenaire : <span className="text-ink-2">{partner.Player}</span>{partnerPosition ? ` (${positionName(partnerPosition).toLowerCase()})` : ''}</p>
@@ -241,7 +241,7 @@ const CandidateDossier: React.FC<CandidateDossierProps> = ({
                 ))}
               </tbody>
             </table>
-            <p className="text-2xs text-ink-4 mt-1.5">Information : n'entre pas dans la projection ni dans le classement.</p>
+            <p className="text-2xs text-ink-4 mt-1.5">Lecture indicative : n'entre ni dans la projection sportive ni dans le classement, et n'est pas couverte par la validation historique.</p>
           </>
         ) : <p className="text-xs text-ink-4">{partner ? `Pas de point faible marqué de ${partner.Player} sur les métriques du poste.` : 'Pas de partenaire de ligne de référence.'}</p>}
       </Section>
@@ -251,9 +251,9 @@ const CandidateDossier: React.FC<CandidateDossierProps> = ({
         {value ? (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <Stat label="Transfermarkt" value={formatEuros(value.market)} sub="valeur actuelle" wrapSub />
-              <Stat label={<span className="inline-flex items-center gap-1">Estimation ScoutVision <InfoTip text={SCOUTVISION_ESTIMATE_TIP} align="end" /></span>}
-                value={formatEuros(value.estimate)} sub="statistique" wrapSub />
+              <Stat label="Valeur de marché Transfermarkt" value={formatEuros(value.market)} sub="au relevé" wrapSub />
+              <Stat label={<span className="inline-flex items-center gap-1">Estimation statistique ScoutVision <InfoTip text={SCOUTVISION_ESTIMATE_TIP} align="end" /></span>}
+                value={formatEuros(value.estimate)} sub="pas un prix" wrapSub />
               <Stat label="Contrat" value={formatMonth(value.contract)} tone={value.contractMonths !== undefined && value.contractMonths <= CONTRACT_MONTHS ? 'warn' : 'default'}
                 sub={value.contractMonths !== undefined ? (value.contractMonths < 0 ? 'échu' : `dans ${Math.round(value.contractMonths)} mois`) : 'inconnu'} wrapSub />
             </div>

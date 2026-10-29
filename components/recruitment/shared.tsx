@@ -44,6 +44,7 @@ export const CANDIDATE_FLAGS: Record<CandidateFlag, { label: string; icon: React
 
 export const SCOUTVISION_ESTIMATE_TIP = 'Estimation statistique de valeur. Ce n\'est pas un prix de transfert.';
 export const EFFICIENT_TIP = 'Frontière valeur / performance : aucun autre candidat n\'a une projection au moins égale pour une valeur Transfermarkt au plus égale (et strictement meilleure sur l\'une des deux). Une lecture, pas un verdict commercial.';
+export const COMPLEMENT_TIP = 'Cette lecture compare les points faibles actuels du partenaire de ligne aux qualités projetées du candidat. Elle n\'entre pas dans la projection sportive et n\'est pas couverte par la validation historique du modèle de transfert.';
 export const GAIN_TIP = 'Différence entre deux projections (candidat chez nous, titulaire dans le même rôle) ; l\'incertitude de chacune doit être prise en compte.';
 
 // ============================================

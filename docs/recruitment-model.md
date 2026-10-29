@@ -24,6 +24,13 @@ contract end, expected decline and lack of cover are flagged.
   2026-27, Radnički Niš 2024-25). In both cases the SRB player rows of that team all carry
   `Position = GK` (percentiles computed among goalkeepers): the needs of the outfield slots are
   shown as *à évaluer* with a data warning, never computed from goalkeeper percentiles.
+- **Position data check** (`checkPositionData`): on the complete formations, each starter with
+  data is compared with his slot; only a goalkeeper on an outfield slot (or the reverse) counts,
+  never a wing-back, winger or midfield gap. Two contradictions or more flag the team-season as
+  *postes probablement incohérents*. Measured on 1,934 team-seasons: 0 contradiction everywhere
+  except Radnički Niš 2024-25 (17 of 21) and Crvena Zvezda 2026-27 (15 of 17). The check only
+  warns: positions are never corrected and no percentile is recomputed with an invented position;
+  the fix belongs to the pipeline.
 - **Position searched**: the starter's registered position, except when he is manifestly out of
   position in the formation (`isManifestlyOutOfPosition`: two lines or more apart, or a
   goalkeeper on one side only, wing-backs excluded). The slot position read from the formation
@@ -76,7 +83,9 @@ projected percentile = age-curve projection
   95th percentile of |context| over 115,812 candidate evaluations, 12 teams, 2025-26 and 2026-27;
   4.8 % flagged) is shown as *Effet de contexte important*. Goalkeepers are the most sensitive
   (median 3.6 points, 95th percentile 22.8, 20 % at 12 or more, against 0.9 % for forwards): the
-  goalkeeping metrics depend on how many shots the team concedes.
+  goalkeeping metrics depend on how many shots the team concedes. Backlog: test out of sample a
+  non-linear relation between the change in field tilt and the translation of percentiles (the
+  model is linear; the largest terms are extrapolations). Not run yet.
 - **Adaptation**: a cost per metric for a league change or a club change.
 - **Fit**: consecutive seasons at the same role, weighted by minutes.
 
@@ -85,10 +94,11 @@ projected percentile = age-curve projection
 Role index recomputed on projected percentiles (the role weights only), compared with the
 starter projected in the same role. Candidates are ranked by this sports projection.
 
-- **Complementarity** (separate reading): the line partner's weak metrics (below the 35th
-  percentile, up to 3) and, for each candidate, his projected percentile on each of them. Nothing
-  is added to the projection or to the ranking; sorting by complementarity only reorders the best
-  projections. Before Oct. 2026 these metrics were added to the index: on 67 slots of 8
+- **Complementarity** (*complémentarité indicative*, separate reading): the line partner's weak
+  metrics (below the 35th percentile, up to 3) and, for each candidate, his projected percentile
+  on each of them. Nothing is added to the projection or to the ranking; sorting by
+  complementarity only reorders the best projections. It is not covered by the out-of-sample
+  validation of the transfer model, and there is no overall fit score. Before Oct. 2026 these metrics were added to the index: on 67 slots of 8
   team-seasons, the top 10 shared on average 5.8 players with today's ranking (minimum 1), and
   the first candidate was the same in 25 cases.
 - **Filters** (hard constraints, counted as a funnel): position, minutes, age, leagues, budget,
