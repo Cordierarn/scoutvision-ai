@@ -19,7 +19,7 @@ import { useAsyncData } from '../hooks/useAsyncData';
 import { squadProfile } from '../utils/recruitment';
 import { resolveTeamLeague } from '../utils/teamContext';
 import { orderFormations } from '../utils/teamLineups';
-import { styleReliability, teamMetric, teamMetricRanks, teamValue } from '../utils/teamMetrics';
+import { styleReliability, teamMetric, teamMetricRanks, teamValue, STYLE_METRICS } from '../utils/teamMetrics';
 import { styleLabel } from '../utils/labels';
 import { prepareComparison } from './PlayerComparison';
 import { CompetitionBadge, TeamLogo } from './Media';
@@ -27,6 +27,9 @@ import { EmptyState, PercentileValue } from './ui';
 import TeamSearch from './TeamSearch';
 import { openRecruitment } from './RecruitmentPage';
 import TeamStyleTab, { formatTeamValue } from './team/TeamStyleTab';
+import { GroundedAiPanel } from './ai/GroundedAiPanel';
+import { aiOpposition } from '../services/groundedAiService';
+import { buildOppositionFacts } from '../utils/oppositionFacts';
 import TeamLineupTab from './team/TeamLineupTab';
 import TeamSquadTab from './team/TeamSquadTab';
 import TeamShotsTab from './team/TeamShotsTab';
@@ -223,7 +226,21 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
         ) : (
           <>
             {tab === 'STYLE' && (
-              <TeamStyleTab team={stats} teams={teamStats} leagueName={leagueName} allSeasons={allSeasons} />
+              <>
+                <TeamStyleTab team={stats} teams={teamStats} leagueName={leagueName} allSeasons={allSeasons} />
+                {/* Briefing d'opposition IA ancré : faits déjà affichés (statistiques, rangs, formation, effectif), résultat non enregistré */}
+                <div className="px-5 pb-5">
+                  <GroundedAiPanel title="Briefing d'opposition" resetKey={team}
+                    help="Gemini rédige un briefing à partir des seuls faits d'équipe ScoutVision (statistiques de saison et leur rang dans la compétition, formation principale et titulaires, profil de l'effectif, joueurs les plus utilisés avec leur rôle). Le serveur rejette tout nombre absent des faits, tout sujet non mesuré et toute prédiction. Aucune donnée individuelle brute n'est transmise."
+                    description="Quatre sections : identité et résultats, style et tendances, forces et vulnérabilités statistiques, points à préparer."
+                    disabled={!stats} disabledReason="Aucune statistique d'équipe pour cette compétition : le briefing n'a pas de faits."
+                    request={() => aiOpposition(buildOppositionFacts({
+                      name: ctx.name, competition: leagueName, season: ctx.seasonLabel, stats, isCup,
+                      ranks: stats ? teamMetricRanks(stats, teamStats, [...HEADER_METRICS, ...STYLE_METRICS.filter(m => !HEADER_METRICS.includes(m))]) : [],
+                      mainFormation, profile, players, seasonInProgress: inProgress,
+                    }))} />
+                </div>
+              </>
             )}
             {tab === 'LINEUP' && (
               <TeamLineupTab key={team} teamKey={team} lineups={lineups} lineupsError={lineupsData.error} onRetry={lineupsData.retry}

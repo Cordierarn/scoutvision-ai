@@ -47,7 +47,7 @@ export async function aiCompare(players: ComparePlayer[], options: { framing?: '
 }
 
 /** Briefing d'opposition à partir des faits d'équipe calculés par ScoutVision */
-export async function aiOpposition(facts: { team: Record<string, unknown>; [k: string]: unknown }): Promise<AiTextResult> {
+export async function aiOpposition(facts: { team: Record<string, unknown> }): Promise<AiTextResult> {
   const p = await post('opposition', facts);
   if (typeof p.content !== 'string') throw new ScoutReportError('Réponse du serveur incomplète.');
   return { content: p.content, meta: meta(p.meta), facts: p.facts, promptVersion: typeof p.promptVersion === 'string' ? p.promptVersion : null };

@@ -26,6 +26,8 @@ import { PlayerAvatar, TeamLogo, CompetitionBadge } from './Media';
 import { PlayerSearch } from './PlayerSearch';
 import { competitionName, isCup, minutesOf, seasonInProgress } from '../utils/playerContext';
 import { PageHeader, Panel, EmptyState, PercentileValue, PolarTick, LegendItem, IndexBar, InfoTip } from './ui';
+import { GroundedAiPanel } from './ai/GroundedAiPanel';
+import { aiCompare } from '../services/groundedAiService';
 import { SERIES, polarGridProps } from '../theme/charts';
 
 interface PlayerComparisonProps {
@@ -536,6 +538,12 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data, onSelectPlaye
             <ComparisonRadar players={players} names={names} metrics={metrics} />
             <Differences players={players} names={names} metrics={metrics} />
           </div>
+          {/* Synthèse comparative IA ancrée : demande explicite, résultat non enregistré */}
+          <GroundedAiPanel title="Synthèse comparative" resetKey={players.map(getPlayerSeasonId).join('|')}
+            help="Gemini résume les différences entre les joueurs comparés à partir des seuls faits ScoutVision envoyés (percentiles, indices de rôle, valeurs, échantillon). Le serveur rejette tout nombre absent des faits, tout sujet non mesuré et tout verdict. Aucun score n'est calculé par le modèle."
+            description="Quatre sections : profils, principales différences, complémentarité et contexte, points à vérifier en observation."
+            disabled={players.length < 2} disabledReason="Ajoutez au moins deux joueurs pour obtenir une synthèse comparative."
+            request={() => aiCompare(players.map(p => ({ row: p, bestRoles: rankPresets(p).map(r => ({ role: r.name, normalizedScore: r.index })) })), { framing: 'comparison', seasonInProgress: players.some(seasonInProgress) })} />
 
           <Panel flush icon={Table2} title="Détail des métriques"
             subtitle={viewMode === 'raw'

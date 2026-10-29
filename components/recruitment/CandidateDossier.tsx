@@ -9,7 +9,9 @@ import { ArrowLeft, ArrowLeftRight, ExternalLink, Scale, Star } from 'lucide-rea
 import { PlayerData, getPlayerSeasonId } from '../../types';
 import { TransferModel } from '../../services/dataLoader';
 import { addToWatchlist, getWatchlist, removeFromWatchlist } from '../../services/storageService';
-import { RolePreset, presetWeights } from '../../utils/rolePresets';
+import { RolePreset, presetWeights, rankPresets } from '../../utils/rolePresets';
+import { GroundedAiPanel } from '../ai/GroundedAiPanel';
+import { aiCompare } from '../../services/groundedAiService';
 import { Candidate, CandidateView, RoleForecast, displayIndex, leagueLevel, CONTRACT_MONTHS } from '../../utils/recruitment';
 import { metricLabel, positionName } from '../../utils/labels';
 import { PlayerAvatar, TeamLine } from '../Media';
@@ -284,6 +286,15 @@ const CandidateDossier: React.FC<CandidateDossierProps> = ({
           </ul>
         ) : <p className="text-xs text-ink-4">Aucun signal : temps de jeu suffisant, championnat observé, saut de niveau et effet de contexte modérés.</p>}
       </Section>
+
+      {/* H. Synthèse IA ancrée : candidat face au titulaire (ou seul), résultat non enregistré */}
+      <div className="px-4 py-3 border-t border-line">
+        <GroundedAiPanel title={incumbentPlayer ? 'Synthèse IA face au titulaire' : 'Synthèse IA du candidat'} resetKey={id}
+          help="Gemini compare le candidat au titulaire à partir des seuls faits ScoutVision (percentiles, indices de rôle, valeurs, échantillon) ; le serveur rejette tout nombre absent des faits, tout sujet non mesuré et tout verdict de recrutement. La projection chez nous n'est pas transmise : le texte décrit les profils, il ne tranche pas."
+          description={incumbentPlayer ? `${incumbentPlayer.Player} (titulaire) et ${p.Player}, rôle ${roleName}.` : `${p.Player}, rôle ${roleName}, sans titulaire comparable.`}
+          disabled={!incumbentPlayer} disabledReason="Sans titulaire au poste, la synthèse comparative n'a pas de point de comparaison."
+          request={() => aiCompare([incumbentPlayer!, p].map(x => ({ row: x, bestRoles: rankPresets(x).map(r => ({ role: r.name, normalizedScore: r.index })) })), { framing: 'candidate_vs_incumbent', role: roleName })} />
+      </div>
     </article>
   );
 };

@@ -28,6 +28,8 @@ import { TeamLine, PlayerAvatar } from './Media';
 import { Panel, EmptyState, InfoTip, IndexBar, PercentileValue } from './ui';
 import { isRowActivation } from '../utils/rowKeys';
 import { formatEuro } from '../utils/format';
+import { HunterAssistant } from './ai/HunterAssistant';
+import { HunterCatalogue, HunterConfig } from '../services/groundedAiService';
 
 interface ProspectsProps {
   data: PlayerData[];
@@ -212,11 +214,50 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
   const thresholds = preset ? effectiveThresholds(preset, strictness) : {};
   const breakdownWeights = preset ? Object.entries(preset.weights ?? {}) : [];
 
+  // ---------- Assistant IA : demande en langage naturel → filtres (appliqués seulement sur clic, puis modifiables) ----------
+  const hunterCatalogue = useMemo<HunterCatalogue>(() => ({
+    positions: [...new Set(Object.values(presets).flatMap(p => p.positions))],
+    roles: Object.entries(presets).filter(([, p]) => p.category !== 'sp').map(([name, p]) => ({ name, positions: p.positions, ...(p.category ? { category: p.category } : {}), ...(p.description ? { description: p.description } : {}) })),
+    metrics: availableMetrics.map(key => ({ key, label: metricLabel(key) })),
+    competitions: competitions.map(c => ({ key: c.key, name: c.info?.name ?? c.key })),
+    capabilities: caps,
+  }), [presets, availableMetrics, competitions, caps]);
+  const applyAiConfig = (config: HunterConfig) => {
+    if (config.role && presets[config.role]) chooseRole(config.role);
+    setConstraints(prev => ({
+      ...prev,
+      ...(config.ageMax !== undefined ? { ageMax: config.ageMax } : {}),
+      ...(config.minutesMin !== undefined ? { minutesMin: config.minutesMin } : {}),
+      ...(config.valueMax !== undefined && caps.marketValue ? { valueMax: config.valueMax } : {}),
+      ...(config.contractMonths !== undefined && caps.contract ? { contractMonths: config.contractMonths } : {}),
+      ...(config.estimateAboveMarket !== undefined && caps.estimate ? { estimateAboveMarket: config.estimateAboveMarket } : {}),
+      ...(config.competition !== undefined ? { competition: config.competition } : {}),
+    }));
+    // Critères supplémentaires : rôle personnalisé créé à partir du rôle choisi (seuils visibles et modifiables comme les autres)
+    if (config.extraCriteria.length) {
+      const base = config.role && presets[config.role] ? presets[config.role] : undefined;
+      const positions = base?.positions ?? (config.position ? [config.position] : []);
+      if (positions.length) {
+        const metrics: Record<string, number> = { ...(base?.metrics ?? {}) };
+        config.extraCriteria.forEach(c => { metrics[c.metric] = c.minPercentile; });
+        const stem = `IA · ${config.role ?? positionLabel(positions[0])}`;
+        let name = stem;
+        for (let i = 2; presets[name]; i++) name = `${stem} ${i}`;
+        const next = { ...customPresets, [name]: { positions, metrics, custom: true, description: 'Rôle proposé par l\'assistant IA, à partir de votre demande.' } };
+        setCustomPresets(next);
+        saveCustomPresets(next);
+        setRoleName(name);
+        setStrictness(1);
+      }
+    }
+  };
+
   const profile = (
     <Panel title="Profil recherché" icon={Gem} className="min-w-0"
       right={!creating && (
         <button onClick={() => setCreating(true)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6 !px-1.5"><Plus className="w-3 h-3" /> Créer un rôle</button>
       )}>
+      <div className="mb-2"><HunterAssistant catalogue={hunterCatalogue} onApply={applyAiConfig} /></div>
       <label className="block">
         <span className="sr-only">Rôle recherché</span>
         <select className="sv-select w-full" value={roleName} onChange={e => chooseRole(e.target.value)} aria-label="Rôle recherché">
