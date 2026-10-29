@@ -193,7 +193,11 @@ const App: React.FC = () => {
       )}
 
       {view === ViewState.COMPARISON && (
-        <PlayerComparison data={players} />
+        <PlayerComparison
+          data={players}
+          onSelectPlayer={handleSelectPlayer}
+          selectedId={selectedPlayer ? getPlayerSeasonId(selectedPlayer) : undefined}
+        />
       )}
 
       {view === ViewState.SCOUT_REPORT && (
