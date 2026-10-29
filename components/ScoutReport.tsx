@@ -1,110 +1,180 @@
+/**
+ * ScoutVision - Rapports de scouting : espace de travail local
+ * Joueur → snapshot des données → synthèse ScoutVision (Gemini, versionnée) → observations
+ * humaines → statut → export PDF. Dossiers stockés dans le navigateur (localStorage), export et
+ * import JSON pour la sauvegarde. Liste à gauche et dossier à droite à partir de 1 280 px ;
+ * en dessous, liste puis dossier avec retour.
+ */
 
-import React, { useState } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getSeasonShortLabel, getPlayerSeasonTag } from '../types';
-import PlayerCard from './PlayerCard';
-import { Search, FileText, ArrowRight, TrendingUp, ClipboardList } from 'lucide-react';
-import { positionLabel } from '../utils/labels';
-import { PlayerAvatar, TeamLine } from './Media';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ClipboardList, Download, Upload } from 'lucide-react';
+import { PlayerData, getPlayerSeasonId } from '../types';
+import { dataLoader } from '../services/dataLoader';
+import { useAsyncData } from '../hooks/useAsyncData';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import {
+  ObservationInput, ReportStoreError, addObservation, deleteReport, exportFileName, exportReportsJson, importReportsJson, loadReports,
+  removeObservation, setRole, setStatus, setTags, subscribeReports, updateObservation,
+} from '../services/scoutReportStore';
+import { ScoutReportError } from '../services/scoutReportService';
+import { ReportStatus, ScoutReportRecord } from '../types/scoutReport';
+import { downloadReportPdf } from '../utils/scoutReportPdf';
 import { EmptyState, PageHeader } from './ui';
+import { createDossier, generateAndStore } from './reports/generateReport';
+import { PlayerPicker } from './reports/PlayerPicker';
+import { EMPTY_FILTERS, ListFilters, ReportList } from './reports/ReportList';
+import { ReportDossier } from './reports/ReportDossier';
+import { Note } from './reports/shared';
 
-interface ScoutReportProps {
-  data: PlayerData[];
-}
+const WIDE = '(min-width: 1280px)';
+type Step = 'list' | 'dossier';
+const memory: { selectedId: string | null; filters: ListFilters; step: Step } = { selectedId: null, filters: EMPTY_FILTERS, step: 'list' };
 
-const ScoutReport: React.FC<ScoutReportProps> = ({ data }) => {
-  const [selectedPlayer, setSelectedPlayer] = useState<PlayerData | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+interface Flash { tone: 'info' | 'warn'; text: string }
 
-  const filteredPlayers = searchTerm 
-    ? data.filter(p => {
-        const playerName = typeof p.Player === 'string' ? p.Player.toLowerCase() : '';
-        const teamName = typeof p.Team === 'string' ? p.Team.toLowerCase() : '';
-        const searchLower = searchTerm.toLowerCase();
-        return playerName.includes(searchLower) || teamName.includes(searchLower);
-      }).slice(0, 10)
-    : [];
+const ScoutReport: React.FC<{ data: PlayerData[]; onSelectPlayer?: (player: PlayerData) => void }> = ({ data, onSelectPlayer }) => {
+  const [loaded, setLoaded] = useState(() => loadReports());
+  useEffect(() => subscribeReports(() => setLoaded(loadReports())), []);
+  const records = loaded.records;
+  const [selectedId, setSelectedId] = useState<string | null>(memory.selectedId);
+  const [filters, setFilters] = useState<ListFilters>(memory.filters);
+  const [step, setStep] = useState<Step>(memory.step);
+  useEffect(() => { memory.selectedId = selectedId; memory.filters = filters; memory.step = step; }, [selectedId, filters, step]);
+  const [flash, setFlash] = useState<Flash | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const wide = useMediaQuery(WIDE);
+  const curves = useAsyncData(() => dataLoader.loadAgeCurves(), []);
+  const dataIndex = dataLoader.getCachedIndex();
 
-  if (selectedPlayer) {
-    return (
-      <PlayerCard 
-        player={selectedPlayer} 
-        onBack={() => {
-            setSelectedPlayer(null);
-            setSearchTerm('');
-        }} 
-        allPlayers={data}
-      />
-    );
-  }
+  const selected = records.find(r => r.id === selectedId);
+  const byPlayerSeason = useMemo(() => new Map(data.map(p => [getPlayerSeasonId(p), p])), [data]);
+  const existing = useMemo(() => new Set(records.map(r => r.player.playerSeasonId)), [records]);
+  const livePlayer = selected ? byPlayerSeason.get(selected.player.playerSeasonId) : undefined;
+
+  // Focus : titre du dossier après sélection, liste après retour
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pending = useRef<'dossier' | 'list' | null>(null);
+  useEffect(() => {
+    const p = pending.current;
+    if (!p) return;
+    pending.current = null;
+    if (p === 'dossier') { headingRef.current?.focus({ preventScroll: wide }); if (!wide) headingRef.current?.closest('article')?.scrollIntoView({ block: 'start' }); }
+    if (p === 'list') {
+      const row = listRef.current?.querySelector<HTMLButtonElement>('button[aria-current="true"]') ?? listRef.current?.querySelector<HTMLButtonElement>('button');
+      (row ?? pickerRef.current?.querySelector<HTMLInputElement>('input'))?.focus();
+    }
+  });
+
+  const guard = (fn: () => void) => {
+    try { fn(); setFlash(null); } catch (e) { setFlash({ tone: 'warn', text: e instanceof ReportStoreError ? e.message : 'Enregistrement impossible.' }); }
+  };
+  const select = useCallback((id: string) => { setSelectedId(id); setStep('dossier'); setGenerateError(null); setExportError(null); pending.current = 'dossier'; }, []);
+  const back = useCallback(() => { setStep('list'); pending.current = 'list'; }, []);
+
+  const onPick = async (player: PlayerData) => {
+    try {
+      const record = await createDossier(player, curves.data ?? null);
+      select(record.id);
+      setFlash(existing.has(record.player.playerSeasonId) ? null : { tone: 'info', text: `Dossier ouvert pour ${record.player.name} : données figées à aujourd'hui, sans synthèse IA.` });
+    } catch (e) { setFlash({ tone: 'warn', text: e instanceof ReportStoreError ? e.message : 'Le dossier n\'a pas pu être créé.' }); }
+  };
+
+  const onGenerate = livePlayer ? async () => {
+    setGenerating(true); setGenerateError(null);
+    try { await generateAndStore(livePlayer, curves.data ?? null); }
+    catch (e) { setGenerateError(e instanceof ScoutReportError || e instanceof ReportStoreError ? e.message : 'Le rapport n\'a pas pu être généré. Réessayez.'); }
+    finally { setGenerating(false); }
+  } : undefined;
+
+  const onExportPdf = (record: ScoutReportRecord) => {
+    setExporting(true); setExportError(null);
+    // Laisse le bouton afficher son état avant le calcul synchrone du PDF
+    setTimeout(() => {
+      try { downloadReportPdf(record, { dataGeneratedAt: dataIndex?.generatedAt }); }
+      catch { setExportError('L\'export PDF a échoué. Réessayez ; si le problème persiste, exportez les dossiers en JSON.'); }
+      finally { setExporting(false); }
+    }, 0);
+  };
+
+  const exportJson = () => {
+    const blob = new Blob([exportReportsJson(records)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = exportFileName(); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setFlash({ tone: 'info', text: `${records.length} dossier${records.length > 1 ? 's' : ''} exporté${records.length > 1 ? 's' : ''} en JSON (dossiers seulement, aucune clé ni cache).` });
+  };
+  const fileInput = useRef<HTMLInputElement>(null);
+  const importJson = async (file: File | undefined) => {
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const r = importReportsJson(text);
+      setFlash({ tone: r.errors.length && !r.added && !r.updated ? 'warn' : 'info', text: `Import : ${r.added} ajouté${r.added > 1 ? 's' : ''}, ${r.updated} mis à jour, ${r.skipped} ignoré${r.skipped > 1 ? 's' : ''}.${r.errors.length ? ` ${r.errors[0]}` : ''}` });
+    } catch (e) { setFlash({ tone: 'warn', text: e instanceof ReportStoreError ? e.message : 'Import impossible.' }); }
+    if (fileInput.current) fileInput.current.value = '';
+  };
+
+  const showStep = (s: Step) => (step === s ? '' : 'max-xl:hidden');
+  const dossierVisible = wide || step === 'dossier';
 
   return (
-    <div className="p-5 space-y-4 max-w-5xl animate-fade-in">
-      <PageHeader
-        title="Rapports de scouting"
-        icon={ClipboardList}
-        description="Choisissez un joueur : sa fiche complète s'ouvre (percentiles, radar, RAPM, projection, tirs). Le rapport rédigé par IA s'y génère en complément des données, et la fiche s'exporte en PDF."
-      />
+    <div className="p-4 sm:p-5 space-y-4 animate-fade-in overflow-x-clip">
+      <PageHeader title="Rapports de scouting" icon={ClipboardList}
+        description="Dossiers par joueur-saison : données figées, synthèse ScoutVision versionnée, observations humaines, statut et export PDF. Stockés dans ce navigateur ; exportez-les en JSON pour les conserver." />
 
-      <div className="relative w-full max-w-xl">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4" />
-        <input type="text" placeholder="Rechercher un joueur ou un club" className="sv-input pl-8" aria-label="Rechercher un joueur ou un club"
-          value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} autoFocus />
-      </div>
+      {loaded.ignored > 0 && <Note tone="warn">{loaded.ignored} enregistrement{loaded.ignored > 1 ? 's' : ''} illisible{loaded.ignored > 1 ? 's' : ''} dans le stockage local, laissé{loaded.ignored > 1 ? 's' : ''} de côté. Les autres dossiers sont intacts.</Note>}
+      {flash && <Note tone={flash.tone}>{flash.text}</Note>}
 
-      {searchTerm ? (
-        filteredPlayers.length > 0 ? (
-          <div className="sv-panel overflow-hidden">
-            <table className="sv-table">
-              <thead>
-                <tr>
-                  <th className="pl-4">Joueur</th>
-                  <th>Poste</th>
-                  <th className="text-right">Âge</th>
-                  <th className="text-right">Min</th>
-                  <th className="text-right">Valeur</th>
-                  <th className="pr-4"><span className="sr-only">Ouvrir</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPlayers.map(player => (
-                  <tr key={getPlayerSeasonId(player)} className="group cursor-pointer" onClick={() => setSelectedPlayer(player)}>
-                    <td className="pl-4">
-                      <span className="flex items-center gap-2.5">
-                        <PlayerAvatar player={player} size="sm" />
-                        <span className="min-w-0">
-                          <span className="block text-[13px] font-medium text-ink group-hover:text-accent transition-colors">{player.Player || 'Inconnu'}<span className="sv-tag !h-4 !px-1 !text-[9px] ml-1.5 align-middle !font-medium">{getPlayerSeasonTag(player)}</span></span>
-                          <span className="block text-2xs text-ink-3"><TeamLine player={player} /></span>
-                        </span>
-                      </span>
-                    </td>
-                    <td><span className="sv-tag">{positionLabel(player.Position)}</span></td>
-                    <td className="text-right text-ink-2">{player.Age ?? '–'}</td>
-                    <td className="text-right text-ink-3">{Number(player['Minutes played'] || 0).toLocaleString('fr-FR')}</td>
-                    <td className="text-right text-ink font-medium">{typeof player['Market value'] === 'number' ? `€${(player['Market value'] / 1000000).toFixed(1)}M` : '–'}</td>
-                    <td className="pr-4 text-right"><ArrowRight className="w-3.5 h-3.5 inline text-ink-4 group-hover:text-accent" /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="px-4 py-1.5 text-2xs text-ink-4 border-t border-line">Les {filteredPlayers.length} premiers résultats</div>
-          </div>
-        ) : (
-          <div className="sv-panel"><EmptyState icon={Search} title={`Aucun joueur ne correspond à « ${searchTerm} »`} /></div>
-        )
-      ) : (
-        <div className="sv-panel grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-line">
-          {[
-            { icon: TrendingUp, title: 'Données d\'abord', text: 'Percentiles par poste et par niveau, radar, forces et faiblesses, RAPM et finition.' },
-            { icon: FileText, title: 'Rapport rédigé', text: 'Synthèse en langage football générée par Gemini à partir des chiffres de la fiche : à relire, pas à croire sur parole.' },
-            { icon: Search, title: '35 compétitions', text: 'Tous les joueurs des saisons chargées, export PDF de la fiche.' },
-          ].map(f => (
-            <div key={f.title} className="px-4 py-3">
-              <div className="sv-label flex items-center gap-1.5"><f.icon className="w-3 h-3" /> {f.title}</div>
-              <p className="text-xs text-ink-3 mt-1.5 leading-relaxed">{f.text}</p>
+      <div className="xl:grid xl:grid-cols-[26rem_minmax(0,1fr)] 2xl:grid-cols-[28rem_minmax(0,1fr)] xl:gap-4 xl:items-start">
+        <div className={`space-y-3 min-w-0 ${showStep('list')}`}>
+          <section className="sv-panel" aria-label="Nouveau dossier">
+            <div className="px-4 pt-3 pb-3">
+              <p className="sv-label mb-1.5">Nouveau dossier <span className="normal-case tracking-normal font-normal text-ink-4">· joueur-saison de la saison chargée</span></p>
+              <div ref={pickerRef}><PlayerPicker data={data} existing={existing} onPick={onPick} autoFocus={records.length === 0} /></div>
             </div>
-          ))}
+          </section>
+          <section className="sv-panel" aria-labelledby="reports-list-title">
+            <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
+              <h2 id="reports-list-title" className="text-xs font-semibold uppercase tracking-[0.08em] text-ink">Dossiers</h2>
+              <div className="flex items-center gap-1.5">
+                <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={exportJson} disabled={records.length === 0}><Download className="w-3.5 h-3.5" aria-hidden /> Exporter</button>
+                <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={() => fileInput.current?.click()}><Upload className="w-3.5 h-3.5" aria-hidden /> Importer</button>
+                <input ref={fileInput} type="file" accept="application/json,.json" className="sr-only" aria-label="Importer des dossiers (JSON)" onChange={e => importJson(e.target.files?.[0])} />
+              </div>
+            </div>
+            {records.length === 0 ? (
+              <EmptyState icon={ClipboardList} title="Aucun dossier pour l'instant.">Cherchez un joueur ci-dessus : son dossier s'ouvre avec ses données figées, même sans Gemini.</EmptyState>
+            ) : (
+              <ReportList records={records} filters={filters} onFilters={patch => setFilters(f => ({ ...f, ...patch }))} selectedId={selectedId ?? undefined} onSelect={select} listRef={listRef} />
+            )}
+          </section>
         </div>
-      )}
+
+        <aside aria-label="Dossier sélectionné" className={`${showStep('dossier')} min-w-0 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto xl:overscroll-contain rounded-lg`}>
+          <p className="sr-only" aria-live="polite">{selected ? `Dossier affiché : ${selected.player.name}` : ''}</p>
+          {selected && dossierVisible ? (
+            <ReportDossier key={selected.id} record={selected} livePlayer={livePlayer} curves={curves.data ?? null} dataIndex={dataIndex}
+              onStatus={(s: ReportStatus) => guard(() => setStatus(selected.id, s))}
+              onTags={tags => guard(() => setTags(selected.id, tags))}
+              onRole={role => guard(() => setRole(selected.id, role))}
+              onAddObservation={(obs: ObservationInput) => guard(() => addObservation(selected.id, obs))}
+              onUpdateObservation={(id, obs) => guard(() => updateObservation(selected.id, id, obs))}
+              onRemoveObservation={id => guard(() => removeObservation(selected.id, id))}
+              onGenerate={onGenerate} generating={generating} generateError={generateError}
+              onExportPdf={() => onExportPdf(selected)} exporting={exporting} exportError={exportError}
+              onDelete={() => { guard(() => deleteReport(selected.id)); setSelectedId(null); back(); }}
+              onOpenPlayer={livePlayer && onSelectPlayer ? () => onSelectPlayer(livePlayer) : undefined}
+              onBack={wide ? undefined : back} headingRef={headingRef} />
+          ) : (
+            <div className="sv-panel"><EmptyState icon={ClipboardList} title="Aucun dossier sélectionné.">Choisissez un dossier dans la liste, ou cherchez un joueur pour en ouvrir un.</EmptyState></div>
+          )}
+        </aside>
+      </div>
     </div>
   );
 };

@@ -9,7 +9,7 @@
  */
 
 import { auditReport, sanitizeReport } from './reportAudit';
-import { buildCorrectionPrompt, buildReportFacts, buildScoutReportPrompt, PlayerRow, ReportOptions } from './reportFacts';
+import { PROMPT_VERSION, ReportFacts, buildCorrectionPrompt, buildReportFacts, buildScoutReportPrompt, PlayerRow, ReportOptions } from './reportFacts';
 
 // ============================================
 // LIMITES
@@ -41,7 +41,8 @@ export function resolveGeminiModel(configured: string | undefined): string {
 // TYPES
 // ============================================
 
-export type { PlayerRow, ReportOptions };
+export type { PlayerRow, ReportFacts, ReportOptions };
+export { PROMPT_VERSION };
 
 export interface ReportRequest {
   player: PlayerRow;
@@ -155,9 +156,20 @@ export interface ReportMeta {
   generatedAt: string;
 }
 
+/**
+ * Réponse d'une génération : le texte, le modèle, les faits exacts que le modèle a reçus (le
+ * navigateur les conserve avec le rapport) et la version du prompt
+ */
+export interface ReportResponse {
+  content: string;
+  meta: ReportMeta;
+  facts: ReportFacts;
+  promptVersion: string;
+}
+
 export interface HandlerResult {
   status: number;
-  body: { report: string; meta: ReportMeta } | { error: string };
+  body: ReportResponse | { error: string };
 }
 
 // ============================================
@@ -265,7 +277,7 @@ export async function handleScoutReport(body: unknown, deps: HandlerDeps): Promi
       requestedModel,
       generatedAt: (deps.now?.() ?? new Date()).toISOString(),
     };
-    return { status: 200, body: { report, meta } };
+    return { status: 200, body: { content: report, meta, facts, promptVersion: PROMPT_VERSION } };
   } catch (error) {
     deps.log?.(`[scout-report] échec de l'appel Gemini : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey)}`);
     return { status: 502, body: { error: 'Le service de génération est indisponible pour le moment. Réessayez dans quelques instants.' } };

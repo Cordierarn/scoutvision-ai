@@ -181,7 +181,7 @@ the report endpoint). To rebuild the data with Python, see [data pipeline](docs/
 | Data preparation | Python, pandas, pyarrow |
 | Statistical models | NumPy and custom modelling code (`scripts/models.py`, `scripts/lab.py`) |
 | AI summaries | Gemini through a server-side endpoint (`server/`) |
-| Exports | jsPDF, html2canvas |
+| Exports | jsPDF (texte natif, radar vectoriel), JSON des dossiers |
 | Automation | GitHub Actions |
 
 ## Data & privacy

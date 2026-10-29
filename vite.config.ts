@@ -3,8 +3,8 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { scoutReportApi } from './server/scoutReportPlugin';
 
-// Images PitchAPI servies en même origine : le CDN n'envoie pas d'en-tête CORS,
-// ce qui empêche html2canvas de les inclure dans l'export PDF.
+// Images PitchAPI servies en même origine : le CDN n'envoie pas d'en-tête CORS
+// (photos et logos affichés par l'application sans dépendre d'un autre domaine).
 // Un hébergement de production doit reproduire cette réécriture /cdn/* -> cdn.pitchapi.dev/*.
 const cdnProxy = {
   target: 'https://cdn.pitchapi.dev',

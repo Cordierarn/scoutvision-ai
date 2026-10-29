@@ -206,7 +206,7 @@ const App: React.FC = () => {
       )}
 
       {view === ViewState.SCOUT_REPORT && (
-        <ScoutReport data={players} />
+        <ScoutReport data={players} onSelectPlayer={handleSelectPlayer} />
       )}
 
       {view === ViewState.PLAYER_DETAIL && selectedPlayer && (

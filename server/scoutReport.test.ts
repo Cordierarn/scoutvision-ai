@@ -1,7 +1,7 @@
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRateLimiter, handleScoutReport, MAX_BODY_BYTES, redact, validateReportRequest } from './scoutReport';
+import { createRateLimiter, handleScoutReport, MAX_BODY_BYTES, redact, validateReportRequest, PROMPT_VERSION, ReportResponse } from './scoutReport';
 import { buildReportFacts, buildScoutReportPrompt } from './reportFacts';
 import { SCOUT_REPORT_PATH, scoutReportMiddleware } from './scoutReportPlugin';
 
@@ -72,7 +72,14 @@ describe('handleScoutReport', () => {
 
   it('200 avec le texte généré et le modèle dans les métadonnées', async () => {
     const r = await handleScoutReport({ player }, { apiKey: KEY, model: 'gemini-test', generate: async () => VALID_REPORT, now: () => new Date('2026-10-28T12:00:00Z') });
-    expect(r).toEqual({ status: 200, body: { report: VALID_REPORT, meta: { model: 'gemini-test', requestedModel: 'gemini-test', generatedAt: '2026-10-28T12:00:00.000Z' } } });
+    expect(r.status).toBe(200);
+    const body = r.body as ReportResponse;
+    expect(body.content).toBe(VALID_REPORT);
+    expect(body.meta).toEqual({ model: 'gemini-test', requestedModel: 'gemini-test', generatedAt: '2026-10-28T12:00:00.000Z' });
+    // Les faits renvoyés sont ceux du prompt : le navigateur les fige avec le rapport
+    expect(body.facts).toEqual(buildReportFacts(player as never, {}));
+    expect(body.promptVersion).toBe(PROMPT_VERSION);
+    expect(body.promptVersion).toMatch(/^scout-report-v\d+$/);
   });
 
   it('502 sur une erreur Gemini, sans jamais renvoyer ni journaliser la clé', async () => {
@@ -126,7 +133,7 @@ describe('scoutReportMiddleware (serveur HTTP réel)', () => {
     const res = await post(base, JSON.stringify({ player }));
     const text = await res.text();
     expect(res.status).toBe(200);
-    expect(JSON.parse(text)).toMatchObject({ report: VALID_REPORT, meta: { model: 'gemini-serveur', requestedModel: 'gemini-serveur' } });
+    expect(JSON.parse(text)).toMatchObject({ content: VALID_REPORT, meta: { model: 'gemini-serveur', requestedModel: 'gemini-serveur' }, promptVersion: PROMPT_VERSION });
     expect(text).not.toContain(KEY);
     expect(res.headers.get('cache-control')).toBe('no-store');
   });

@@ -2,9 +2,12 @@
  * ScoutVision AI - rapport de scouting rédigé par IA
  * Le navigateur n'appelle jamais Gemini : il envoie la ligne du joueur et les indicateurs
  * calculés à l'endpoint serveur POST /api/scout-report (server/), qui détient la clé.
+ * Le serveur renvoie le texte, le modèle réel, les faits exacts qu'il a transmis au modèle et
+ * la version du prompt : le dossier de scouting les conserve ensemble.
  */
 
-import { PlayerData, PlayerPercentileProfile, ShotStats } from '../types';
+import { PlayerData, PlayerPercentileProfile, ShotStats, getPlayerSeasonId } from '../types';
+import type { ReportFacts } from '../server/reportFacts';
 
 export const SCOUT_REPORT_ENDPOINT = '/api/scout-report';
 
@@ -33,8 +36,10 @@ export interface ScoutReportMeta {
 }
 
 export interface ScoutReportResult {
-  report: string;
+  content: string;
   meta: ScoutReportMeta | null;
+  facts: ReportFacts | null;    // faits exacts transmis au modèle (snapshot du dossier)
+  promptVersion: string | null;
 }
 
 /**
@@ -55,12 +60,24 @@ export class ScoutReportError extends Error {
 }
 
 /**
- * Cache pour les rapports générés
+ * Cache des rapports générés (30 minutes), par ligne joueur-saison et par entrée déterminante
+ * du snapshot : jamais par nom (des homonymes et des lignes championnat / coupe partagent un nom,
+ * un club et un libellé de compétition)
  */
 const reportCache = new Map<string, { result: ScoutReportResult; timestamp: number }>();
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
-const getCacheKey = (player: PlayerData): string => `${player.Player}_${player.Team}_${player.League}`;
+export function reportCacheKey(player: PlayerData, options: ScoutReportOptions = {}): string {
+  const roles = (options.bestRoles ?? []).map(r => `${r.role}:${Math.round(r.normalizedScore)}`).join(',');
+  return [
+    getPlayerSeasonId(player), player['Minutes played'] ?? '', options.language ?? 'fr', options.detailLevel ?? '',
+    options.targetRole ?? '', options.seasonInProgress ? 1 : 0, roles,
+  ].join('|');
+}
+
+export function clearReportCache(): void {
+  reportCache.clear();
+}
 
 /**
  * Corps envoyé au serveur : seulement ce que le prompt utilise
@@ -87,13 +104,16 @@ export function buildReportRequest(player: PlayerData, options: ScoutReportOptio
   };
 }
 
+interface WirePayload { content?: string; report?: string; meta?: Partial<ScoutReportMeta>; facts?: unknown; promptVersion?: unknown; error?: string }
+
 /**
- * Génère un rapport de scouting via le serveur ; lève ScoutReportError en cas d'échec
+ * Génère un rapport de scouting via le serveur ; lève ScoutReportError en cas d'échec.
+ * skipCache : nouvelle version demandée explicitement (le cache de 30 minutes est ignoré).
  */
-export async function generateScoutReport(player: PlayerData, options?: ScoutReportOptions): Promise<ScoutReportResult> {
-  const cacheKey = getCacheKey(player);
+export async function generateScoutReport(player: PlayerData, options?: ScoutReportOptions, { skipCache = false } = {}): Promise<ScoutReportResult> {
+  const cacheKey = reportCacheKey(player, options);
   const cached = reportCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+  if (!skipCache && cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.result;
   }
 
@@ -108,8 +128,9 @@ export async function generateScoutReport(player: PlayerData, options?: ScoutRep
     throw new ScoutReportError('Serveur de rapports injoignable. Vérifiez votre connexion et réessayez.');
   }
 
-  const payload = await response.json().catch(() => null) as { report?: string; meta?: Partial<ScoutReportMeta>; error?: string } | null;
-  if (!response.ok || typeof payload?.report !== 'string') {
+  const payload = await response.json().catch(() => null) as WirePayload | null;
+  const content = typeof payload?.content === 'string' ? payload.content : typeof payload?.report === 'string' ? payload.report : undefined;
+  if (!response.ok || content === undefined) {
     throw new ScoutReportError(
       payload?.error ?? (response.status === 404
         ? 'Endpoint de rapport absent : lancez l\'application avec son serveur (npm run dev ou npm run preview).'
@@ -118,11 +139,13 @@ export async function generateScoutReport(player: PlayerData, options?: ScoutRep
     );
   }
 
-  const m = payload.meta;
+  const m = payload!.meta;
   const meta = m && typeof m.model === 'string' && m.model
     ? { model: m.model, requestedModel: typeof m.requestedModel === 'string' ? m.requestedModel : m.model, generatedAt: typeof m.generatedAt === 'string' ? m.generatedAt : new Date().toISOString() }
     : null;
-  const result = { report: payload.report, meta };
+  const facts = payload!.facts && typeof payload!.facts === 'object' ? payload!.facts as ReportFacts : null;
+  const promptVersion = typeof payload!.promptVersion === 'string' && payload!.promptVersion ? payload!.promptVersion : null;
+  const result: ScoutReportResult = { content, meta, facts, promptVersion };
   reportCache.set(cacheKey, { result, timestamp: Date.now() });
   return result;
 }
