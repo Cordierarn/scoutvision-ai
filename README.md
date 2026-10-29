@@ -107,6 +107,9 @@ verdict on a player.
 ### AI scout reports (optional)
 - Optional grounded scouting summaries written from ScoutVision's structured analyses.
 - Gemini writes the text only; it does not compute any ScoutVision model.
+- Same guard for the comparative synthesis (Comparison, Recruitment), the opposition briefing
+  (Team analysis) and the natural-language assistant of the Gem Hunter, which only proposes
+  filters validated against the catalogue.
 
 ## Key numbers
 

@@ -236,6 +236,25 @@ style without subsetting, which is why it was not adopted).
 Without `GEMINI_API_KEY`, generation answers 503 and the dossier still works: snapshot,
 observations, status, tags, JSON export/import and PDF.
 
+## Grounded AI functions (`/api/ai/*`)
+
+Three more functions share the report's server guard (`server/groundedAi.ts`, routed by the same
+middleware with the same body limit, rate limiter and 503 without `GEMINI_API_KEY`). The browser
+sends only facts ScoutVision already computed; the server builds the prompt (never an open proxy),
+calls Gemini with retry, audits the text (any number absent from the facts, any unmeasured topic,
+any verdict, missing headings), runs one correction pass and removes the sentences still at
+fault. Each answer carries the real model, the exact facts sent and an explicit prompt version
+(`ai-compare-v1`, `ai-opposition-v1`, `ai-hunter-v1`). Results are not stored.
+
+| Function | Where | Facts sent | Output |
+|---|---|---|---|
+| `compare` | Comparison page (players compared), Recruitment candidate dossier (candidate vs starter) | `ReportFacts` of each player, built server-side from the rows | four sections: profiles, main differences, complementarity and context, points to verify |
+| `opposition` | Team analysis, Style tab | `utils/oppositionFacts.ts`: season stats with league rank, main formation and starters, squad profile, most-used players with their role; never a raw row | four sections: identity and results, style and trends, statistical strengths and vulnerabilities, points to prepare |
+| `hunter` | Gem Hunter, "Décrire le profil recherché" | the scout's sentence (500 characters max) and the catalogue (positions, roles, metric keys, competitions, season capabilities) | a strict JSON configuration validated against the catalogue (unknown role, metric or competition dropped and listed as "non traduit"), shown before being applied; extra criteria become a custom role; the model computes no score |
+
+Validation without a key: unit tests with injected generators (`server/groundedAi.test.ts`) and
+browser runs with mocked responses explicitly labelled "MAQUETTE D'AUDIT".
+
 ## Limitations
 
 - The direction of a metric (more is better or worse) can only be checked for the metrics the
