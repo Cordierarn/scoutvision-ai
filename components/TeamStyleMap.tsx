@@ -7,8 +7,9 @@
 
 import React, { useMemo } from 'react';
 import { Compass } from 'lucide-react';
-import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ReferenceLine, LabelList } from 'recharts';
+import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ReferenceLine, LabelList } from 'recharts';
 import { TeamStats } from '../types';
+import { useElementWidth } from './Pitch';
 import { dataLoader } from '../services/dataLoader';
 import { styleLabel } from '../utils/labels';
 import { STYLE_MIN_MATCHES, STYLE_PCA_VARIANCE, STYLE_TREND_MATCHES, styleMapPopulation, styleReliability, teamValue } from '../utils/teamMetrics';
@@ -40,6 +41,8 @@ interface Point {
   styleName: string;   // pas « style » : recharts transmet les champs du point au SVG
 }
 
+const CHART_HEIGHT = 320;   // hauteur du conteneur (h-80)
+
 const seasonTag = (season: string) => season.replace(/^20(\d{2})-(\d{2})$/, '$1-$2');
 
 /**
@@ -52,6 +55,7 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?:
   const profile = dataLoader.getCachedIndex()?.models?.styles?.find(s => s.name === style)?.profile;
   const matches = teamValue(team, 'Matches');
   const reliability = styleReliability(matches, style);
+  const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
 
   const { selected, club, same, others } = useMemo(() => {
     const points = styleMapPopulation(team, teams, allSeasons).map(({ team: t, kind }) => ({ kind, p: {
@@ -92,9 +96,10 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?:
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SAME_STYLE }} />Même style</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: OTHER }} />Autres équipes</span>
           </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
+          {/* Largeur mesurée avant le montage du graphique (pas de premier rendu à -1 × -1 de ResponsiveContainer) */}
+          <div ref={chartRef} className="h-80">
+            {chartWidth > 0 && (
+              <ScatterChart width={chartWidth} height={CHART_HEIGHT} margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
                 <CartesianGrid stroke={INK.grid} />
                 <XAxis type="number" dataKey="x" tick={false} axisLine={{ stroke: INK.axis }}
                   label={{ value: 'Direct  ←  contrôle du jeu  →  Dominant', fill: INK.muted, fontSize: 11, position: 'bottom' }} />
@@ -128,7 +133,7 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?:
                   <LabelList dataKey="label" position="top" fill={INK.primary} fontSize={12} fontWeight={600} />
                 </Scatter>
               </ScatterChart>
-            </ResponsiveContainer>
+            )}
           </div>
         </div>
 

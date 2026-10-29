@@ -6,7 +6,7 @@ description: Règles de qualité frontend propres à ScoutVision (React 19, Tail
 # Qualité frontend ScoutVision
 
 ## Pages gelées
-Layout / navigation, Base joueurs, Fiche joueur, Chasseur de pépites, Comparaison et Joueurs similaires sont validés et gelés : n'y toucher que pour un bug réel ou la régression d'un composant partagé.
+Layout / navigation, Base joueurs, Fiche joueur, Chasseur de pépites, Comparaison, Joueurs similaires et Analyse d'équipe sont validés et gelés : n'y toucher que pour un bug réel ou la régression d'un composant partagé.
 
 ## Périmètre et méthode
 - Mesurer avant de corriger. Classer P0 à P3 et ne présenter comme confirmé que ce qui a été reproduit dans un vrai navigateur, sur les vraies données (`npm run data:pull`). Aucune donnée fictive.

@@ -59,8 +59,11 @@ export interface TeamShots {
 
 /**
  * Tirs pour et contre d'une équipe. Ses matchs sont ceux où elle apparaît dans le fichier
- * (au moins un tir, but contre son camp compris) : un match sans aucun tir de l'équipe
- * n'y figure pas.
+ * (au moins un tir, but contre son camp compris). Limite connue : un match sans aucun tir de
+ * l'équipe n'y figure pas, et les tirs adverses de ce match manquent aux tirs contre. Les
+ * données publiées n'ont pas la liste des matchs joués (forecast.json : matchs à venir ;
+ * compositions agrégées par formation ; team_season : un nombre de matchs). Mesuré : 5 matchs
+ * sur 10 826 en 2025-26, 1 sur 3 587 en 2026-27, 5 sur 5 919 en 2021-22.
  */
 export function splitTeamShots(shots: ShotEvent[], team: string): TeamShots {
   const matches = new Set(shots.filter(s => s.team === team && s.match_id).map(s => s.match_id!));

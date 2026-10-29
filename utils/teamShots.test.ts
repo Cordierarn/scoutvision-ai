@@ -99,3 +99,12 @@ describe('filtres de tirs', () => {
     expect(filterShots(s.for, DEFAULT_SHOT_FILTERS)).toEqual(s.for);
   });
 });
+
+describe('limite connue : match sans tir de l\'équipe', () => {
+  it('les tirs adverses d\'un match où l\'équipe n\'a pas tiré ne sont pas rattachés (pas de liste des matchs publiée)', () => {
+    const solo = shot(['m_solo00_s_1', 50, 'Goal', 0.9, 0.5, 0.4, 'Adversaire', 'p_adv', 'Monaco', 'h', 'OpenPlay', 'RightFoot', null]);
+    const s = splitTeamShots([...LE_HAVRE, solo], 'Le Havre');
+    expect(s.matches).toBe(4);
+    expect(s.against.some(x => x.match_id === 'm_solo00')).toBe(false);
+  });
+});

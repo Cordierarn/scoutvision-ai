@@ -48,7 +48,9 @@ Every index and projection below is a scouting aid. None of them is a verdict on
   that concedes. It is credited to the opponent, listed apart, and kept out of xG, shots on target,
   conversion and the shot map (`utils/teamShots.ts`). Le Havre 2025-26: 32 goals for (31 from shots,
   1 own goal), as in team_season; the former count was 34. Shots against = shots of the other team
-  in the team's matches.
+  in the team's matches. Known limit: a match where the team has no shot at all is not in the shot
+  file under its name, so the opponent's shots of that match are missing from "shots against"; the
+  published data has no list of played matches (5 such matches of 10,826 in 2025-26).
 - Formations: most used first. A slot without coordinates (`x = y = 0` in the files) is not placed
   and marks the formation incomplete; when a formation has more than 11 slots, slots at exactly the
   same coordinates (two position_id grids) are merged (`utils/teamLineups.ts`). Position held = read

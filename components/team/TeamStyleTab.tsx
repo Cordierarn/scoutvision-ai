@@ -1,16 +1,14 @@
 /**
  * ScoutVision - Analyse d'équipe, onglet « Style & forces »
  * Les 6 indicateurs du modèle de style (valeur, rang, sens), les résultats de la saison,
- * le profil de l'effectif (squadProfile, comme le Recrutement), puis la carte des styles.
+ * puis la carte des styles. Le profil de l'effectif est dans « Effectif & profondeur ».
  */
 
 import React, { useMemo } from 'react';
 import { Compass, Crosshair } from 'lucide-react';
 import { TeamStats } from '../../types';
-import { DimensionScore } from '../../utils/recruitment';
 import { STYLE_METRICS, TEAM_METRICS, TeamMetricRank, teamMetricRanks } from '../../utils/teamMetrics';
 import { Panel, PercentileBar, PercentileValue, EmptyState } from '../ui';
-import { SquadProfilePanel } from '../SquadProfile';
 import TeamStyleMap from '../TeamStyleMap';
 
 const DEC = [0, 1, 2].map(d => new Intl.NumberFormat('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -53,10 +51,7 @@ const TeamStyleTab: React.FC<{
   teams: TeamStats[];
   leagueName: string;
   allSeasons: boolean;
-  profile: DimensionScore[] | null;          // null : pas de championnat de référence
-  profileLeague?: string;
-  profileNote?: React.ReactNode;
-}> = ({ team, teams, leagueName, allSeasons, profile, profileLeague, profileNote }) => {
+}> = ({ team, teams, leagueName, allSeasons }) => {
   const style = useMemo(() => (team ? teamMetricRanks(team, teams, STYLE_METRICS) : []), [team, teams]);
   const outcome = useMemo(() => (team ? teamMetricRanks(team, teams, OUTCOME_KEYS.map(k => TEAM_METRICS.find(m => m.key === k)!)) : []), [team, teams]);
 
@@ -79,8 +74,6 @@ const TeamStyleTab: React.FC<{
           <TeamMetricTable ranks={outcome} caption="Résultats de l'équipe" leagueName={leagueName} />
         </Panel>
       </div>
-
-      {profile !== null && <SquadProfilePanel profile={profile} leagueName={profileLeague ?? leagueName} note={profileNote} />}
 
       <TeamStyleMap team={team} teams={teams} allSeasons={allSeasons} />
     </div>

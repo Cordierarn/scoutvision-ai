@@ -223,8 +223,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
         ) : (
           <>
             {tab === 'STYLE' && (
-              <TeamStyleTab team={stats} teams={teamStats} leagueName={leagueName} allSeasons={allSeasons}
-                profile={profile} profileLeague={profileLeague} profileNote={profileNote} />
+              <TeamStyleTab team={stats} teams={teamStats} leagueName={leagueName} allSeasons={allSeasons} />
             )}
             {tab === 'LINEUP' && (
               <TeamLineupTab key={team} teamKey={team} lineups={lineups} lineupsError={lineupsData.error} onRetry={lineupsData.retry}
