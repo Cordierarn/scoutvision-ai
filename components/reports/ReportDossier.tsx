@@ -105,10 +105,11 @@ export interface ReportDossierProps {
 }
 
 /** Rend le focus au bouton quand une action qui l'avait désactivé se termine (sinon il retombe sur le document) */
-function useRefocus(busy: boolean, ref: React.RefObject<HTMLButtonElement | null>) {
+function useRefocus(busy: boolean, ref: React.RefObject<HTMLButtonElement | null> | (() => HTMLButtonElement | null)) {
   const was = useRef(false);
   useEffect(() => {
-    if (was.current && !busy && document.activeElement === document.body) ref.current?.focus();
+    const target = typeof ref === 'function' ? ref() : ref.current;
+    if (was.current && !busy && document.activeElement === document.body) target?.focus();
     was.current = busy;
   }, [busy, ref]);
 }
@@ -140,9 +141,13 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
   // ensuite, et la fin du formulaire d'observation rend le focus au bouton « Observation »
   const generateRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
+  const exportFullRef = useRef<HTMLButtonElement>(null);
+  const lastExport = useRef<PdfMode>('synthese');
   const addRef = useRef<HTMLButtonElement>(null);
   useRefocus(generating, generateRef);
-  useRefocus(exporting, exportRef);
+  // Les deux boutons d'export sont désactivés pendant l'export : le focus revient sur celui qui a été utilisé
+  useRefocus(exporting, () => (lastExport.current === 'complet' ? exportFullRef.current : exportRef.current));
+  const exportPdf = (mode: PdfMode) => { lastExport.current = mode; onExportPdf(mode); };
   const closeForm = () => { setAdding(false); requestAnimationFrame(() => addRef.current?.focus()); };
 
   const radarMetrics = useMemo(() => roleMetrics(facts, role, 8), [facts, role]);
@@ -197,8 +202,8 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
           )}
           <div className="flex flex-wrap gap-1.5 ml-auto">
             {onOpenPlayer && <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={onOpenPlayer}><ExternalLink className="w-3.5 h-3.5" aria-hidden /> Fiche</button>}
-            <button ref={exportRef} type="button" className="sv-btn sv-btn-secondary sv-btn-sm" onClick={() => onExportPdf('synthese')} disabled={exporting} title="Rapport synthèse : quatre pages, dernière synthèse"><Download className="w-3.5 h-3.5" aria-hidden /> {exporting ? 'Export…' : 'PDF'}</button>
-            <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={() => onExportPdf('complet')} disabled={exporting} title="Rapport complet : annexe avec l'historique des synthèses et toutes les métriques">PDF complet</button>
+            <button ref={exportRef} type="button" className="sv-btn sv-btn-secondary sv-btn-sm" onClick={() => exportPdf('synthese')} disabled={exporting} title="Rapport synthèse : quatre pages, dernière synthèse"><Download className="w-3.5 h-3.5" aria-hidden /> {exporting ? 'Export…' : 'PDF'}</button>
+            <button ref={exportFullRef} type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={() => exportPdf('complet')} disabled={exporting} title="Rapport complet : annexe avec l'historique des synthèses et toutes les métriques">PDF complet</button>
             {!confirmDelete
               ? <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={() => setConfirmDelete(true)}><Trash2 className="w-3.5 h-3.5" aria-hidden /> Supprimer</button>
               : (
@@ -210,7 +215,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
               )}
           </div>
         </div>
-        {exportError && <div className="mt-2"><LoadError message={exportError} onRetry={() => onExportPdf('synthese')} /></div>}
+        {exportError && <div className="mt-2"><LoadError message={exportError} onRetry={() => exportPdf('synthese')} /></div>}
         <div className="mt-2.5"><TagsEditor tags={r.tags} onChange={onTags} /></div>
       </SectionBlock>
 
