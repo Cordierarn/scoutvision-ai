@@ -333,7 +333,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
     setExportError(null);
     try {
       const source = record ?? await draftDossier(player, await dataLoader.loadAgeCurves().catch(() => null));
-      downloadReportPdf(source, { summaryId: summary?.id, dataGeneratedAt: dataIndex?.generatedAt });
+      await downloadReportPdf(source, { summaryId: summary?.id, dataGeneratedAt: dataIndex?.generatedAt });
     } catch (error) {
       console.error('Échec de l\'export PDF :', error);
       setExportError('Échec de l\'export PDF. Réessayez.');

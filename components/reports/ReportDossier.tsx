@@ -23,6 +23,7 @@ import { useElementWidth } from '../Pitch';
 import { BRAND, INK } from '../../theme/charts';
 import { ObservationForm } from './ObservationForm';
 import { Note, STATUS_META, SectionBlock, StatusChip, TYPE_LABELS, fmtDate, fmtDateTime } from './shared';
+import { PdfMode } from '../../utils/scoutReportPdf';
 
 const INT = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 const D1 = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -94,7 +95,7 @@ export interface ReportDossierProps {
   onGenerate?: () => void;
   generating: boolean;
   generateError: string | null;
-  onExportPdf: () => void;
+  onExportPdf: (mode: PdfMode) => void;   // synthèse (4 pages) ou complet (annexe : historique, toutes les métriques)
   exporting: boolean;
   exportError: string | null;
   onDelete: () => void;
@@ -196,7 +197,8 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
           )}
           <div className="flex flex-wrap gap-1.5 ml-auto">
             {onOpenPlayer && <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={onOpenPlayer}><ExternalLink className="w-3.5 h-3.5" aria-hidden /> Fiche</button>}
-            <button ref={exportRef} type="button" className="sv-btn sv-btn-secondary sv-btn-sm" onClick={onExportPdf} disabled={exporting}><Download className="w-3.5 h-3.5" aria-hidden /> {exporting ? 'Export…' : 'PDF'}</button>
+            <button ref={exportRef} type="button" className="sv-btn sv-btn-secondary sv-btn-sm" onClick={() => onExportPdf('synthese')} disabled={exporting} title="Rapport synthèse : quatre pages, dernière synthèse"><Download className="w-3.5 h-3.5" aria-hidden /> {exporting ? 'Export…' : 'PDF'}</button>
+            <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={() => onExportPdf('complet')} disabled={exporting} title="Rapport complet : annexe avec l'historique des synthèses et toutes les métriques">PDF complet</button>
             {!confirmDelete
               ? <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={() => setConfirmDelete(true)}><Trash2 className="w-3.5 h-3.5" aria-hidden /> Supprimer</button>
               : (
@@ -208,7 +210,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
               )}
           </div>
         </div>
-        {exportError && <div className="mt-2"><LoadError message={exportError} onRetry={onExportPdf} /></div>}
+        {exportError && <div className="mt-2"><LoadError message={exportError} onRetry={() => onExportPdf('synthese')} /></div>}
         <div className="mt-2.5"><TagsEditor tags={r.tags} onChange={onTags} /></div>
       </SectionBlock>
 

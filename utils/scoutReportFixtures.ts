@@ -16,3 +16,13 @@ export const STRIKER: PlayerData = {
   'Duels won per 90': 3, 'Duels won per 90 pct': 35, 'xA per 90': 0.12, 'xA per 90 pct': 48, 'Key passes per 90': 0.8, 'Key passes per 90 pct': 45,
   'RAPM net': 0.08, 'RAPM off': 0.1, 'RAPM def': -0.02, 'RAPM net pct': 72, 'RAPM minutes': 1000,
 } as unknown as PlayerData;
+
+/** Gardien synthétique (fixture de test) : métriques de la famille « Gardien », aucun tir */
+export const GOALKEEPER: PlayerData = {
+  Player: 'Gardien Fixture', 'Player ID': 'fx-gk', Team: 'Club Fixture', 'Team ID': 'tf-1', League: 'Ligue Fixture 2026-27', Season: '2026-27', Competition: 'FIX-L1',
+  Position: 'GK', Age: 29, 'Matches played': 20, 'Starts': 20, 'Minutes played': 1800,
+  'Saves per 90': 3.1, 'Saves per 90 pct': 70, 'Save rate, %': 74, 'Save rate, % pct': 80, 'Prevented goals per 90': 0.12, 'Prevented goals per 90 pct': 77,
+  'Conceded goals per 90': 1.1, 'Conceded goals per 90 pct': 40, 'Exits per 90': 0.9, 'Exits per 90 pct': 55, 'High claims per 90': 0.6, 'High claims per 90 pct': 35,
+  'Launch rate, %': 45, 'Launch rate, % pct': 60, 'Distribution accuracy, %': 81, 'Distribution accuracy, % pct': 66, 'Passes per 90': 28, 'Passes per 90 pct': 52,
+  'Long passes per 90': 9, 'Long passes per 90 pct': 58, 'Rating': 6.9, 'Rating pct': 61,
+} as unknown as PlayerData;

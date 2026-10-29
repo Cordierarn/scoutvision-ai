@@ -184,13 +184,31 @@ When a dossier is opened, its snapshot is compared with the current data of the 
 (sample, percentiles, values, contract, data date); if they differ, a neutral note says that
 the current data is more recent than the report. Nothing is replaced automatically.
 
-The PDF export (`utils/scoutReportPdf.ts`) writes the dossier as text with jsPDF: page 1
-profile (identity, values, roles, vector radar, key percentiles), page 2 impact, projection,
-shots and team context, then the selected summary, observation priorities, human observations
-and the version history. Text is selectable, long reports are paginated without cutting a
-block, the footer carries the data date, season, report date, model, prompt version and
-"Page X / Y", and the file name is `ScoutVision_<player>_<season>_<date>.pdf` with accents
-transliterated. Nothing is rasterised from the DOM.
+The PDF export (`utils/scoutReportPdf.ts`, primitives in `utils/scoutReportPdfKit.ts`) is built
+only from the stored `ScoutReportRecord` with jsPDF, as native text and vector graphics (nothing
+is rasterised from the DOM, html2canvas is gone). Base document in four A4 pages:
+
+1. player summary: identity (photo and flag when they load in the browser), six KPIs, Transfermarkt
+   value and ScoutVision statistical estimate, role badges ("Indice composite 0–100, et non
+   percentile"), role radar, statistical strengths and limits;
+2. impact and development: model indicators (RAPM, finishing, pass share, relay role, value and
+   performance) each with value, interpretation, context and limit; the ScoutVision statistical
+   projection; team context;
+3. shots and metrics by family (finishing, creation, progression, possession, circulation,
+   defending, duels, goalkeeping, models), the most marked metrics of each family, sized to fit
+   the page; the shot map and heatmap are not part of the snapshot and are not drawn;
+4. scouting in three layers: the generated summary (model, prompt version, date), observation
+   priorities, "Observation du scout" cards and a conclusion made only of the scout's own fields,
+   then a methodology note.
+
+"PDF" exports this summary with the latest generated summary only; "PDF complet" adds an annex
+with the older summaries and every metric. Each page has a one-line footer (player, season,
+status, report date, page X / Y). Long texts paginate without cutting a block, the file name is
+`ScoutVision_<player>_<season>_<date>.pdf`, and the build returns an audit (smallest font used,
+text outside the margins, empty sections) checked by the tests. Fonts: the standard Helvetica
+set, so the text is extractable and a report weighs 20 to 50 KB; characters outside Latin-1 are
+transliterated (an embedded Unicode font such as Inter or Noto Sans would add 300 to 600 KB per
+style without subsetting, which is why it was not adopted).
 
 Without `GEMINI_API_KEY`, generation answers 503 and the dossier still works: snapshot,
 observations, status, tags, JSON export/import and PDF.

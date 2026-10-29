@@ -18,7 +18,7 @@ import {
 } from '../services/scoutReportStore';
 import { ScoutReportError } from '../services/scoutReportService';
 import { ReportStatus, ScoutReportRecord } from '../types/scoutReport';
-import { downloadReportPdf } from '../utils/scoutReportPdf';
+import { PdfMode, downloadReportPdf } from '../utils/scoutReportPdf';
 import { EmptyState, PageHeader } from './ui';
 import { createDossier, generateAndStore } from './reports/generateReport';
 import { PlayerPicker } from './reports/PlayerPicker';
@@ -91,11 +91,11 @@ const ScoutReport: React.FC<{ data: PlayerData[]; onSelectPlayer?: (player: Play
     finally { setGenerating(false); }
   } : undefined;
 
-  const onExportPdf = (record: ScoutReportRecord) => {
+  const onExportPdf = (record: ScoutReportRecord, mode: PdfMode = 'synthese') => {
     setExporting(true); setExportError(null);
-    // Laisse le bouton afficher son état avant le calcul synchrone du PDF
-    setTimeout(() => {
-      try { downloadReportPdf(record, { dataGeneratedAt: dataIndex?.generatedAt }); }
+    // Laisse le bouton afficher son état avant le calcul du PDF (photo chargée puis document écrit)
+    setTimeout(async () => {
+      try { await downloadReportPdf(record, { dataGeneratedAt: dataIndex?.generatedAt, mode }); }
       catch { setExportError('L\'export PDF a échoué. Réessayez ; si le problème persiste, exportez les dossiers en JSON.'); }
       finally { setExporting(false); }
     }, 0);
@@ -166,7 +166,7 @@ const ScoutReport: React.FC<{ data: PlayerData[]; onSelectPlayer?: (player: Play
               onUpdateObservation={(id, obs) => guard(() => updateObservation(selected.id, id, obs))}
               onRemoveObservation={id => guard(() => removeObservation(selected.id, id))}
               onGenerate={onGenerate} generating={generating} generateError={generateError}
-              onExportPdf={() => onExportPdf(selected)} exporting={exporting} exportError={exportError}
+              onExportPdf={mode => onExportPdf(selected, mode)} exporting={exporting} exportError={exportError}
               onDelete={() => { guard(() => deleteReport(selected.id)); setSelectedId(null); back(); }}
               onOpenPlayer={livePlayer && onSelectPlayer ? () => onSelectPlayer(livePlayer) : undefined}
               onBack={wide ? undefined : back} headingRef={headingRef} />

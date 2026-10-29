@@ -1,41 +1,52 @@
 /**
- * ScoutVision - export PDF structuré d'un dossier de scouting (jsPDF, texte natif)
+ * ScoutVision - export PDF d'un dossier de scouting (jsPDF, texte natif, pagination déterministe)
  *
- * Pages : 1 profil (identité, valeurs, rôles, radar vectoriel, principaux percentiles) ;
- * 2 analyse (impact et valeur, projection, tirs, contexte équipe) ; 3+ synthèse ScoutVision,
- * priorités d'observation, observations humaines, historique des versions. Le texte est écrit
- * comme texte (sélectionnable), les graphiques en vecteurs ; rien n'est rasterisé. Les blocs ne
- * sont pas coupés : un titre reste avec ses premières lignes, une ligne de stat ou une
- * observation courte tient sur une page. Pied de page avec métadonnées et « Page X / Y ».
+ * Construit uniquement à partir du ScoutReportRecord (snapshot figé) : jamais depuis la fiche, les
+ * données de la saison chargée ou le DOM. Document de base en quatre pages :
+ *   1. Synthèse joueur : identité, KPI, valeur, rôles, radar, forces et limites ;
+ *   2. Impact et développement : indicateurs des modèles, projection, contexte d'équipe ;
+ *   3. Tirs et métriques par famille (sélection utile, annexe complète en mode « complet ») ;
+ *   4. Scouting : synthèse ScoutVision (dernière version), priorités d'observation, observations
+ *      du scout, conclusion du scout, puis note de méthodologie.
+ * Mode « complet » : annexe avec l'historique des synthèses et toutes les métriques.
+ * Primitives et grille : utils/scoutReportPdfKit.ts.
  */
 
 import { jsPDF } from 'jspdf';
-import { ScoutReportRecord, GeneratedSummary } from '../types/scoutReport';
+import { ScoutReportRecord, GeneratedSummary, ReportFacts } from '../types/scoutReport';
 import { FactMetric, observationPriorities, orientedPercentile, roleMetrics, strengthsAndLimits, summarySections } from './scoutReportSnapshot';
+import { METRIC_CATEGORIES } from './metricCategories';
+import { metricLabel } from './labels';
+import { getFlagUrl } from './flags';
 import { formatEuro } from './format';
+import {
+  CONTENT_W, FONT, MARGIN, PdfAudit, PdfCanvas, PdfImage, SP, THEME, colX, drawCallout, drawIdentityBlock, drawIndicator,
+  drawKpiRow, drawMethodologyNote, drawMetricRow, drawObservation, drawPageFooter, drawPageHeader, drawRadar, drawRoleBadge, drawSectionTitle, roleBadgeWidth,
+  drawTextBlock, fmtDate, fr, lineHeight, pdfText, signed, span,
+} from './scoutReportPdfKit';
+
+export { pdfText };
+export type { PdfAudit, PdfImage };
 
 // ============================================
-// TEXTE : polices standard (WinAnsi) → caractères hors Latin-1 translittérés
+// OPTIONS, NOM DE FICHIER
 // ============================================
 
-const SPECIAL: Record<string, string> = {
-  '→': '->', '←': '<-', '−': '-', '–': '-', '—': '-', '’': '\'', '‘': '\'', '“': '"', '”': '"', '…': '...', '≥': '>=', '≤': '<=',
-  'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ı': 'i', 'ß': 'ss', 'æ': 'ae', 'Æ': 'AE', 'ø': 'o', 'Ø': 'O', 'þ': 'th', 'ð': 'd', '•': '-', '·': '.',
-  '\u202F': ' ', '\u2009': ' ', '\u2007': ' ', '\u2002': ' ', '\u2003': ' ',   // espaces fines (séparateurs de milliers fr-FR)
-};
+export type PdfMode = 'synthese' | 'complet';
 
-/** Texte imprimable par les polices standard de jsPDF : Latin-1 conservé, le reste translittéré */
-export function pdfText(input: string): string {
-  let out = '';
-  for (const ch of input) {
-    const code = ch.codePointAt(0)!;
-    if (code < 0x80 || (code >= 0xA0 && code <= 0xFF && !(ch in SPECIAL)) || ch === '€' || ch === 'œ' || ch === 'Œ') { out += ch; continue; }
-    if (ch in SPECIAL) { out += SPECIAL[ch]; continue; }
-    const base = ch.normalize('NFD').replace(/[̀-ͯ]/g, '');
-    out += base !== ch && base.codePointAt(0)! < 0x80 ? base : (code >= 0x300 && code <= 0x36f ? '' : '?');
-  }
-  return out;
+export interface PdfOptions {
+  mode?: PdfMode;                // synthèse (4 pages, dernière synthèse) par défaut ; complet = annexe
+  summaryId?: string;            // version de synthèse à imprimer (la dernière par défaut)
+  now?: Date;
+  dataGeneratedAt?: string;      // date des données affichée si le snapshot ne l'a pas
+  photo?: PdfImage;              // photo du joueur déjà chargée (navigateur), facultative
+  flag?: PdfImage;               // drapeau déjà chargé, facultatif
+  statusLabel?: (s: ScoutReportRecord['status']) => string;
+  typeLabel?: (t: ScoutReportRecord['observations'][number]['type']) => string;
 }
+
+const STATUS_FR: Record<ScoutReportRecord['status'], string> = { draft: 'Brouillon', to_observe: 'À observer', finalized: 'Finalisé', archived: 'Archivé' };
+const TYPE_FR: Record<ScoutReportRecord['observations'][number]['type'], string> = { video: 'Vidéo', live: 'Live', general: 'Général' };
 
 /** « ScoutVision_<nom>_<saison>_<date>.pdf », accents translittérés, jamais vide */
 export function pdfFileName(record: ScoutReportRecord, now = new Date()): string {
@@ -46,375 +57,554 @@ export function pdfFileName(record: ScoutReportRecord, now = new Date()): string
 }
 
 // ============================================
-// MISE EN PAGE
+// LECTURES DU SNAPSHOT
 // ============================================
 
-const PAGE_W = 210, PAGE_H = 297, MARGIN = 15, FOOTER_H = 14;
-const CONTENT_W = PAGE_W - 2 * MARGIN;
-const BOTTOM = PAGE_H - MARGIN - FOOTER_H;
-const LINE = 4.6;                      // hauteur d'une ligne de corps (10 pt)
-const INK = [20, 28, 38] as const, INK2 = [70, 80, 95] as const, INK3 = [120, 130, 145] as const;
-const ACCENT = [0, 150, 170] as const, RULE = [205, 212, 222] as const, FILL = [240, 243, 247] as const;
+const LABEL_TO_FAMILY = new Map<string, string>(METRIC_CATEGORIES.flatMap(c => c.keys.map(k => [metricLabel(k), c.id] as [string, string])));
+const FAMILY_LABEL = new Map(METRIC_CATEGORIES.map(c => [c.id, c.label]));
+const FAMILY_ORDER = ['finishing', 'creation', 'progression', 'possession', 'circulation', 'defending', 'duels', 'goalkeeping', 'models', 'rating'];
 
-export interface PdfOptions {
-  summaryId?: string;            // version de synthèse à imprimer (la dernière par défaut)
-  now?: Date;
-  dataGeneratedAt?: string;      // date des données affichée si le snapshot ne l'a pas
-  statusLabel?: (s: ScoutReportRecord['status']) => string;
-  typeLabel?: (t: ScoutReportRecord['observations'][number]['type']) => string;
-}
-
-const STATUS_FR: Record<ScoutReportRecord['status'], string> = { draft: 'Brouillon', to_observe: 'À observer', finalized: 'Finalisé', archived: 'Archivé' };
-const TYPE_FR: Record<ScoutReportRecord['observations'][number]['type'], string> = { video: 'Vidéo', live: 'Live', general: 'Général' };
-
-const fmtDate = (iso: string | undefined) => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('fr-FR');
+const fmtValue = (v: number): string => {
+  const abs = Math.abs(v);
+  const digits = Number.isInteger(v) ? 0 : abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
+  return v.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: digits });
 };
-const fr = (v: number, digits = 1) => v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-const signed = (v: number, digits = 1) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fr(Math.abs(v), digits)}`;
 
-class Writer {
-  doc: jsPDF;
-  y = MARGIN;
-  private readonly footerMeta: string;
-
-  constructor(footerMeta: string) {
-    this.doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-    this.footerMeta = footerMeta;
-    this.doc.setLineHeightFactor(1.25);
-  }
-
-  get remaining() { return BOTTOM - this.y; }
-
-  /** Nouvelle page si `height` ne tient plus */
-  ensure(height: number) { if (this.y + height > BOTTOM) this.newPage(); }
-
-  newPage() { this.doc.addPage(); this.y = MARGIN; }
-
-  text(size: number, color: readonly [number, number, number], style: 'normal' | 'bold' = 'normal') {
-    this.doc.setFont('helvetica', style); this.doc.setFontSize(size); this.doc.setTextColor(color[0], color[1], color[2]);
-  }
-
-  /** Titre de section, gardé avec au moins deux lignes de corps */
-  heading(title: string, level: 1 | 2 = 1) {
-    const h = level === 1 ? 9 : 7;
-    this.ensure(h + 2 * LINE);
-    if (level === 1) {
-      this.doc.setDrawColor(...ACCENT); this.doc.setLineWidth(0.6); this.doc.line(MARGIN, this.y + 1.5, MARGIN + 6, this.y + 1.5);
-      this.text(11.5, INK, 'bold'); this.doc.text(pdfText(title.toUpperCase()), MARGIN + 9, this.y + 3);
-      this.y += h;
-    } else {
-      this.text(9.5, INK2, 'bold'); this.doc.text(pdfText(title), MARGIN, this.y + 3);
-      this.y += h;
-    }
-  }
-
-  /** Paragraphe à la largeur donnée ; les lignes se paginent, les 2 premières restent ensemble */
-  paragraph(textValue: string, opts: { size?: number; color?: readonly [number, number, number]; x?: number; width?: number; style?: 'normal' | 'bold'; indent?: number; bullet?: string } = {}) {
-    const size = opts.size ?? 10, x = (opts.x ?? MARGIN) + (opts.indent ?? 0), width = (opts.width ?? CONTENT_W) - (opts.indent ?? 0) - (opts.bullet ? 4 : 0);
-    const lineH = LINE * (size / 10);
-    this.text(size, opts.color ?? INK, opts.style ?? 'normal');
-    const lines: string[] = this.doc.splitTextToSize(pdfText(textValue), width);
-    this.ensure(Math.min(lines.length, 2) * lineH);
-    lines.forEach((line, i) => {
-      if (this.y + lineH > BOTTOM) { this.newPage(); this.text(size, opts.color ?? INK, opts.style ?? 'normal'); }
-      if (i === 0 && opts.bullet) this.doc.text(opts.bullet, x, this.y + lineH * 0.78);
-      this.doc.text(line, x + (opts.bullet ? 4 : 0), this.y + lineH * 0.78);
-      this.y += lineH;
-    });
-  }
-
-  space(h = 3) { this.y += h; }
-
-  /** Lignes libellé / valeur sur `columns` colonnes ; chaque ligne reste entière */
-  keyValues(rows: [string, string][], columns = 3) {
-    const colW = CONTENT_W / columns;
-    for (let i = 0; i < rows.length; i += columns) {
-      this.ensure(10);
-      rows.slice(i, i + columns).forEach(([k, v], j) => {
-        const x = MARGIN + j * colW;
-        this.text(7, INK3, 'bold'); this.doc.text(pdfText(k.toUpperCase()), x, this.y + 3);
-        this.text(10.5, INK, 'bold'); this.doc.text(this.doc.splitTextToSize(pdfText(v), colW - 4)[0] ?? '', x, this.y + 8);
-      });
-      this.y += 11;
-    }
-  }
-
-  /** Texte tronqué (avec « ... ») pour tenir dans la largeur donnée, avec la police courante */
-  fit(text: string, width: number): string {
-    if (this.doc.getTextWidth(text) <= width) return text;
-    let t = text;
-    while (t.length > 1 && this.doc.getTextWidth(t + '...') > width) t = t.slice(0, -1);
-    return t.trimEnd() + '...';
-  }
-
-  /** Ligne de percentile : libellé, valeur, barre, percentile ; jamais coupée */
-  percentileRow(m: FactMetric, width = CONTENT_W, x = MARGIN) {
-    this.ensure(LINE + 1);
-    const barX = x + width * 0.52, barW = width * 0.3, pctX = x + width;
-    const value = pdfText(String(m.value).replace('.', ','));
-    this.text(9, INK3); const valueW = this.doc.getTextWidth(value); this.doc.text(value, barX - 2, this.y + 3.3, { align: 'right' });
-    // Libellé tronqué avec « … » avant la colonne des valeurs : jamais de chevauchement
-    this.text(9, INK2); this.doc.text(this.fit(pdfText(m.metric + (m.lessIsPreferable ? ' (inv.)' : '')), barX - 2 - valueW - 2 - x), x, this.y + 3.3);
-    this.doc.setFillColor(...FILL); this.doc.rect(barX, this.y + 1.2, barW, 2.2, 'F');
-    const o = orientedPercentile(m);
-    const col = o >= 75 ? ACCENT : o <= 25 ? ([200, 80, 70] as const) : INK3;
-    this.doc.setFillColor(col[0], col[1], col[2]); this.doc.rect(barX, this.y + 1.2, (barW * m.percentile) / 100, 2.2, 'F');
-    this.text(9, INK, 'bold'); this.doc.text(`P${m.percentile}`, pctX, this.y + 3.3, { align: 'right' });
-    this.y += LINE + 0.6;
-  }
-
-  /** Radar vectoriel des percentiles (polygone, grille, libellés) ; la hauteur est réservée d'un bloc */
-  radar(metrics: FactMetric[], cx: number, cy: number, r: number) {
-    const n = metrics.length;
-    if (n < 3) return;
-    const angle = (i: number) => -Math.PI / 2 + (2 * Math.PI * i) / n;
-    this.doc.setDrawColor(...RULE); this.doc.setLineWidth(0.2);
-    [0.25, 0.5, 0.75, 1].forEach(k => {
-      const pts = metrics.map((_, i) => [cx + r * k * Math.cos(angle(i)), cy + r * k * Math.sin(angle(i))]);
-      pts.forEach((p, i) => { const q = pts[(i + 1) % n]; this.doc.line(p[0], p[1], q[0], q[1]); });
-    });
-    metrics.forEach((_, i) => this.doc.line(cx, cy, cx + r * Math.cos(angle(i)), cy + r * Math.sin(angle(i))));
-    const poly = metrics.map((m, i) => [cx + (r * orientedPercentile(m)) / 100 * Math.cos(angle(i)), cy + (r * orientedPercentile(m)) / 100 * Math.sin(angle(i))]);
-    this.doc.setDrawColor(...ACCENT); this.doc.setLineWidth(0.5); this.doc.setFillColor(0, 150, 170);
-    this.doc.setGState(this.doc.GState({ opacity: 0.18 }));
-    this.doc.lines(poly.slice(1).map((p, i) => [p[0] - poly[i][0], p[1] - poly[i][1]]).concat([[poly[0][0] - poly[n - 1][0], poly[0][1] - poly[n - 1][1]]]), poly[0][0], poly[0][1], [1, 1], 'F', true);
-    this.doc.setGState(this.doc.GState({ opacity: 1 }));
-    this.doc.lines(poly.slice(1).map((p, i) => [p[0] - poly[i][0], p[1] - poly[i][1]]).concat([[poly[0][0] - poly[n - 1][0], poly[0][1] - poly[n - 1][1]]]), poly[0][0], poly[0][1], [1, 1], 'S', true);
-    poly.forEach(p => { this.doc.setFillColor(0, 150, 170); this.doc.circle(p[0], p[1], 0.8, 'F'); });
-    this.text(7, INK2);
-    metrics.forEach((m, i) => {
-      const a = angle(i), lx = cx + (r + 4) * Math.cos(a), ly = cy + (r + 4) * Math.sin(a);
-      const align = Math.cos(a) > 0.3 ? 'left' : Math.cos(a) < -0.3 ? 'right' : 'center';
-      const label = this.doc.splitTextToSize(pdfText(m.metric), 26).slice(0, 2) as string[];
-      this.doc.text(label, lx, ly + (Math.sin(a) > 0.3 ? 2.5 : Math.sin(a) < -0.3 ? -0.5 : 1), { align, baseline: 'middle' });
-    });
-  }
-
-  /** Pied de page sur toutes les pages, avec le total */
-  finish(): jsPDF {
-    const total = this.doc.getNumberOfPages();
-    for (let p = 1; p <= total; p++) {
-      this.doc.setPage(p);
-      this.doc.setDrawColor(...RULE); this.doc.setLineWidth(0.2); this.doc.line(MARGIN, PAGE_H - MARGIN - 8, PAGE_W - MARGIN, PAGE_H - MARGIN - 8);
-      this.text(7.5, INK3); this.doc.text('ScoutVision · Rapport de scouting', MARGIN, PAGE_H - MARGIN - 4);
-      this.doc.text(`Page ${p} / ${total}`, PAGE_W - MARGIN, PAGE_H - MARGIN - 4, { align: 'right' });
-      this.text(7, INK3); this.doc.text(pdfText(this.footerMeta), PAGE_W / 2, PAGE_H - MARGIN - 0.5, { align: 'center', maxWidth: CONTENT_W - 10 });
-    }
-    return this.doc;
-  }
+/** Statistique par clé de colonne, dans les métriques puis dans les totaux sans percentile */
+function stat(facts: ReportFacts, key: string): number | undefined {
+  const label = metricLabel(key);
+  return facts.metrics.find(m => m.metric === label)?.value ?? facts.otherStats.find(s => s.stat === label)?.value;
 }
 
+const rowOf = (m: FactMetric) => ({ label: m.metric, value: fmtValue(m.value), percentile: m.percentile, oriented: orientedPercentile(m), note: m.lessIsPreferable ? '(inv.)' : undefined });
+
+/** Métriques par famille : sélection (les plus marquées, `perFamily` au plus, note globale exclue) ou toutes */
+function metricFamilies(facts: ReportFacts, all: boolean, perFamily = 4): { id: string; label: string; metrics: FactMetric[] }[] {
+  const by = new Map<string, FactMetric[]>();
+  facts.metrics.forEach(m => { const f = LABEL_TO_FAMILY.get(m.metric) ?? 'other'; by.set(f, [...(by.get(f) ?? []), m]); });
+  return [...FAMILY_ORDER, 'other'].flatMap(id => {
+    const list = by.get(id);
+    if (!list || list.length === 0 || (!all && id === 'rating')) return [];
+    const picked = all ? list : [...list].sort((a, b) => Math.abs(b.percentile - 50) - Math.abs(a.percentile - 50)).slice(0, perFamily);
+    if (!all && picked.length < 2) return [];
+    return [{ id, label: id === 'other' ? 'Autres' : FAMILY_LABEL.get(id) ?? id, metrics: picked }];
+  });
+}
+
+const reliabilityLabel = (r: number) => (r >= 0.6 ? 'bonne' : r >= 0.3 ? 'modérée' : 'faible');
+
 // ============================================
-// CONTENU
+// PAGES
 // ============================================
+
+interface Ctx {
+  c: PdfCanvas; record: ScoutReportRecord; facts: ReportFacts; summary: GeneratedSummary | undefined; options: PdfOptions;
+  mode: PdfMode; statusLabel: (s: ScoutReportRecord['status']) => string; typeLabel: (t: ScoutReportRecord['observations'][number]['type']) => string;
+}
+
+function page1Synthesis({ c, record, facts, options }: Ctx) {
+  const p = record.player, snap = record.dataSnapshot;
+  const role = record.role ?? snap.bestRoles[0]?.role;
+  const roleIndex = snap.bestRoles.find(b => b.role === role)?.index ?? facts.scoutVisionRoleIndices.find(r => r.role === role)?.index;
+
+  // Identité
+  c.openSection('Identité');
+  const chips: string[] = [];
+  const position = facts.player.position ?? p.position;
+  if (position) chips.push(String(position));
+  const age = p.age ?? facts.player.age;
+  if (age !== undefined) chips.push(`${age} ans`);
+  if (facts.player.preferredFoot) chips.push(`pied ${String(facts.player.preferredFoot).toLowerCase()}`);
+  if (facts.player.heightCm !== undefined) chips.push(`${facts.player.heightCm} cm`);
+  if (facts.sample.minutes !== undefined) chips.push(`${Number(facts.sample.minutes).toLocaleString('fr-FR')} min`);
+  if (facts.sample.matches !== undefined) chips.push(`${facts.sample.matches} matchs${facts.sample.starts !== undefined ? ` (${facts.sample.starts} titul.)` : ''}`);
+  drawIdentityBlock(c, {
+    name: p.name, team: p.team, competition: p.competitionName ?? p.competition, season: p.seasonLabel ?? p.season, chips,
+    photo: options.photo, flag: options.flag, nationality: facts.player.nationalityCode ? String(facts.player.nationalityCode) : undefined,
+  });
+  c.closeSection();
+  c.space(SP.xs);
+
+  // KPI : six au plus
+  c.openSection('KPI');
+  const kpis: { label: string; value: string; sub?: string }[] = [];
+  if (facts.sample.minutes !== undefined) kpis.push({ label: 'Minutes', value: Number(facts.sample.minutes).toLocaleString('fr-FR'), sub: facts.sample.shareOfTeamMinutesPct !== undefined ? `part ${facts.sample.shareOfTeamMinutesPct} %` : facts.sample.matches !== undefined ? `${facts.sample.matches} matchs` : undefined });
+  const rating = facts.metrics.find(m => m.metric === metricLabel('Rating'));
+  if (rating) kpis.push({ label: 'Note', value: fr(rating.value, 2), sub: `P${rating.percentile} · notes de match` });
+  const goalkeeper = /gardien/i.test(String(position ?? ''));
+  if (goalkeeper) {
+    // Gardien : arrêts et buts évités plutôt que buts et passes décisives
+    const saveRate = facts.metrics.find(m => m.metric === metricLabel('Save rate, %'));
+    if (saveRate) kpis.push({ label: 'Arrêts', value: `${fmtValue(saveRate.value)} %`, sub: `P${saveRate.percentile}` });
+    const prevented = facts.metrics.find(m => m.metric === metricLabel('Prevented goals per 90'));
+    if (prevented) kpis.push({ label: 'Buts évités /90', value: fmtValue(prevented.value), sub: `P${prevented.percentile}` });
+  } else {
+    const goals = stat(facts, 'Goals'), xg = stat(facts, 'xG');
+    if (goals !== undefined || xg !== undefined) kpis.push({ label: 'Buts · xG', value: `${goals !== undefined ? fmtValue(goals) : '—'} · ${xg !== undefined ? fr(xg, 1) : '—'}`, sub: 'saison' });
+    const assists = stat(facts, 'Assists'), xa = stat(facts, 'xA');
+    if (assists !== undefined || xa !== undefined) kpis.push({ label: 'Passes déc. · xA', value: `${assists !== undefined ? fmtValue(assists) : '—'} · ${xa !== undefined ? fr(xa, 1) : '—'}`, sub: 'saison' });
+  }
+  if (role) kpis.push({ label: 'Rôle principal', value: role, sub: roleIndex !== undefined ? `indice ${roleIndex} / 100` : undefined });
+  if (facts.values.marketValueTransfermarkt) kpis.push({ label: 'Valeur marché', value: facts.values.marketValueTransfermarkt, sub: 'Transfermarkt' });
+  else if (facts.values.estimatedValueScoutVision) kpis.push({ label: 'Estimation ScoutVision', value: facts.values.estimatedValueScoutVision, sub: 'statistique, pas un prix' });
+  drawKpiRow(c, kpis.slice(0, 6));
+  c.closeSection();
+  c.space(SP.xs);
+
+  // Radar (gauche) · valeur et rôles (droite)
+  c.openSection('Profil');
+  const top = c.y;
+  const leftW = span(7), rightX = colX(7), rightW = span(5);
+  const axes = roleMetrics(facts, role, 8).map(m => ({ label: m.metric.replace(/ par 90$/, ' /90') + (m.lessIsPreferable ? ' (inv.)' : ''), value: orientedPercentile(m) }));
+  c.font(FONT.note, THEME.ink3, 'bold'); c.text(`RADAR DU RÔLE${role ? ` · ${pdfText(role).toUpperCase()}` : ''}`, MARGIN, top + 3);
+  let leftY = top + 5;
+  if (axes.length >= 3) {
+    leftY = drawRadar(c, MARGIN, leftY, leftW, axes);
+    c.font(FONT.note, THEME.ink3);
+    c.wrap('Percentiles du rôle (anneaux 25, 50, 75, 100), sens « plus c\'est haut, mieux c\'est » ; métriques « inv. » retournées.', leftW).forEach(l => { c.text(l, MARGIN, leftY + 2.5); leftY += lineHeight(FONT.note); });
+  } else {
+    c.y = top + 6;
+    leftY = drawTextBlock(c, 'Radar non disponible : moins de trois métriques du rôle dans les faits du dossier.', { size: FONT.small, color: THEME.ink3, width: leftW, x: MARGIN });
+  }
+
+  const valueRows: { label: string; value: string; sub?: string }[] = [
+    { label: 'Valeur de marché Transfermarkt', value: facts.values.marketValueTransfermarkt ?? 'Non disponible' },
+    { label: 'Estimation statistique ScoutVision', value: facts.values.estimatedValueScoutVision ?? 'Non disponible', sub: facts.values.estimatedValueScoutVision ? `erreur typique ${facts.values.estimatedValueTypicalError ?? '—'} · estimation statistique, pas un prix` : undefined },
+    { label: 'Contrat', value: facts.contractUntil ? `jusqu'au ${fmtDate(facts.contractUntil)}` : 'Non renseigné' },
+  ];
+  let rightY = drawCallout(c, rightX, top, rightW, 'Valeur', valueRows);
+  rightY += SP.xs;
+
+  const roles = snap.bestRoles.length ? snap.bestRoles : facts.scoutVisionRoleIndices;
+  const primary = roles.find(r => r.role === role) ?? roles[0];
+  const secondaries = roles.filter(r => r !== primary).slice(0, 3);
+  // Rôles secondaires sur une ou deux lignes selon la largeur des badges
+  const badgeLines: { role: string; index: number }[][] = [[]];
+  let lineW = 0;
+  secondaries.forEach(r => {
+    const w = roleBadgeWidth(c, r);
+    if (lineW > 0 && lineW + w > rightW - 7) { badgeLines.push([]); lineW = 0; }
+    badgeLines[badgeLines.length - 1].push(r); lineW += w + 2;
+  });
+  const secondaryRows = secondaries.length ? badgeLines.length : 0;
+  const rolesH = 8 + (primary ? 9 : 0) + secondaryRows * 8 + (primary ? 0 : 6) + 6;
+  c.rect(rightX, rightY, rightW, rolesH, THEME.white, THEME.rule, 1.2); c.rect(rightX, rightY, rightW, 1.2, THEME.navy);
+  c.font(FONT.note, THEME.ink3, 'bold'); c.text('RÔLES SCOUTVISION', rightX + 3.5, rightY + 5.4);
+  let ry = rightY + 8;
+  if (primary) { drawRoleBadge(c, rightX + 3.5, ry, primary, true); ry += 9; }
+  if (secondaries.length) {
+    badgeLines.forEach(line => {
+      let bx = rightX + 3.5;
+      line.forEach(r => { const w = drawRoleBadge(c, bx, ry, r); bx += w + 2; });
+      ry += 8;
+    });
+  }
+  if (!primary) { c.font(FONT.small, THEME.ink3); c.text('Aucun rôle calculé pour ce poste.', rightX + 3.5, ry + 3); ry += 6; }
+  c.font(FONT.note, THEME.ink3); c.text('Indice composite 0–100, et non percentile.', rightX + 3.5, rightY + rolesH - 2.2);
+  rightY += rolesH;
+  c.y = Math.max(leftY, rightY) + SP.sm;
+  c.closeSection();
+
+  // Forces et limites
+  c.openSection('Forces et limites');
+  drawSectionTitle(c, 'Synthèse du profil statistique', { level: 2, tag: 'libellé · valeur brute · percentile' });
+  const { strengths, limits } = strengthsAndLimits(facts, 5);
+  const half = span(6);
+  const colTop = c.y;
+  c.font(FONT.note, THEME.cyanInk, 'bold'); c.text('FORCES', MARGIN, colTop + 3);
+  c.font(FONT.note, THEME.red, 'bold'); c.text('LIMITES', colX(6), colTop + 3);
+  let yl = colTop + 5, yr = colTop + 5;
+  if (strengths.length) strengths.forEach(m => { yl = drawMetricRow(c, MARGIN, yl, half, rowOf(m)); });
+  else { c.font(FONT.small, THEME.ink3); c.text('Aucune métrique au 75e percentile ou plus.', MARGIN, yl + 3.5); yl += 6; }
+  if (limits.length) limits.forEach(m => { yr = drawMetricRow(c, colX(6), yr, half, rowOf(m)); });
+  else { c.font(FONT.small, THEME.ink3); c.text('Aucune métrique au 25e percentile ou moins.', colX(6), yr + 3.5); yr += 6; }
+  c.y = Math.max(yl, yr) + 1.5;
+  drawTextBlock(c, 'Percentiles du pipeline ScoutVision : rang parmi les joueurs du même groupe de poste, du même niveau de compétition et de la même saison. Ils classent un volume, pas une qualité ; « inv. » : moins c\'est mieux.', { size: FONT.note, color: THEME.ink3 });
+  c.closeSection();
+}
+
+function page2Impact({ c, record, facts }: Ctx) {
+  const snap = record.dataSnapshot, ind = snap.indicators ?? {};
+  c.addPage();
+  drawSectionTitle(c, 'Impact et développement', { tag: 'Données ScoutVision' });
+  const leftW = span(6), rightX = colX(6), rightW = span(6);
+  const top = c.y;
+  const pageBefore = c.page;
+
+  // Colonne 1 : impact
+  c.openSection('Impact');
+  drawSectionTitle(c, 'Impact', { level: 2, x: MARGIN, width: leftW });
+  let items = 0;
+  if (ind.rapm) {
+    const r = ind.rapm;
+    drawIndicator(c, MARGIN, leftW, {
+      title: 'RAPM net', value: `${signed(r.net, 3)} xG / 90`,
+      interpretation: `${r.off !== undefined ? `Offensif ${signed(r.off, 3)}` : ''}${r.off !== undefined && r.def !== undefined ? ' · ' : ''}${r.def !== undefined ? `défensif ${signed(r.def, 3)}` : ''}${r.pct !== undefined ? ` · P${r.pct} dans la ligue` : ''}`.trim() || undefined,
+      context: `Plus-minus régularisé sur deux saisons${r.minutes !== undefined ? `, ${Math.round(r.minutes).toLocaleString('fr-FR')} min prises en compte` : ''}.`,
+      limit: r.reliability ? `fiabilité ${reliabilityLabel(r.reliability.net)} dans cette ligue (nette ${fr(r.reliability.net, 2)}, défense ${fr(r.reliability.def, 2)} ; 1 = parfaitement fiable).` : 'fiabilité de la ligue inconnue.',
+      tone: r.net < 0 ? THEME.orange : THEME.cyan,
+    }); items++;
+  }
+  if (ind.finishing) {
+    const f = ind.finishing;
+    drawIndicator(c, MARGIN, leftW, {
+      title: 'Talent de finition', value: `${signed(f.skill, 1)} but / 100 tirs`,
+      interpretation: f.skill > 0 ? 'Marque plus que son xG ne le prévoit.' : f.skill < 0 ? 'Marque moins que son xG ne le prévoit.' : 'Conforme à son xG.',
+      context: `${f.shots} tirs en carrière, estimation resserrée vers la moyenne.`,
+      limit: f.shots < 50 ? 'petit échantillon (moins de 50 tirs).' : 'la finition est l\'une des qualités les moins stables d\'une saison à l\'autre.',
+      tone: f.skill < 0 ? THEME.orange : THEME.cyan,
+    }); items++;
+  }
+  if (ind.passShare) {
+    const s = ind.passShare;
+    drawIndicator(c, MARGIN, leftW, {
+      title: 'Part des passes de l\'équipe', value: `${fr(s.value, 1)} %`,
+      interpretation: s.pct !== undefined ? `P${s.pct} pour le rôle.` : undefined,
+      context: `Réseau de passes de l'équipe${s.matches !== undefined ? ` sur ${s.matches} matchs` : ''}.`,
+      limit: s.matches !== undefined && s.matches < 5 ? 'moins de cinq matchs de réseau.' : undefined,
+    }); items++;
+  }
+  const relay = facts.metrics.find(m => m.metric === metricLabel('Network betweenness'));
+  if (relay) {
+    drawIndicator(c, MARGIN, leftW, { title: 'Rôle de relais', value: `${fmtValue(relay.value)} · P${relay.percentile}`, interpretation: 'Centralité dans le réseau de passes : part des circuits qui passent par le joueur.', context: 'Décrit une fonction dans le jeu de l\'équipe, pas une qualité.' }); items++;
+  }
+  if (ind.valuation?.market || ind.valuation?.estimate) {
+    const v = ind.valuation;
+    const ratio = v.market && v.estimate ? Math.round((v.estimate / v.market) * 100) : undefined;
+    drawIndicator(c, MARGIN, leftW, {
+      title: 'Valeur et performance', value: v.estimate ? `${formatEuro(v.estimate)} estimés` : `${formatEuro(v.market!)} de valeur de marché`,
+      interpretation: ratio !== undefined ? `Estimation statistique = ${ratio} % de la valeur de marché Transfermarkt (${formatEuro(v.market!)}).` : v.estimate ? 'Valeur de marché Transfermarkt non disponible.' : 'Estimation statistique non disponible.',
+      context: 'Modèle de valeur ScoutVision à partir de la performance.',
+      limit: v.estimate ? `erreur typique ${facts.values.estimatedValueTypicalError ?? '×1,7'} ; une estimation statistique, pas un prix.` : undefined,
+    }); items++;
+  }
+  if (!items) drawTextBlock(c, 'Aucun indicateur de modèle disponible pour cette ligne joueur-saison.', { size: FONT.small, color: THEME.ink3, width: leftW });
+  c.closeSection();
+  const leftEnd = c.y;
+
+  // Colonne 2 : développement (sous la colonne 1 si celle-ci a débordé sur une autre page)
+  const twoColumns = c.page === pageBefore;
+  c.y = twoColumns ? top : leftEnd + SP.sm;
+  const x = twoColumns ? rightX : MARGIN, w = twoColumns ? rightW : CONTENT_W;
+  c.openSection('Développement');
+  drawSectionTitle(c, 'Développement', { level: 2, x, width: w });
+  const age = record.player.age ?? facts.player.age;
+  if (snap.projection && snap.projection.length) {
+    drawTextBlock(c, `Projection statistique ScoutVision : percentile actuel → percentile attendu la saison prochaine, d'après les courbes d'âge du rôle${age !== undefined ? ` (${age} ans)` : ''}. Effet de l'âge et retour vers la moyenne inclus. Une tendance, pas un verdict.`, { size: FONT.small, color: THEME.ink2, x, width: w });
+    c.space(2);
+    c.font(FONT.note, THEME.ink3, 'bold');
+    c.text('MÉTRIQUE', x, c.y + 3); c.text('ACTUEL → PROJETÉ', x + w - 16, c.y + 3, { align: 'right' }); c.text('ÉCART', x + w, c.y + 3, { align: 'right' });
+    c.y += 5;
+    const lh = lineHeight(FONT.body) + 1.2;
+    snap.projection.forEach(pr => {
+      c.ensureSpace(lh);
+      const d = pr.projected - pr.current;
+      c.font(FONT.body, THEME.ink); c.text(c.fit(pr.label, w - 44), x, c.y + lh * 0.7);
+      c.font(FONT.body, THEME.ink, 'bold'); c.text(`P${pr.current} → P${pr.projected}`, x + w - 16, c.y + lh * 0.7, { align: 'right' });
+      c.font(FONT.body, d > 0 ? THEME.cyanInk : d < 0 ? THEME.orange : THEME.ink3, 'bold'); c.text(signed(d, 0), x + w, c.y + lh * 0.7, { align: 'right' });
+      c.rule(c.y + lh, x, w, THEME.fill, 0.2);
+      c.y += lh;
+    });
+    c.space(2);
+    const up = snap.projection.filter(q => q.projected > q.current).length, down = snap.projection.filter(q => q.projected < q.current).length, flat = snap.projection.length - up - down;
+    drawTextBlock(c, `Évolution attendue sur un an : ${up} métrique${up > 1 ? 's' : ''} en hausse, ${down} en baisse, ${flat} stable${flat > 1 ? 's' : ''}. Les percentiles extrêmes reviennent vers la moyenne ; l'effet de l'âge dépend du rôle.`, { size: FONT.small, color: THEME.ink2, x, width: w });
+  } else {
+    drawTextBlock(c, 'Projection statistique ScoutVision indisponible : courbes d\'âge absentes pour ce rôle ou âge inconnu.', { size: FONT.small, color: THEME.ink3, x, width: w });
+  }
+  if (snap.seasonInProgress || facts.sample.seasonInProgress === true) {
+    c.space(2);
+    drawTextBlock(c, 'Saison en cours au moment du snapshot : échantillon partiel, les percentiles et la projection peuvent encore bouger.', { size: FONT.small, color: THEME.orange, x, width: w });
+  }
+  // Métriques du rôle : percentile actuel, point de départ de la projection
+  const roleRows = roleMetrics(facts, record.role ?? snap.bestRoles[0]?.role, 8);
+  if (roleRows.length) {
+    c.space(SP.xs);
+    c.ensureSpace(12);
+    c.font(FONT.note, THEME.ink3, 'bold'); c.text('MÉTRIQUES DU RÔLE · PERCENTILE ACTUEL', x, c.y + 3); c.y += 5;
+    roleRows.forEach(m => { c.ensureSpace(6); c.y = drawMetricRow(c, x, c.y, w, rowOf(m)); });
+  }
+  c.closeSection();
+  c.y = (twoColumns ? Math.max(c.y, leftEnd) : c.y) + SP.md;
+
+  // Contexte d'équipe
+  c.openSection('Contexte d\'équipe');
+  drawSectionTitle(c, 'Contexte d\'équipe', { level: 2, tag: 'décrit l\'équipe, pas le joueur' });
+  const team = facts.teamContext;
+  const kpis: { label: string; value: string; sub?: string }[] = [];
+  if (team.style !== undefined) kpis.push({ label: 'Style observé', value: String(team.style) });
+  if (team.possessionPct !== undefined) kpis.push({ label: 'Possession', value: `${fr(Number(team.possessionPct), 1)} %` });
+  if (team.ppda !== undefined) kpis.push({ label: 'PPDA', value: fr(Number(team.ppda), 1), sub: 'plus bas = pressing plus haut' });
+  if (team.fieldTiltPct !== undefined) kpis.push({ label: 'Domination territoriale', value: `${fr(Number(team.fieldTiltPct), 1)} %`, sub: 'field tilt' });
+  if (facts.sample.shareOfTeamMinutesPct !== undefined) kpis.push({ label: 'Part des minutes', value: `${facts.sample.shareOfTeamMinutesPct} %`, sub: 'du joueur dans l\'équipe' });
+  if (kpis.length) drawKpiRow(c, kpis);
+  else drawTextBlock(c, 'Contexte d\'équipe non disponible dans le snapshot.', { size: FONT.small, color: THEME.ink3 });
+  drawTextBlock(c, 'Les chiffres du joueur sont produits dans ce contexte collectif : un pressing haut ou une possession élevée modifient les volumes par 90 minutes.', { size: FONT.note, color: THEME.ink3 });
+  c.closeSection();
+}
+
+function page3Metrics({ c, facts, mode }: Ctx) {
+  c.addPage();
+  drawSectionTitle(c, 'Tirs et métriques', { tag: 'Données ScoutVision' });
+
+  if (facts.shots) {
+    c.openSection('Tirs');
+    drawSectionTitle(c, 'Tirs de la saison', { level: 2 });
+    const s = facts.shots;
+    const kpis = [
+      { label: 'Tirs', value: String(s.shots) }, { label: 'Buts', value: String(s.goals) },
+      { label: 'xG', value: fr(s.xG, 2), sub: s.shots > 0 ? `${fr(s.xG / s.shots, 2)} xG par tir` : undefined },
+      { label: 'Buts − xG', value: signed(s.goals - s.xG, 2) }, { label: 'Conversion', value: `${fr(s.conversionPct, 1)} %` },
+    ];
+    const npxg = facts.metrics.find(m => m.metric === metricLabel('npxG per 90'));
+    if (npxg) kpis.push({ label: 'npxG / 90', value: fmtValue(npxg.value), sub: `P${npxg.percentile}` });
+    const onTarget = facts.metrics.find(m => m.metric === metricLabel('Shots on target, %'));
+    if (onTarget && kpis.length < 6) kpis.push({ label: 'Tirs cadrés', value: `${fmtValue(onTarget.value)} %`, sub: `P${onTarget.percentile}` });
+    drawKpiRow(c, kpis.slice(0, 6));
+    drawTextBlock(c, 'Carte des tirs et carte de chaleur : non incluses dans le snapshot du dossier (consultables dans la fiche joueur).', { size: FONT.note, color: THEME.ink3 });
+    c.closeSection();
+    c.space(SP.sm);
+  }
+
+  c.openSection('Métriques par famille');
+  drawSectionTitle(c, mode === 'complet' ? 'Toutes les métriques, par famille' : 'Principales métriques, par famille', { level: 2, tag: mode === 'complet' ? 'annexe complète' : 'les métriques les plus marquées de chaque famille' });
+  const half = span(6), lh = lineHeight(FONT.body) + 1.4;
+  // Sélection : le nombre de métriques par famille est choisi pour que la page suffise (2 par ligne, en-tête de 10,5 mm)
+  let families = metricFamilies(facts, mode === 'complet', 6);
+  if (mode !== 'complet') {
+    const budget = c.remaining - 2;
+    for (const per of [6, 4, 2]) {
+      families = metricFamilies(facts, false, per);
+      const needed = families.reduce((sum, f) => sum + 10.5 + Math.ceil(f.metrics.length / 2) * lh, 0);
+      if (needed <= budget) break;
+    }
+  }
+  if (!families.length) drawTextBlock(c, 'Aucune métrique avec percentile dans les faits du dossier.', { size: FONT.small, color: THEME.ink3 });
+  families.forEach(fam => {
+    const rows = Math.ceil(fam.metrics.length / 2);
+    c.ensureSpace(Math.min(7 + rows * lh, 40));
+    c.font(FONT.small, THEME.navy, 'bold'); c.text(fam.label.toUpperCase(), MARGIN, c.y + 3.2);
+    c.rule(c.y + 4.6, MARGIN, CONTENT_W, THEME.rule, 0.2);
+    c.y += 6.5;
+    for (let i = 0; i < fam.metrics.length; i += 2) {
+      c.ensureSpace(lh);
+      const y = c.y;
+      drawMetricRow(c, MARGIN, y, half, rowOf(fam.metrics[i]));
+      if (fam.metrics[i + 1]) drawMetricRow(c, colX(6), y, half, rowOf(fam.metrics[i + 1]));
+      c.y = y + lh;
+    }
+    c.space(SP.xs);
+  });
+  if (mode === 'complet' && facts.otherStats.length) {
+    c.ensureSpace(14);
+    c.font(FONT.small, THEME.navy, 'bold'); c.text('TOTAUX DE SAISON SANS PERCENTILE', MARGIN, c.y + 3.2);
+    c.rule(c.y + 4.6, MARGIN, CONTENT_W, THEME.rule, 0.2); c.y += 6.5;
+    drawTextBlock(c, facts.otherStats.map(s => `${s.stat} ${fmtValue(s.value)}`).join('  ·  '), { size: FONT.small, color: THEME.ink2 });
+  }
+  c.closeSection();
+}
 
 const stripMd = (s: string) => s.replace(/\*\*/g, '').replace(/__/g, '').trim();
 
-function writeMarkdown(w: Writer, content: string, opts: { skipPriorities?: boolean } = {}) {
-  const sections = summarySections(content);
-  sections.forEach(section => {
-    if (opts.skipPriorities && /priorit/i.test(section.title)) return;
-    if (section.title) w.heading(stripMd(section.title), 2);
+/** Synthèse Markdown : sous-titres « ### n. Titre » et puces ; la section des priorités est écartée (section B) */
+function drawSummary(c: PdfCanvas, content: string, skipPriorities: boolean) {
+  summarySections(content).forEach(section => {
+    if (skipPriorities && /priorit/i.test(section.title)) return;
+    if (section.title) drawSectionTitle(c, stripMd(section.title), { level: 2 });
     let blank = false;
     section.lines.forEach(line => {
       const t = line.trim();
       if (!t) { blank = true; return; }
-      if (blank) { w.space(1.5); blank = false; }
+      if (blank) { c.space(1.5); blank = false; }
       const bullet = t.match(/^[-*•]\s+(.*)$/);
-      if (bullet) w.paragraph(stripMd(bullet[1]), { bullet: '•', indent: 1 });
-      else w.paragraph(stripMd(t));
+      if (bullet) drawTextBlock(c, stripMd(bullet[1]), { bullet: '•', indent: 1, size: FONT.body + 0.5 });
+      else drawTextBlock(c, stripMd(t), { size: FONT.body + 0.5 });
     });
-    w.space(2.5);
+    c.space(2);
   });
 }
 
+function page4Scouting({ c, record, summary, typeLabel }: Ctx) {
+  c.addPage();
+  drawSectionTitle(c, 'Scouting', { tag: 'trois couches : synthèse générée · priorités · observations du scout' });
+
+  // A. Synthèse ScoutVision
+  c.openSection('Synthèse ScoutVision');
+  drawSectionTitle(c, 'A · Synthèse ScoutVision', { level: 2, tag: summary ? `texte généré · ${summary.model} · prompt ${summary.promptVersion} · ${fmtDate(summary.generatedAt)}` : 'aucune synthèse générée' });
+  if (summary) {
+    drawTextBlock(c, 'Synthèse rédigée par le modèle à partir des seuls faits du snapshot (grounding ScoutVision). À relire : elle résume les chiffres, elle n\'évalue pas le joueur.', { size: FONT.note, color: THEME.ink3 });
+    c.space(1.5);
+    drawSummary(c, summary.content, true);
+  } else {
+    drawTextBlock(c, 'Aucune synthèse ScoutVision dans ce dossier : les données des pages précédentes et les observations ci-dessous constituent le rapport.', { size: FONT.body, color: THEME.ink2 });
+    c.space(SP.xs);
+  }
+  c.closeSection();
+
+  // B. Priorités d'observation
+  const priorities = summary ? observationPriorities(summary.content) : [];
+  if (priorities.length) {
+    c.openSection('Priorités d\'observation');
+    c.space(SP.xs);
+    drawSectionTitle(c, 'B · Priorités d\'observation', { level: 2, tag: 'issues de la synthèse · à vérifier en vidéo ou en live' });
+    priorities.forEach((pr, i) => {
+      const lh = lineHeight(FONT.body + 0.5);
+      c.font(FONT.body + 0.5);
+      const lines = c.wrap(pr, CONTENT_W - 12);
+      c.ensureSpace(lines.length * lh + 2);
+      c.rect(MARGIN, c.y + 0.6, 6, 6, THEME.fillNavy, undefined, 1);
+      c.font(FONT.small, THEME.navy, 'bold'); c.text(String(i + 1), MARGIN + 3, c.y + 4.9, { align: 'center' });
+      c.font(FONT.body + 0.5, THEME.ink);
+      lines.forEach(l => { c.text(l, MARGIN + 9, c.y + lh * 0.75); c.y += lh; });
+      c.y += 1.6;
+    });
+    c.closeSection();
+  }
+
+  // C. Observations du scout
+  c.openSection('Observations du scout');
+  c.space(SP.xs);
+  drawSectionTitle(c, 'C · Observations du scout', { level: 2, tag: 'saisie humaine · ni générée ni complétée par un modèle' });
+  const observations = [...record.observations].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  if (observations.length === 0) drawTextBlock(c, 'Aucune observation saisie pour ce dossier.', { size: FONT.body, color: THEME.ink2 });
+  observations.forEach(o => drawObservation(c, { type: typeLabel(o.type), date: fmtDate(o.date), text: o.text, strengths: o.strengths, toReview: o.toReview, conclusion: o.conclusion }));
+  c.closeSection();
+
+  // D. Conclusion du scout : uniquement les champs saisis par l'observateur, jamais générée
+  const withStrengths = observations.filter(o => o.strengths), withReview = observations.filter(o => o.toReview), withConclusion = observations.filter(o => o.conclusion);
+  if (withStrengths.length || withReview.length || withConclusion.length) {
+    c.openSection('Conclusion du scout');
+    c.space(SP.xs);
+    drawSectionTitle(c, 'D · Conclusion du scout', { level: 2, tag: 'reprise des champs saisis par le scout' });
+    const list = (title: string, items: typeof observations, pick: (o: typeof observations[number]) => string | undefined, bold = false) => {
+      if (!items.length) return;
+      c.ensureSpace(10);
+      c.font(FONT.note, THEME.ink3, 'bold'); c.text(title.toUpperCase(), MARGIN, c.y + 3); c.y += 4.5;
+      items.forEach(o => drawTextBlock(c, `${pick(o)}  (${typeLabel(o.type)}, ${fmtDate(o.date)})`, { bullet: '•', indent: 1, size: FONT.body, style: bold ? 'bold' : 'normal' }));
+      c.space(2);
+    };
+    list('Points forts confirmés', withStrengths, o => o.strengths);
+    list('Points à surveiller', withReview, o => o.toReview);
+    list('Conclusion', withConclusion, o => o.conclusion, true);
+    c.closeSection();
+  }
+}
+
+function annexes({ c, record, summary }: Ctx) {
+  const older = record.generatedSummaries.filter(s => s.id !== summary?.id);
+  if (!older.length) return;
+  c.addPage();
+  c.openSection('Annexe · Historique des synthèses');
+  drawSectionTitle(c, 'Annexe · Historique des synthèses', { tag: `${older.length} version${older.length > 1 ? 's' : ''} antérieure${older.length > 1 ? 's' : ''}` });
+  older.forEach((s, i) => {
+    drawSectionTitle(c, `Version ${record.generatedSummaries.indexOf(s) + 1} · ${fmtDate(s.generatedAt)} · ${s.model} · prompt ${s.promptVersion}`, { level: 2 });
+    drawSummary(c, s.content, false);
+    if (i < older.length - 1) c.space(SP.md);
+  });
+  c.closeSection();
+}
+
+function methodology({ c, record, facts, summary, options, statusLabel }: Ctx) {
+  const snap = record.dataSnapshot;
+  const dataDate = snap.dataUpdatedAt ?? options.dataGeneratedAt;
+  const lines = [
+    `Dossier ${statusLabel(record.status).toLowerCase()} créé le ${fmtDate(record.createdAt)}, modifié le ${fmtDate(record.updatedAt)} ; données ScoutVision du ${dataDate ? fmtDate(dataDate) : 'date non renseignée'} figées dans le dossier (snapshot) ; export du ${fmtDate((options.now ?? new Date()).toISOString())}.`,
+    `Ligne joueur-saison ${record.player.playerSeasonId} : ${record.player.team}, ${record.player.competitionName ?? record.player.competition}, saison ${record.player.season}. Un joueur a un dossier par club et par compétition.`,
+    'Percentiles : rang (0-100) parmi les joueurs du même groupe de poste, du même niveau de compétition et de la même saison ; ils classent un volume, pas une qualité. Métriques « inv. » : moins c\'est mieux.',
+    'Indice de rôle ScoutVision : composite pondéré de percentiles (0-100), le même que celui du Chasseur de pépites ; ce n\'est ni un percentile ni une note globale.',
+    'RAPM : plus-minus régularisé sur deux saisons (xG par 90, net = offensif + défensif) avec la fiabilité de la ligue ; finition : buts au-delà de l\'xG par 100 tirs, resserrée vers la moyenne ; part des passes : réseau de passes de l\'équipe.',
+    `Valeur : valeur de marché Transfermarkt et estimation statistique ScoutVision (erreur typique ${facts.values.estimatedValueTypicalError ?? '×1,7'}) ; une estimation, jamais un prix de transfert.`,
+    'Projection statistique ScoutVision : courbes d\'âge du rôle, effet de l\'âge et retour vers la moyenne ; une tendance, pas une prévision de niveau.',
+    summary ? `Synthèse : générée par ${summary.model}${summary.requestedModel && summary.requestedModel !== summary.model ? ` (modèle demandé ${summary.requestedModel})` : ''}, prompt ${summary.promptVersion}, le ${fmtDate(summary.generatedAt)} ; ${record.generatedSummaries.length} version${record.generatedSummaries.length > 1 ? 's' : ''} dans le dossier.` : 'Synthèse : aucune version générée dans ce dossier.',
+    'Observations du scout : saisies par l\'observateur (vidéo, live, général) ; elles ne sont ni générées ni complétées par un modèle et ne modifient aucun chiffre.',
+    'Polices standard du PDF : caractères hors Latin-1 translittérés (ł → l, Đ → D).',
+  ];
+  if (record.tags.length) lines.push(`Tags : ${record.tags.join(', ')}.`);
+  c.space(SP.md);
+  drawMethodologyNote(c, 'Méthodologie et sources', lines);
+}
+
+// ============================================
+// DOCUMENT
+// ============================================
+
+export interface BuiltPdf { doc: jsPDF; pages: number; summary: GeneratedSummary | undefined; audit: PdfAudit }
+
 /**
- * Document PDF d'un dossier. Renvoie le document et le nombre de pages ; `pdfFileName` donne le nom.
+ * Document PDF d'un dossier. Renvoie le document, le nombre de pages, la synthèse imprimée et
+ * l'audit de mise en page (police minimale, textes hors marges, sections vides) ; `pdfFileName` donne le nom.
  */
-export function buildReportPdf(record: ScoutReportRecord, options: PdfOptions = {}): { doc: jsPDF; pages: number; summary: GeneratedSummary | undefined } {
+export function buildReportPdf(record: ScoutReportRecord, options: PdfOptions = {}): BuiltPdf {
   const now = options.now ?? new Date();
+  const mode: PdfMode = options.mode ?? 'synthese';
   const statusLabel = options.statusLabel ?? (s => STATUS_FR[s]);
   const typeLabel = options.typeLabel ?? (t => TYPE_FR[t]);
   const summaries = record.generatedSummaries;
   const summary = (options.summaryId ? summaries.find(s => s.id === options.summaryId) : undefined) ?? summaries[summaries.length - 1];
-  const snap = record.dataSnapshot;
-  const facts = snap.facts;
   const p = record.player;
-  const dataDate = snap.dataUpdatedAt ?? options.dataGeneratedAt;
-  const footerMeta = [
-    `Données : ${dataDate ? fmtDate(dataDate) : 'date non renseignée'}`, `Saison : ${p.season}`,
-    `Rapport : ${summary ? fmtDate(summary.generatedAt) : 'sans synthèse IA'}`, `Modèle : ${summary?.model ?? '—'}`, `Version : ${summary?.promptVersion ?? '—'}`,
-    `Export : ${fmtDate(now.toISOString())}`,
-  ].join('  ·  ');
-  const w = new Writer(footerMeta);
-  const doc = w.doc;
+  const headerInfo = { status: statusLabel(record.status), date: `exporté le ${fmtDate(now.toISOString())}`, player: p.name, season: p.seasonLabel ?? p.season };
+  const c = new PdfCanvas((canvas, page) => drawPageHeader(canvas, page, headerInfo));
+  const ctx: Ctx = { c, record, facts: record.dataSnapshot.facts, summary, options: { ...options, now }, mode, statusLabel, typeLabel };
 
-  // ----- PAGE 1 : PROFIL -----
-  w.text(8, ACCENT, 'bold'); doc.text('SCOUTVISION', MARGIN, w.y + 3);
-  w.text(16, INK, 'bold'); doc.text('Rapport de scouting', MARGIN, w.y + 10);
-  w.text(8, INK3); doc.text(pdfText(`${statusLabel(record.status)} · créé le ${fmtDate(record.createdAt)} · modifié le ${fmtDate(record.updatedAt)}`), PAGE_W - MARGIN, w.y + 10, { align: 'right' });
-  w.y += 15;
-  doc.setDrawColor(...RULE); doc.setLineWidth(0.3); doc.line(MARGIN, w.y, PAGE_W - MARGIN, w.y); w.y += 5;
+  page1Synthesis(ctx);
+  page2Impact(ctx);
+  page3Metrics(ctx);
+  page4Scouting(ctx);
+  if (mode === 'complet') annexes(ctx);
+  methodology(ctx);
 
-  w.text(20, INK, 'bold'); doc.text(pdfText(p.name), MARGIN, w.y + 6); w.y += 9;
-  w.text(10, INK2); doc.text(pdfText([p.team, p.competitionName ?? p.competition, `saison ${p.seasonLabel ?? p.season}`].join('  ·  ')), MARGIN, w.y + 3); w.y += 7;
-  const identity: [string, string][] = [
-    ['Poste', String(facts.player.position ?? p.position ?? '—')], ['Âge', p.age !== undefined ? `${p.age} ans` : facts.player.age !== undefined ? `${facts.player.age} ans` : '—'],
-    ['Minutes', facts.sample.minutes !== undefined ? `${Number(facts.sample.minutes).toLocaleString('fr-FR')} min` : '—'],
-    ['Matchs', facts.sample.matches !== undefined ? `${facts.sample.matches}${facts.sample.starts !== undefined ? ` (${facts.sample.starts} titul.)` : ''}` : '—'],
-    ['Pied', String(facts.player.preferredFoot ?? '—')], ['Taille', facts.player.heightCm !== undefined ? `${facts.player.heightCm} cm` : '—'],
-  ];
-  w.keyValues(identity, 3);
-  w.space(2);
-  w.keyValues([
-    ['Valeur de marché Transfermarkt', facts.values.marketValueTransfermarkt ?? 'N/D'],
-    ['Estimation statistique ScoutVision', facts.values.estimatedValueScoutVision ? `${facts.values.estimatedValueScoutVision} (erreur typique ${facts.values.estimatedValueTypicalError ?? '—'})` : 'N/D'],
-    ['Contrat', facts.contractUntil ? fmtDate(facts.contractUntil) : 'N/D'],
-  ], 3);
-  if (snap.seasonInProgress) w.paragraph('Saison en cours au moment du rapport : échantillon partiel, incertitude plus élevée.', { size: 8.5, color: INK3 });
-  w.space(3);
-
-  w.heading('Rôles principaux');
-  if (snap.bestRoles.length) {
-    w.paragraph(snap.bestRoles.map(r => `${r.role} · indice ${r.index}`).join('     '), { size: 10 });
-    w.paragraph('Indice du rôle (0-100) : composite pondéré de percentiles, le même que le Chasseur de pépites. Ce n\'est ni un percentile ni une note globale.', { size: 8, color: INK3 });
-  } else w.paragraph('Aucun rôle évaluable pour ce poste.', { size: 9, color: INK3 });
-  w.space(3);
-
-  const radarMetrics = roleMetrics(facts, record.role ?? snap.bestRoles[0]?.role, 8);
-  const { strengths, limits } = strengthsAndLimits(facts);
-  w.heading('Profil statistique');
-  const hasRadar = radarMetrics.length >= 3;
-  const radarH = hasRadar ? 74 : 0;
-  w.ensure(radarH + 4);
-  const top = w.y;
-  if (hasRadar) {
-    w.radar(radarMetrics, MARGIN + 44, top + radarH / 2 - 2, 22);
-    w.text(7.5, INK3); doc.text(pdfText(`Percentiles du rôle ${record.role ?? snap.bestRoles[0]?.role ?? ''} (sens « plus c'est haut, mieux c'est »)`), MARGIN + 44, top + radarH - 1, { align: 'center', maxWidth: 84 });
-  }
-  // Sans radar (moins de trois métriques du rôle dans les faits), la colonne des percentiles prend toute la largeur
-  const colX = hasRadar ? MARGIN + 92 : MARGIN, colW = hasRadar ? CONTENT_W - 92 : CONTENT_W;
-  w.y = top;
-  w.text(8, INK3, 'bold'); doc.text('PRINCIPAUX PERCENTILES', colX, w.y + 3); w.y += 6;
-  if (radarMetrics.length) radarMetrics.slice(0, 8).forEach(m => w.percentileRow(m, colW, colX));
-  else w.paragraph('Aucune métrique de rôle dans les faits du rapport.', { size: 8.5, color: INK3, x: colX, width: colW });
-  w.y = Math.max(w.y, top + radarH) + 3;
-
-  w.heading('Forces et limites statistiques', 2);
-  const half = CONTENT_W / 2 - 3;
-  const startY = w.y;
-  w.text(8, ACCENT, 'bold'); doc.text('FORCES', MARGIN, w.y + 3); w.y += 5;
-  if (strengths.length) strengths.forEach(m => w.percentileRow(m, half, MARGIN)); else w.paragraph('Aucune métrique au 75e percentile ou plus.', { size: 8.5, color: INK3, width: half });
-  const endLeft = w.y;
-  w.y = startY;
-  w.text(8, [200, 80, 70], 'bold'); doc.text('LIMITES', MARGIN + half + 6, w.y + 3); w.y += 5;
-  if (limits.length) limits.forEach(m => w.percentileRow(m, half, MARGIN + half + 6)); else w.paragraph('Aucune métrique au 25e percentile ou moins.', { size: 8.5, color: INK3, x: MARGIN + half + 6, width: half });
-  w.y = Math.max(w.y, endLeft);
-  w.paragraph('Percentiles du pipeline ScoutVision : rang parmi les joueurs du même groupe de poste, du même niveau de compétition et de la même saison. « inv. » : moins c\'est mieux.', { size: 8, color: INK3 });
-
-  // ----- PAGE 2 : ANALYSE -----
-  w.newPage();
-  w.heading('Impact et valeur');
-  const ind = snap.indicators ?? {};
-  const rows: [string, string][] = [];
-  if (ind.rapm) rows.push(['Impact sur le terrain (RAPM)', `${signed(ind.rapm.net, 3)} xG/90${ind.rapm.pct !== undefined ? ` · P${ind.rapm.pct} dans la ligue` : ''}`]);
-  if (ind.finishing) rows.push(['Talent de finition', `${signed(ind.finishing.skill, 1)} but / 100 tirs vs xG (${ind.finishing.shots} tirs en carrière${ind.finishing.shots < 50 ? ', petit échantillon' : ''})`]);
-  if (ind.passShare) rows.push(['Circulation du ballon', `${fr(ind.passShare.value, 1)} % des passes de l'équipe${ind.passShare.pct !== undefined ? ` · P${ind.passShare.pct} pour le rôle` : ''}`]);
-  if (ind.valuation?.market || ind.valuation?.estimate) {
-    rows.push(['Valeur et performance', ind.valuation.market && ind.valuation.estimate
-      ? `estimation ${formatEuro(ind.valuation.estimate)} = ${Math.round((ind.valuation.estimate / ind.valuation.market) * 100)} % de la valeur de marché (${formatEuro(ind.valuation.market)})`
-      : ind.valuation.estimate ? `estimation ${formatEuro(ind.valuation.estimate)}` : `valeur de marché ${formatEuro(ind.valuation.market!)}`]);
-  }
-  if (rows.length) {
-    rows.forEach(([k, v]) => { w.ensure(LINE * 2); w.paragraph(k, { size: 8, color: INK3, style: 'bold' }); w.paragraph(v, { size: 10 }); w.space(1.5); });
-    if (ind.rapm?.reliability) w.paragraph(`Fiabilité du RAPM dans cette ligue : nette ${fr(ind.rapm.reliability.net, 2)}, défense ${fr(ind.rapm.reliability.def, 2)} (1 = parfaitement fiable).`, { size: 8, color: INK3 });
-    w.paragraph('Modèles du pipeline : plus-minus régularisé sur deux saisons, finition au-delà de l\'xG resserrée vers la moyenne, part des passes du réseau d\'équipe, valeur estimée par la performance (une estimation statistique, pas un prix).', { size: 8, color: INK3 });
-  } else w.paragraph('Aucun indicateur de modèle disponible pour cette ligne.', { size: 9, color: INK3 });
-  w.space(3);
-
-  w.heading('Projection de développement');
-  if (snap.projection && snap.projection.length) {
-    w.paragraph('Percentile actuel → percentile attendu la saison prochaine (courbes d\'âge du rôle : effet de l\'âge et retour vers la moyenne). Une tendance statistique, pas un verdict sur le joueur.', { size: 8.5, color: INK2 });
-    snap.projection.forEach(pr => {
-      w.ensure(LINE);
-      w.text(9, INK2); doc.text(pdfText(pr.label), MARGIN, w.y + 3.3);
-      w.text(9, INK, 'bold'); doc.text(pdfText(`P${pr.current} → P${pr.projected}`), MARGIN + CONTENT_W * 0.55, w.y + 3.3);
-      const d = pr.projected - pr.current;
-      w.text(9, d > 0 ? ACCENT : d < 0 ? [200, 80, 70] : INK3); doc.text(pdfText(signed(d, 0)), MARGIN + CONTENT_W, w.y + 3.3, { align: 'right' });
-      w.y += LINE + 0.4;
-    });
-  } else w.paragraph('Projection indisponible (courbes d\'âge absentes pour ce rôle ou âge inconnu).', { size: 9, color: INK3 });
-  w.space(3);
-
-  if (facts.shots) {
-    w.heading('Tirs de la saison');
-    w.keyValues([['Tirs', String(facts.shots.shots)], ['Buts', String(facts.shots.goals)], ['xG', fr(facts.shots.xG, 2)], ['Conversion', `${fr(facts.shots.conversionPct, 1)} %`]], 4);
-    w.paragraph('Carte des tirs et carte de chaleur : consultables dans la fiche joueur, non reproduites dans ce PDF.', { size: 8, color: INK3 });
-    w.space(3);
-  }
-
-  w.heading('Contexte d\'équipe');
-  const team = facts.teamContext;
-  const teamRows: [string, string][] = [];
-  if (team.style !== undefined) teamRows.push(['Style de jeu', String(team.style)]);
-  if (team.possessionPct !== undefined) teamRows.push(['Possession', `${team.possessionPct} %`]);
-  if (team.ppda !== undefined) teamRows.push(['PPDA', String(team.ppda)]);
-  if (team.fieldTiltPct !== undefined) teamRows.push(['Domination territoriale', `${team.fieldTiltPct} %`]);
-  if (facts.sample.shareOfTeamMinutesPct !== undefined) teamRows.push(['Part des minutes', `${facts.sample.shareOfTeamMinutesPct} %`]);
-  if (teamRows.length) w.keyValues(teamRows, 3); else w.paragraph('Contexte d\'équipe non disponible.', { size: 9, color: INK3 });
-  w.paragraph('Le contexte décrit l\'équipe, pas le joueur : ses chiffres sont produits dans ce cadre.', { size: 8, color: INK3 });
-
-  // ----- PAGE 3+ : RAPPORT -----
-  w.newPage();
-  w.heading('Synthèse ScoutVision');
-  if (summary) {
-    w.paragraph(pdfText(`Rédigée par ${summary.model} le ${fmtDate(summary.generatedAt)} (prompt ${summary.promptVersion}) à partir des seuls faits du snapshot. Une synthèse à relire, pas une évaluation.`), { size: 8.5, color: INK3 });
-    w.space(2);
-    writeMarkdown(w, summary.content, { skipPriorities: true });
-    const priorities = observationPriorities(summary.content);
-    w.heading('Priorités d\'observation');
-    if (priorities.length) priorities.forEach(pr => w.paragraph(pr, { bullet: '•', indent: 1 }));
-    else w.paragraph('La synthèse ne contient pas de section de priorités.', { size: 9, color: INK3 });
-  } else {
-    w.paragraph('Aucune synthèse IA dans ce dossier : les données ci-dessus et les observations ci-dessous constituent le rapport.', { size: 9.5, color: INK2 });
-    w.heading('Priorités d\'observation');
-    w.paragraph('À définir à partir des forces et limites statistiques (page 1).', { size: 9, color: INK3 });
-  }
-  w.space(4);
-
-  w.heading('Observations humaines');
-  if (record.observations.length === 0) w.paragraph('Aucune observation saisie.', { size: 9, color: INK3 });
-  record.observations.forEach(o => {
-    w.ensure(LINE * 4);
-    w.paragraph(`${typeLabel(o.type)} · ${fmtDate(o.date)}`, { size: 8.5, color: ACCENT, style: 'bold' });
-    w.paragraph(o.text, { size: 10 });
-    if (o.strengths) w.paragraph(`Forces observées : ${o.strengths}`, { size: 9.5, color: INK2, indent: 2 });
-    if (o.toReview) w.paragraph(`À revoir : ${o.toReview}`, { size: 9.5, color: INK2, indent: 2 });
-    if (o.conclusion) w.paragraph(`Conclusion : ${o.conclusion}`, { size: 9.5, color: INK, indent: 2, style: 'bold' });
-    w.space(2.5);
-  });
-  w.paragraph('Observations saisies par l\'observateur. Elles ne sont ni générées ni complétées par un modèle et ne modifient aucun chiffre du dossier.', { size: 8, color: INK3 });
-
-  if (summaries.length > 1) {
-    w.space(3);
-    w.heading('Historique des versions', 2);
-    summaries.forEach((s, i) => w.paragraph(`v${i + 1} · ${fmtDate(s.generatedAt)} · ${s.model} · ${s.promptVersion}${s.id === summary?.id ? ' · version imprimée' : ''}`, { size: 8.5, color: INK2 }));
-  }
-  if (record.tags.length) { w.space(2); w.paragraph(`Tags : ${record.tags.join(', ')}`, { size: 8.5, color: INK3 }); }
-
-  const finished = w.finish();
-  return { doc: finished, pages: finished.getNumberOfPages(), summary };
+  const total = c.page;
+  const footer = { player: p.name, season: p.seasonLabel ?? p.season, status: statusLabel(record.status), reportDate: fmtDate(record.updatedAt) };
+  for (let i = 1; i <= total; i++) drawPageFooter(c, i, total, footer);
+  return { doc: c.doc, pages: total, summary, audit: c.audit() };
 }
 
-/** Télécharge le PDF du dossier ; renvoie le nom et le nombre de pages */
-export function downloadReportPdf(record: ScoutReportRecord, options: PdfOptions = {}): { fileName: string; pages: number } {
-  const { doc, pages } = buildReportPdf(record, options);
+// ============================================
+// IMAGES (navigateur) ET TÉLÉCHARGEMENT
+// ============================================
+
+/** URL d'image servie en même origine via le proxy /cdn (même règle que components/Media) */
+const sameOrigin = (url: string) => url.replace(/^https:\/\/cdn\.pitchapi\.dev\//, '/cdn/');
+
+/**
+ * Charge une image dans le navigateur et la réduit (JPEG pour une photo, PNG pour un drapeau) ;
+ * undefined hors navigateur, à l'échec ou après `timeoutMs`. Ne lève jamais.
+ */
+export function loadPdfImage(url: string | undefined | null, opts: { maxPx?: number; format?: 'JPEG' | 'PNG'; timeoutMs?: number } = {}): Promise<PdfImage | undefined> {
+  if (!url || typeof document === 'undefined' || typeof Image === 'undefined') return Promise.resolve(undefined);
+  const { maxPx = 240, format = 'JPEG', timeoutMs = 2500 } = opts;
+  return new Promise(resolve => {
+    const img = new Image();
+    const timer = setTimeout(() => resolve(undefined), timeoutMs);
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const scale = Math.min(1, maxPx / Math.max(img.naturalWidth, img.naturalHeight, 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round((img.naturalWidth || maxPx) * scale)); canvas.height = Math.max(1, Math.round((img.naturalHeight || maxPx) * scale));
+        const g = canvas.getContext('2d');
+        if (!g) { resolve(undefined); return; }
+        if (format === 'JPEG') { g.fillStyle = '#ffffff'; g.fillRect(0, 0, canvas.width, canvas.height); }
+        g.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve({ dataUrl: canvas.toDataURL(format === 'JPEG' ? 'image/jpeg' : 'image/png', 0.82), format, width: canvas.width, height: canvas.height });
+      } catch { resolve(undefined); }
+    };
+    img.onerror = () => { clearTimeout(timer); resolve(undefined); };
+    img.src = sameOrigin(url);
+  });
+}
+
+/** Télécharge le PDF du dossier (photo et drapeau chargés si possible) ; renvoie le nom, le nombre de pages et l'audit */
+export async function downloadReportPdf(record: ScoutReportRecord, options: PdfOptions = {}): Promise<{ fileName: string; pages: number; audit: PdfAudit }> {
+  const code = record.dataSnapshot.facts.player.nationalityCode;
+  const [photo, flag] = await Promise.all([
+    options.photo ?? loadPdfImage(record.player.image, { maxPx: 240, format: 'JPEG' }),
+    options.flag ?? loadPdfImage(getFlagUrl(code ? String(code) : undefined), { maxPx: 64, format: 'PNG' }),
+  ]);
+  const { doc, pages, audit } = buildReportPdf(record, { ...options, photo, flag });
   const fileName = pdfFileName(record, options.now);
   doc.save(fileName);
-  return { fileName, pages };
+  return { fileName, pages, audit };
 }
 
 /** Texte des pages (flux de contenu), pour les tests : le texte est écrit tel quel par les polices standard */
