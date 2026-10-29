@@ -11,7 +11,8 @@ import { TeamLineups, dataLoader } from '../../services/dataLoader';
 import { addToWatchlist, getWatchlist, removeFromWatchlist } from '../../services/storageService';
 import { placeEleven } from '../../utils/lineup';
 import { formationPositions } from '../../utils/teamLineups';
-import { CONTRACT_MONTHS, DimensionScore, Models, NeedFlag, isDeclining, slotDepth } from '../../utils/recruitment';
+import { CONTRACT_MONTHS, DepthSignal, DimensionScore, Models, isDeclining, seasonMarket, slotDepth } from '../../utils/recruitment';
+import { seasonCapabilities } from '../../utils/prospects';
 import { useAsyncData } from '../../hooks/useAsyncData';
 import { positionLabel, positionName } from '../../utils/labels';
 import { formatEuro } from '../../utils/format';
@@ -22,7 +23,7 @@ import { SquadProfilePanel } from '../SquadProfile';
 import { FormationPicker, useFormation } from './TeamLineupTab';
 import { SquadSortKey, teamMemory } from './teamMemory';
 
-const SIGNALS: Record<NeedFlag, { label: string; icon: React.ElementType; title: string }> = {
+const SIGNALS: Record<DepthSignal, { label: string; icon: React.ElementType; title: string }> = {
   noStarter: { label: 'Aucun joueur régulier', icon: CircleAlert, title: 'Aucun joueur de ce poste n\'a assez de minutes pour figurer dans les données' },
   depth: { label: 'Pas de doublure', icon: Users, title: 'Aucun autre joueur n\'a débuté 15 % des matchs de la formation à ce poste' },
   rotation: { label: 'Poste en rotation', icon: Repeat, title: 'Le titulaire le plus fréquent est sous le seuil de minutes : la référence est le joueur le plus utilisé à ce poste' },
@@ -66,20 +67,23 @@ const TeamSquadTab: React.FC<{
   const eleven = useMemo(() => (formation ? placeEleven(formation.slots) : []), [formation]);
   const positions = useMemo(() => (formation ? formationPositions(formation) : null), [formation]);
 
-  // Signaux de contrat et de déclin : mêmes sources que le Recrutement (Transfermarkt, courbes d'âge)
+  // Signaux de contrat et de déclin : mêmes sources que le Recrutement (Transfermarkt, courbes d'âge).
+  // L'instantané Transfermarkt ne vaut que pour la saison en cours : une saison passée n'a
+  // aucun signal de contrat (seasonMarket, comme le Recrutement et le Chasseur de pépites)
+  const caps = useMemo(() => seasonCapabilities(players), [players]);
   const market = useAsyncData(() => dataLoader.loadMarketValues(), []);
   const curves = useAsyncData(() => dataLoader.loadAgeCurves(), []);
   const ready = market.status !== 'loading' && curves.status !== 'loading';
   const depth = useMemo(() => {
     if (!ready) return null;
     const models: Models | null = curves.data ? { curves: curves.data, transfer: null } : null;
-    const m = market.data ?? null;
+    const m = seasonMarket(market.data, caps);
     return slotDepth(eleven, players, {
       contractOf: m ? p => m.players.get(p['Player ID'] ?? '')?.contract : undefined,
       asOf: m?.scrapedAt ? new Date(m.scrapedAt) : new Date(),
       declining: models ? p => isDeclining(p, models) : undefined,
     });
-  }, [ready, eleven, players, market.data, curves.data]);
+  }, [ready, eleven, players, market.data, curves.data, caps]);
 
   const [sort, setSort] = useState(teamMemory.squadSort);
   useEffect(() => { teamMemory.squadSort = sort; }, [sort]);
@@ -132,9 +136,9 @@ const TeamSquadTab: React.FC<{
               : (
                 <>
                   <div className="px-4 pt-3 pb-2"><FormationPicker formations={formations} current={formation} onChoose={chooseFormation} lineups={lineups} teamMatches={teamMatches} /></div>
-                  {(market.status === 'error' || curves.status === 'error') && (
+                  {((market.status === 'error' && caps.contract) || curves.status === 'error') && (
                     <p className="px-4 pb-2 text-2xs text-warn">
-                      {market.status === 'error' ? 'Contrats indisponibles : signal de fin de contrat absent. ' : ''}
+                      {market.status === 'error' && caps.contract ? 'Contrats indisponibles : signal de fin de contrat absent. ' : ''}
                       {curves.status === 'error' ? 'Courbes d\'âge indisponibles : signal de déclin absent.' : ''}
                     </p>
                   )}

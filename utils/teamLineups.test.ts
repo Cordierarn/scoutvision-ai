@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LineupSlot, TeamLineups } from '../services/dataLoader';
-import { formationPositions, isOutOfPosition, isValidSlotPosition, lineupCoverage, normalizeFormation, orderFormations } from './teamLineups';
+import { formationPositions, isExploitableFormation, isOutOfPosition, isValidSlotPosition, lineupCoverage, normalizeFormation, orderFormations, recruitmentFormation } from './teamLineups';
 
 const slot = (n: number, x: number, y: number, players: [string, string, number][] = [[`p${n}`, `Joueur ${n}`, 3]]): LineupSlot => ({ slot: n, x, y, players });
 const eleven = (offset = 0): LineupSlot[] => Array.from({ length: 11 }, (_, i) => slot(offset + i, 0.1 + i * 0.07, (i % 4) * 0.25 + 0.1));
@@ -113,5 +113,35 @@ describe('poste occupé dans la formation', () => {
     expect(isOutOfPosition('CB', 'DM')).toBe(false);
     expect(isOutOfPosition('GK', 'CB')).toBe(true);
     expect(isOutOfPosition(undefined, 'CB')).toBe(false);
+  });
+});
+
+describe('formation des besoins de recrutement', () => {
+  const lineups = (formations: { formation: string; matches: number; slots: LineupSlot[] }[]): TeamLineups => ({ matches: 10, formations } as TeamLineups);
+  const empty = (n: number) => Array.from({ length: n }, (_, i) => slot(i, 0, 0));
+
+  it('la plus utilisée si elle donne un onze exploitable : pas de repli', () => {
+    const f = orderFormations(lineups([{ formation: '4-3-3', matches: 8, slots: eleven() }, { formation: '4-4-2', matches: 2, slots: eleven(20) }]));
+    expect(recruitmentFormation(f)).toEqual({ index: 0 });
+  });
+
+  it('cas Crvena Zvezda : 3-2-4-1 sans case placée → repli sur la plus utilisée exploitable, annoncé', () => {
+    const f = orderFormations(lineups([
+      { formation: '4-1-4-1', matches: 2, slots: eleven() }, { formation: '3-4-3', matches: 1, slots: eleven(20) },
+      { formation: '3-2-4-1', matches: 7, slots: empty(4) },
+    ]));
+    expect(f[0].formation).toBe('3-2-4-1');                 // l'Analyse d'équipe la montre toujours en premier
+    expect(isExploitableFormation(f[0])).toBe(false);
+    const choice = recruitmentFormation(f)!;
+    expect(f[choice.index].formation).toBe('4-1-4-1');
+    expect(choice.fallbackFrom?.formation).toBe('3-2-4-1');
+  });
+
+  it('formation irrégulière (plus de 11 cases) : exploitable ; aucune exploitable : la plus utilisée, sans repli', () => {
+    const twelve = [...eleven(), slot(99, 0.95, 0.95)];
+    expect(isExploitableFormation(normalizeFormation({ formation: '3-4-3', matches: 3, slots: twelve }))).toBe(true);
+    const f = orderFormations(lineups([{ formation: '4-4-2', matches: 5, slots: eleven().slice(0, 7) }, { formation: '3-5-2', matches: 2, slots: empty(3) }]));
+    expect(recruitmentFormation(f)).toEqual({ index: 0 });
+    expect(recruitmentFormation([])).toBeNull();
   });
 });

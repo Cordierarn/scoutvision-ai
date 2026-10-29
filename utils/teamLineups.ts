@@ -144,3 +144,25 @@ export function isOutOfPosition(playerPosition: string | undefined, slotPosition
   if (a === 0 || b === 0) return a !== b;
   return Math.abs(a - b) >= 2;
 }
+
+// ============================================
+// FORMATION DES BESOINS DE RECRUTEMENT
+// ============================================
+
+/** Onze exploitable : au moins 11 cases placées (formation complète, ou irrégulière fusionnée) */
+export const isExploitableFormation = (view: Pick<FormationView, 'slots'>) => view.slots.length >= ELEVEN;
+
+/**
+ * Formation retenue pour les besoins de recrutement : la plus utilisée parmi celles qui
+ * donnent un onze exploitable. L'Analyse d'équipe montre la plus utilisée telle quelle, même
+ * incomplète (« 3-2-4-1 · 7 matchs · Incomplète ») ; le Recrutement ne peut pas mesurer de
+ * besoin sur des cases sans position et se replie sur la suivante, en le disant
+ * (`fallbackFrom`). Sans aucune formation exploitable, la plus utilisée est gardée.
+ * `formations` : ordre de orderFormations.
+ */
+export function recruitmentFormation(formations: FormationView[]): { index: number; fallbackFrom?: FormationView } | null {
+  if (formations.length === 0) return null;
+  const index = formations.findIndex(isExploitableFormation);
+  if (index <= 0) return { index: 0 };
+  return { index, fallbackFrom: formations[0] };
+}
