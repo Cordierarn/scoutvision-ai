@@ -5,6 +5,9 @@ description: Règles de qualité frontend propres à ScoutVision (React 19, Tail
 
 # Qualité frontend ScoutVision
 
+## Pages gelées
+Layout / navigation, Base joueurs, Fiche joueur et Chasseur de pépites sont validés et gelés : n'y toucher que pour un bug réel ou la régression d'un composant partagé.
+
 ## Périmètre et méthode
 - Mesurer avant de corriger. Classer P0 à P3 et ne présenter comme confirmé que ce qui a été reproduit dans un vrai navigateur, sur les vraies données (`npm run data:pull`). Aucune donnée fictive.
 - Une passe qualité ne change pas l'apparence (pas de redesign) et ne touche ni aux modèles statistiques, ni à `utils/rolePresets.ts`, ni au pipeline Python, ni à `server/` (rapports Gemini).
@@ -18,6 +21,8 @@ description: Règles de qualité frontend propres à ScoutVision (React 19, Tail
 - **Format français** : nombres via `toLocaleString('fr-FR')` ou un `Intl.NumberFormat` mis en cache au niveau du module ; écarts signés via `formatDelta` (« +0,34 », « −2 »). Ne pas appeler `toLocaleString` dans une boucle de cellules.
   Montants via `formatEuro` (`utils/format.ts`, « 1,8 M€ », « 850 k€ ») : pas de formateur local par page.
 - **Couleurs** : le cyan marque l'accent, la sélection, le tri et les percentiles élite. Une colonne de données (valeur, minutes) reste en encre neutre. Orange = avertissement, rouge = constat défavorable, vert = progression.
+- **Texte qui ne tient pas** : revoir la structure avant d'ajouter du `break-words` (lignes sémantiques séparées, moins de colonnes sous `sm`). Mesurer la largeur réelle de la tuile à 320 px : une grille de 3 tuiles y laisse ~45 px.
+- **Radars sur téléphone** : la largeur vient de `ResponsiveContainer onResize` ; sous 340 px rayon réduit, sous 260 px libellés `/90` sur trois lignes coupées entre les mots (`PolarTick maxLines`). Jamais de police réduite ni de libellé masqué.
 - **Tableaux `.sv-table`** : une colonne numérique met `text-right` sur le `th` et les `td` ; l'en-tête s'aligne alors sur les chiffres.
 - **Performance React** : `useTransition` ou `useDeferredValue` seulement après une mesure avant/après. Mesuré ici : la transition sur le retour de fiche fait passer l'INP de ~1,5 s à ~50 ms, mais des transitions sur la navigation et l'ouverture de fiche retardent l'affichage (de 1,4 s à 3,6 s). Clés React stables (identifiant joueur-saison, jamais l'index). Pas de `React.memo`/`useMemo` systématique, pas de virtualisation sans profil qui la justifie.
 - **États** : chaque chargement asynchrone a un état de chargement (jamais « Aucune donnée » pendant le chargement), une erreur `LoadError` (`role="alert"`, bouton Réessayer) et un état vide qui explique pourquoi.
