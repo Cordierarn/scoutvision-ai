@@ -5,6 +5,7 @@ import { exportToCSV } from '../utils/exportUtils';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 import { getMetricKeys } from '../utils/positionMetrics';
 import { isRowActivation } from '../utils/rowKeys';
+import { formatEuro } from '../utils/format';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
 import { TeamLine, CountryFlag, PlayerAvatar } from './Media';
 import { EmptyState, PercentileValue } from './ui';
@@ -76,12 +77,7 @@ const PERCENTILE_TIP = 'Percentile de la note (0-100) parmi les joueurs du même
 const SHORT_LABELS: Record<string, string> = { Goals: 'Buts', Assists: 'PD', Rating: 'Note', 'Minutes played': 'Min' };
 const shortLabel = (key: string) => SHORT_LABELS[key] ?? metricLabel(key).replace(/ par 90$/, ' /90').replace(/, %$/, ' %');
 
-const formatValue = (val: number) => {
-  if (!val) return '–';
-  if (val >= 1000000) return `€${(val / 1000000).toFixed(1)}M`;
-  if (val >= 1000) return `€${(val / 1000).toFixed(0)}K`;
-  return `€${val}`;
-};
+const formatValue = (val: number) => (val ? formatEuro(val) : '–');
 
 // Nombres au format français, un formateur par nombre de décimales (créer un Intl.NumberFormat
 // par cellule coûte cher sur des centaines de lignes)
@@ -614,7 +610,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                   <td className={`text-right text-ink-2 ${sortedCell('Age')}`}>{typeof player.Age === 'number' ? player.Age : <span className="text-ink-4">–</span>}</td>
                   <td className={sortedCell('Position')}><span className="sv-tag" title={positionName(player.Position)}>{positionLabel(player.Position)}</span></td>
                   <td className={`text-ink-2 ${sortedCell('Team')}`}><TeamLine player={player} className="max-w-[14rem]" /></td>
-                  <td className={`text-right font-semibold whitespace-nowrap ${typeof player['Market value'] === 'number' ? 'text-accent' : 'text-ink-4 font-normal'} ${sortedCell('Market value')}`}>
+                  <td className={`text-right whitespace-nowrap ${typeof player['Market value'] === 'number' ? 'text-ink font-medium' : 'text-ink-4'} ${sortedCell('Market value')}`}>
                     {formatValue(Number(player['Market value']) || 0)}
                   </td>
                   {contextColumns.includes('Contract expires') && (

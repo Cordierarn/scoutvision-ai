@@ -301,8 +301,10 @@ export const PolarTick: React.FC<{
   maxChars?: number;
   active?: boolean;                       // libellé mis en évidence
   onHover?: (value: string | null) => void;
-}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover }) => {
-  const words = String(payload?.value ?? '').split(' ');
+  format?: (value: string) => string;     // libellé affiché (la valeur d'origine reste celle du survol)
+}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover, format }) => {
+  const raw = String(payload?.value ?? '');
+  const words = (format ? format(raw) : raw).split(' ');
   const lines: string[] = [];
   words.forEach(w => {
     const last = lines[lines.length - 1];

@@ -150,9 +150,11 @@
   /* Tableau de données dense */
   .sv-table { @apply w-full text-sm border-separate border-spacing-0; }
   .sv-table thead th {
-    @apply sticky top-0 z-10 bg-surface px-3 h-8 text-left align-middle text-2xs uppercase tracking-[0.08em]
+    @apply sticky top-0 z-10 bg-surface px-3 h-8 align-middle text-2xs uppercase tracking-[0.08em]
       font-semibold text-ink-3 border-b border-line whitespace-nowrap;
   }
+  /* À gauche par défaut, sans spécificité : text-right aligne l'en-tête d'une colonne numérique sur ses chiffres */
+  .sv-table :where(thead th) { text-align: left; }
   .sv-table tbody td { @apply px-3 py-1.5 border-b border-line/70 align-middle; }
   .sv-table tbody tr { @apply transition-colors; }
   .sv-table tbody tr:hover > td { @apply bg-raised/70; }
