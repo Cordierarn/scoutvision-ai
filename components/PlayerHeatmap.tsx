@@ -240,7 +240,7 @@ const PlayerHeatmap: React.FC<PlayerHeatmapProps> = ({ player }) => {
                 <div className="sv-label mb-1.5">{block.title}</div>
                 {block.order.map(i => (
                   <div key={block.labels[i]} className="flex items-center gap-2 mb-1.5">
-                    <span className="text-ink-3 flex-1 min-w-0 truncate">{block.labels[i].replace('Tiers ', '').replace('Couloir ', '')}</span>
+                    <span className="text-ink-3 flex-1 leading-snug">{block.labels[i].replace('Tiers ', '').replace('Couloir ', '')}</span>
                     <div className="w-12 h-1.5 bg-raised rounded-sm overflow-hidden shrink-0">
                       <div className="h-full bg-accent-deep rounded-sm" style={{ width: `${pct(block.values[i])}%` }} />
                     </div>

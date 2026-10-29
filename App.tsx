@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useTransition } from 'react';
 import Layout from './components/Layout';
 import LoadingScreen from './components/LoadingScreen';
 import PlayerList from './components/PlayerList';
@@ -84,6 +84,12 @@ const App: React.FC = () => {
 
     return () => { cancelled = true; };
   }, [dataIndex, globalSeason]);
+
+  // Retour d'une fiche en transition : la liste restaure toutes les lignes déjà parcourues (plusieurs
+  // centaines), rendu qui bloquait la page jusqu'à 2 s. Mesuré : les autres changements de vue
+  // s'affichent plus tard en transition (rendu interrompu par le chargement des images), ils restent
+  // donc immédiats.
+  const [, startTransition] = useTransition();
 
   const handleNavigate = (newView: string) => {
     setView(newView);
@@ -197,7 +203,7 @@ const App: React.FC = () => {
       {view === ViewState.PLAYER_DETAIL && selectedPlayer && (
         <PlayerCard
           player={selectedPlayer}
-          onBack={() => setView(returnView)}
+          onBack={() => startTransition(() => setView(returnView))}
           allPlayers={players}
         />
       )}
