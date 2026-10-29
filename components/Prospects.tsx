@@ -27,6 +27,7 @@ import { dataLoader } from '../services/dataLoader';
 import { TeamLine, PlayerAvatar } from './Media';
 import { Panel, EmptyState, InfoTip, IndexBar, PercentileValue } from './ui';
 import { isRowActivation } from '../utils/rowKeys';
+import { formatEuro } from '../utils/format';
 
 interface ProspectsProps {
   data: PlayerData[];
@@ -50,12 +51,6 @@ const CONTRACT_OPTIONS = [0, 6, 12, 18, 24];
 const STRICTNESS_STEP = 0.1;
 
 const fr = (v: number, digits: number) => v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-
-const formatEuro = (val: number) => {
-  if (val >= 1_000_000) return `€${fr(val / 1_000_000, val % 1_000_000 ? 1 : 0)}M`;
-  if (val >= 1000) return `€${Math.round(val / 1000)}K`;
-  return `€${val}`;
-};
 
 const shortMetric = (key: string) => metricLabel(key).replace(/ par 90$/, ' /90').replace(/, %$/, ' %');
 
@@ -556,7 +551,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
                 <td className="text-right whitespace-nowrap">
                   {typeof market === 'number'
                     ? <>
-                        <div className="text-accent font-semibold num">{formatEuro(market)}</div>
+                        <div className="text-ink font-medium num">{formatEuro(market)}</div>
                         {typeof estimate === 'number' && market > 0 && (
                           <div className="text-2xs text-ink-4 num" data-tip="Estimation statistique / valeur de marché" data-tip-pos="left">estim. {Math.round((estimate / market) * 100)} %</div>
                         )}

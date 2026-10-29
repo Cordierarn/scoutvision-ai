@@ -11,6 +11,7 @@ import React, { useMemo } from 'react';
 import { Activity, Crosshair, Share2, Coins, TrendingUp, TrendingDown, Minus, Sprout } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts';
 import { PlayerData } from '../types';
+import { formatEuro } from '../utils/format';
 import { dataLoader, AgeCurves } from '../services/dataLoader';
 import { useAsyncData } from '../hooks/useAsyncData';
 import { projectPlayer, roleAgeProfile } from '../utils/development';
@@ -25,8 +26,6 @@ const signed = (v: number, digits = 2) => `${v > 0 ? '+' : ''}${v.toFixed(digits
 const fr = (v: number, digits: number, withSign = false) =>
   `${withSign && v > 0 ? '+' : ''}${v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-const formatEuro = (v: number) =>
-  v >= 1e6 ? `€${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `€${Math.round(v / 1e3)}K` : `€${v}`;
 
 /**
  * Carte d'indicateur, toujours lue dans le même ordre :
@@ -210,7 +209,7 @@ export const DevelopmentPanel: React.FC<{ player: PlayerData; metrics: string[] 
               <LineChart data={profile} margin={{ top: 18, right: 12, bottom: 0, left: -18 }}>
                 <CartesianGrid {...gridProps} />
                 <XAxis dataKey="age" {...axisProps} />
-                <YAxis {...axisProps} axisLine={false} allowDecimals={false} />
+                <YAxis {...axisProps} axisLine={false} allowDecimals={false} tickFormatter={(v: number) => (v < 0 ? `−${-v}` : String(v))} />
                 <ReferenceLine y={0} stroke={INK.axis} />
                 <ReferenceLine x={Math.round(age)} stroke={INK.muted} strokeDasharray="3 3"
                   label={{ value: `${Math.round(age)} ans`, fill: INK.secondary, fontSize: 11, position: 'top' }} />

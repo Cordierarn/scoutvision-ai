@@ -7,7 +7,7 @@ import PlayerHeatmap from './PlayerHeatmap';
 import { metricLabel, positionName, styleLabel, footLabel } from '../utils/labels';
 import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsights';
 import { dataLoader } from '../services/dataLoader';
-import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3, Radar as RadarIcon, ChartBarBig } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { generateScoutReport, reportFooterLabel, ScoutReportError, ScoutReportMeta } from '../services/scoutReportService';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
@@ -22,6 +22,10 @@ import { groupMetrics } from '../utils/metricCategories';
 import { isSeasonInProgress, MIN_NETWORK_MATCHES, MIN_RAPM_MINUTES, PIPELINE_PERCENTILE_HELP, RATING_HELP, roleIndexHelp } from '../utils/sampleContext';
 import { BRAND, CONTEXT, INK, polarGridProps } from '../theme/charts';
 import ShotPitch, { ShotLegend } from './ShotPitch';
+import { formatEuro } from '../utils/format';
+
+// Libellé d'axe du radar : « par 90 » abrégé en « /90 » comme dans les tableaux, pour tenir sur deux lignes sans être coupé
+const radarAxisLabel = (label: string) => label.replace(/ par 90$/, ' /90');
 
 interface PlayerCardProps {
   player: PlayerData;
@@ -84,6 +88,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   // Custom Metric Config State
   const [activeMetrics, setActiveMetrics] = useState<string[]>([]);
   const [showMetricConfig, setShowMetricConfig] = useState(false);
+  // Radar étroit (téléphone) : rayon réduit pour que les libellés d'axe restent dans le panneau
+  const [radarNarrow, setRadarNarrow] = useState(false);
   const [metricSearch, setMetricSearch] = useState('');
   
   // Rapport propre au joueur affiché
@@ -374,12 +380,6 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
     }
   };
 
-  const formatCurrency = (val: number) => {
-      if (val >= 1000000) return `€${(val / 1000000).toFixed(1)}M`;
-      if (val >= 1000) return `€${(val / 1000).toFixed(0)}K`;
-      return `€${val}`;
-  };
-
   // Forces et faiblesses : métriques du radar les mieux et les moins bien classées dans le groupe de comparaison
   const strengths = useMemo(() => [...chartData].sort((a, b) => b.A - a.A).filter(m => m.A >= 70).slice(0, 4), [chartData]);
   const weaknesses = useMemo(() => [...chartData].sort((a, b) => a.A - b.A).filter(m => m.A <= 30).slice(0, 4), [chartData]);
@@ -504,9 +504,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
 
           {/* Valeur et contrat : un écart modèle / marché est une piste, pas une alerte */}
           <div className="grid grid-cols-3 lg:w-[26rem] shrink-0 border border-line rounded-md divide-x divide-line">
-            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Marché" full="Valeur marché" />} value={market !== undefined ? formatCurrency(market) : 'N/D'}
+            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Marché" full="Valeur marché" />} value={market !== undefined ? formatEuro(market) : 'N/D'}
               sub={market !== undefined ? 'Transfermarkt, actuelle' : isCurrentSeason ? 'Hors Transfermarkt' : 'Saison en cours seulement'} />
-            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Estimée" full="Valeur estimée" />} value={estimate !== undefined ? formatCurrency(estimate) : 'N/D'}
+            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Estimée" full="Valeur estimée" />} value={estimate !== undefined ? formatEuro(estimate) : 'N/D'}
               wrapSub
               sub={market && estimate ? <MobileLabel short={`${Math.round((estimate / market) * 100)} % du marché`} full={`${Math.round((estimate / market) * 100)} % de la valeur de marché`} /> : estimate !== undefined ? 'Estimation statistique' : isCurrentSeason ? 'Sans valeur de marché' : 'Saison en cours seulement'}
               help={`Valeur estimée par le modèle statistique du pipeline : régression ridge sur le log de la valeur Transfermarkt (âge, minutes, rôle, compétition, note, percentiles du rôle, RAPM), chaque joueur étant prédit par un modèle entraîné sans lui. C'est une estimation statistique, ni un prix ni la valeur « réelle » du joueur.${valuation ? ` R² hors échantillon ${fixed(valuation.r2_cv, 2)}, erreur typique ×${fixed(valuation.median_error_factor, 2)}.` : ''} Un écart avec la valeur de marché est un élément à examiner, pas un verdict.`} />
@@ -537,6 +537,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         <Panel
           className="xl:col-span-4 relative"
+          icon={RadarIcon}
           title={<>Profil de performance <InfoTip text={`Percentile = (joueurs du groupe sous la valeur + moitié des égalités) / taille du groupe, calculé ici sur le groupe de comparaison choisi (valeur absente comptée 0). Ces percentiles diffèrent de ceux du pipeline affichés dans « Toutes les métriques ».\nSurvolez une métrique pour la retrouver dans les percentiles.`} /></>}
           subtitle={`Percentiles ${COMPARISON_LABELS[comparisonMode]} · ${cohortDescription}`}
           right={
@@ -576,7 +577,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           <div className="sv-seg w-full" role="group" aria-label="Groupe de comparaison">
             {(['position', 'position_league', 'league', 'all'] as ComparisonMode[]).map(mode => (
               <button key={mode} onClick={() => setComparisonMode(mode)} title={COMPARISON_LABELS[mode]}
-                className={`sv-seg-btn flex-1 ${comparisonMode === mode ? 'sv-seg-on' : ''}`} aria-pressed={comparisonMode === mode}>
+                className={`sv-seg-btn flex-1 px-1.5 sm:px-2.5 ${comparisonMode === mode ? 'sv-seg-on' : ''}`} aria-pressed={comparisonMode === mode}>
                 {COMPARISON_SHORT_LABELS[mode]}
               </button>
             ))}
@@ -588,9 +589,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
               {radarData.length === 0 ? 'Aucune métrique disponible pour ce joueur.' : 'Les percentiles disponibles sont listés dans le panneau Percentiles ; ajoutez des métriques avec le bouton de réglage.'}
             </EmptyState>
           ) : (
-          <div className="h-[300px] -mx-2 mt-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart cx="50%" cy="50%" outerRadius="66%" data={radarData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}
+          <div className="h-[300px] -mx-4 sm:-mx-2 mt-1">
+            <ResponsiveContainer width="100%" height="100%" onResize={w => setRadarNarrow(w < 340)}>
+              <RadarChart cx="50%" cy="50%" outerRadius={radarNarrow ? '52%' : '66%'} data={radarData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}
                 onMouseMove={(state: { activeTooltipIndex?: number | string | null }) => {
                   // Hors du disque (libellés) : pas d'axe actif, la mise en évidence vient du libellé survolé
                   const i = state?.activeTooltipIndex;
@@ -600,7 +601,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 <PolarGrid {...polarGridProps} />
                 <PolarAngleAxis dataKey="subject" tick={(tickProps: object) => {
                   const props = tickProps as React.ComponentProps<typeof PolarTick>;
-                  return <PolarTick {...props} active={!!focusMetric && radarData.find(d => d.fullSubject === focusMetric)?.subject === props.payload?.value} onHover={focusBySubject} />;
+                  return <PolarTick {...props} format={radarAxisLabel} active={!!focusMetric && radarData.find(d => d.fullSubject === focusMetric)?.subject === props.payload?.value} onHover={focusBySubject} />;
                 }} />
                 <PolarRadiusAxis angle={90} domain={[0, 100]} tickCount={5} tick={false} axisLine={false} />
                 <Radar name="Médiane du groupe" dataKey="median" stroke={CONTEXT} strokeDasharray="3 3" strokeWidth={1} fill="none" isAnimationActive={false} />
@@ -639,7 +640,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           </div>
         </Panel>
 
-        <Panel className="xl:col-span-5" title="Percentiles" subtitle="Valeur brute et rang percentile dans le groupe de comparaison"
+        <Panel className="xl:col-span-5" title="Percentiles" icon={ChartBarBig} subtitle="Valeur brute et rang percentile dans le groupe de comparaison"
           right={<span className="text-2xs text-ink-4 num">{cohort.length.toLocaleString('fr-FR')} joueurs</span>}>
           <div className="space-y-0.5 -mx-1.5">
             {chartData.map(d => (
