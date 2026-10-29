@@ -1,9 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect, useDeferredValue } from 'react';
 import { PlayerData, extractSeason, getPlayerSeasonId, getPlayerSeasonTag, getSeasonLabel } from '../types';
 import { Search, ChevronDown, ChevronUp, ChevronsUpDown, Eye, SlidersHorizontal, Plus, X, Download, Star, Columns3, RotateCcw, Users, Check } from 'lucide-react';
 import { exportToCSV } from '../utils/exportUtils';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 import { getMetricKeys } from '../utils/positionMetrics';
+import { isRowActivation } from '../utils/rowKeys';
+import { formatEuro } from '../utils/format';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
 import { TeamLine, CountryFlag, PlayerAvatar } from './Media';
 import { EmptyState, PercentileValue } from './ui';
@@ -75,11 +77,24 @@ const PERCENTILE_TIP = 'Percentile de la note (0-100) parmi les joueurs du même
 const SHORT_LABELS: Record<string, string> = { Goals: 'Buts', Assists: 'PD', Rating: 'Note', 'Minutes played': 'Min' };
 const shortLabel = (key: string) => SHORT_LABELS[key] ?? metricLabel(key).replace(/ par 90$/, ' /90').replace(/, %$/, ' %');
 
-const formatValue = (val: number) => {
-  if (!val) return '–';
-  if (val >= 1000000) return `€${(val / 1000000).toFixed(1)}M`;
-  if (val >= 1000) return `€${(val / 1000).toFixed(0)}K`;
-  return `€${val}`;
+const formatValue = (val: number) => (val ? formatEuro(val) : '–');
+
+// Nombres au format français, un formateur par nombre de décimales (créer un Intl.NumberFormat
+// par cellule coûte cher sur des centaines de lignes)
+const FR_FORMATS = new Map<number, Intl.NumberFormat>();
+const formatFr = (v: number, digits: number) => {
+  let f = FR_FORMATS.get(digits);
+  if (!f) { f = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits }); FR_FORMATS.set(digits, f); }
+  return f.format(v);
+};
+
+// Métriques numériques d'une saison, calculées une fois par jeu de données (et non à chaque
+// retour sur la liste)
+const METRIC_KEYS = new WeakMap<PlayerData[], string[]>();
+const metricKeysOf = (data: PlayerData[]) => {
+  let keys = METRIC_KEYS.get(data);
+  if (!keys) { keys = getMetricKeys(data); METRIC_KEYS.set(data, keys); }
+  return keys;
 };
 
 const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedId }) => {
@@ -97,6 +112,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   const [showColumns, setShowColumns] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
   const columnsRef = useRef<HTMLDivElement>(null);
+  const columnsButtonRef = useRef<HTMLButtonElement>(null);
 
   // Watchlist State
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set());
@@ -142,7 +158,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
 
   const numericKeys = useMemo(() => {
     if (data.length === 0) return [];
-    return getMetricKeys(data);
+    return metricKeysOf(data);
   }, [data]);
 
   // Colonnes choisies encore valides : une colonne mémorisée absente des données est ignorée
@@ -186,7 +202,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   useEffect(() => {
     if (!showColumns) return;
     const onDown = (e: MouseEvent) => { if (!columnsRef.current?.contains(e.target as Node)) setShowColumns(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowColumns(false); };
+    // Échap rend le focus au bouton qui a ouvert le menu
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setShowColumns(false); columnsButtonRef.current?.focus(); } };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
@@ -227,12 +244,16 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Recherche différée : le champ se met à jour à chaque frappe, le filtrage et le rendu du tableau
+  // suivent en priorité basse (interruptibles) au lieu de bloquer la saisie
+  const deferredSearch = useDeferredValue(searchTerm);
+
   const filteredAndSortedData = useMemo(() => {
     let result = [...data];
 
     // Text Search - avec vérification null et type
-    if (searchTerm) {
-      const lower = searchTerm.toLowerCase();
+    if (deferredSearch) {
+      const lower = deferredSearch.toLowerCase();
       result = result.filter(p => {
         const playerName = typeof p.Player === 'string' ? p.Player.toLowerCase() : '';
         const teamName = typeof p.Team === 'string' ? p.Team.toLowerCase() : '';
@@ -272,11 +293,11 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
     });
 
     return result;
-  }, [data, searchTerm, positionFilter, sortField, sortOrder, activeFilters]);
+  }, [data, deferredSearch, positionFilter, sortField, sortOrder, activeFilters]);
 
   // Revenir au début de la liste quand la recherche, les filtres, le tri ou la saison changent ;
   // au retour d'une fiche (mêmes critères), la position de lecture est conservée
-  const signature = JSON.stringify([searchTerm, positionFilter, sortField, sortOrder, activeFilters, data.length]);
+  const signature = JSON.stringify([deferredSearch, positionFilter, sortField, sortOrder, activeFilters, data.length]);
   useEffect(() => {
     if (memory.signature === signature) return;
     memory.signature = signature;
@@ -305,7 +326,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   const formatStat = (key: string, v: unknown) => {
     if (typeof v !== 'number') return <span className="text-ink-4">–</span>;
     const digits = integerColumns.has(key) ? 0 : key.endsWith(', %') ? 1 : 2;
-    const text = v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    const text = formatFr(v, digits);
     // Zéro atténué : les valeurs non nulles ressortent à la lecture d'une colonne
     return <span className={v === 0 ? 'text-ink-4' : ''}>{text}</span>;
   };
@@ -399,6 +420,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
           {/* Sélecteur de colonnes statistiques */}
           <div className="relative" ref={columnsRef}>
             <button
+              ref={columnsButtonRef}
               onClick={() => setShowColumns(!showColumns)}
               aria-expanded={showColumns}
               aria-haspopup="dialog"
@@ -553,17 +575,17 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
             </tr>
           </thead>
           <tbody>
-            {filteredAndSortedData.slice(0, visibleCount).map((player, idx) => {
+            {filteredAndSortedData.slice(0, visibleCount).map(player => {
               const season = extractSeason(player.League);
               const id = getPlayerSeasonId(player);
               const watched = watchlistIds.has(id);
               const selected = id === selectedId;
               return (
                 <tr
-                  key={`${player.Player}-${player.Team}-${season}-${idx}`}
+                  key={id}
                   className={`group cursor-pointer [&:hover>td]:!bg-raised focus-visible:outline-none [&:focus-visible>td]:!bg-raised ${selected ? 'sv-row-selected' : ''}`}
                   onClick={() => onSelectPlayer(player)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectPlayer(player); } }}
+                  onKeyDown={e => { if (isRowActivation(e)) { e.preventDefault(); onSelectPlayer(player); } }}
                   tabIndex={0}
                   aria-label={`Ouvrir la fiche de ${player.Player}`}
                   aria-current={selected ? 'true' : undefined}
@@ -588,7 +610,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                   <td className={`text-right text-ink-2 ${sortedCell('Age')}`}>{typeof player.Age === 'number' ? player.Age : <span className="text-ink-4">–</span>}</td>
                   <td className={sortedCell('Position')}><span className="sv-tag" title={positionName(player.Position)}>{positionLabel(player.Position)}</span></td>
                   <td className={`text-ink-2 ${sortedCell('Team')}`}><TeamLine player={player} className="max-w-[14rem]" /></td>
-                  <td className={`text-right font-semibold whitespace-nowrap ${typeof player['Market value'] === 'number' ? 'text-accent' : 'text-ink-4 font-normal'} ${sortedCell('Market value')}`}>
+                  <td className={`text-right whitespace-nowrap ${typeof player['Market value'] === 'number' ? 'text-ink font-medium' : 'text-ink-4'} ${sortedCell('Market value')}`}>
                     {formatValue(Number(player['Market value']) || 0)}
                   </td>
                   {contextColumns.includes('Contract expires') && (
@@ -605,7 +627,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                     <td key={k} className={`text-right whitespace-nowrap ${k === 'xG' || k === 'xA' ? 'text-ink' : 'text-ink-2'} ${sortedCell(k)}`}>
                       {k === 'Rating' && typeof player.Rating === 'number' ? (
                         <span className="inline-flex items-center justify-end gap-2">
-                          {player.Rating.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatFr(player.Rating, 2)}
                           {typeof player['Rating pct'] === 'number' && (
                             <PercentileValue value={player['Rating pct'] as number} className="text-2xs w-9 justify-end"
                               tip={`P${Math.round(player['Rating pct'] as number)} · ${PERCENTILE_TIP}`} />

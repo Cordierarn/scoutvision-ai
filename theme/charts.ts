@@ -39,7 +39,7 @@ export const INK = {
   primary: '#F8FAFC',
   secondary: '#C4CDD8',
   muted: '#8996A7',
-  faint: '#5E6B7C',
+  faint: '#7B8899',
   grid: '#1E2938',
   axis: '#303E50',
   surface: '#101721',

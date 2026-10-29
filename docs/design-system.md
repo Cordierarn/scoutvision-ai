@@ -26,7 +26,7 @@ Defined as RGB triplets in `styles/index.css` (so that Tailwind opacity modifier
 | `raised` | `#17202C` | inputs, hovered rows, inner tiles |
 | `overlay` | `#1E2938` | menus, tooltips, active state |
 | `line` / `line-strong` | `#222D3B` / `#303E50` | separators and panel borders / control borders |
-| `ink`, `ink-2`, `ink-3`, `ink-4` | `#F8FAFC`, `#C4CDD8`, `#8996A7`, `#5E6B7C` | main text, secondary text, labels, faint text |
+| `ink`, `ink-2`, `ink-3`, `ink-4` | `#F8FAFC`, `#C4CDD8`, `#8996A7`, `#7B8899` | main text, secondary text, labels, faint text |
 | `accent`, `accent-deep` | `#00E5FF`, `#0096AD` | brand cyan, muted accent borders and fills |
 | `pos`, `neg`, `warn` | `#3DD68C`, `#F0605D`, `#F2B33D` | positive, negative, warning |
 

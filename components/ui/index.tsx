@@ -88,9 +88,12 @@ export const Stat: React.FC<{
   const color = tone === 'accent' ? 'text-accent' : tone === 'pos' ? 'text-pos' : tone === 'warn' ? 'text-warn' : tone === 'neg' ? 'text-neg' : 'text-ink';
   return (
     <div className={`min-w-0 ${className}`} title={title}>
-      <div className="sv-label flex items-center gap-1 min-w-0"><span className="truncate">{label}</span>{help && <InfoTip text={help} />}</div>
+      {/* Sous 1280 px les tuiles sont étroites : libellé et précision passent à la ligne entre les mots au lieu d'être coupés.
+          Pas de min-w-0 sur le libellé : dans un bandeau flex la tuile garde la largeur du mot le plus long (pas de « JOUE/URS »),
+          break-words ne coupe un mot que s'il dépasse une colonne de grille fixe. */}
+      <div className="sv-label flex items-center gap-1 min-w-0"><span className="break-words xl:min-w-0 xl:truncate">{label}</span>{help && <InfoTip text={help} />}</div>
       <div className={`mt-0.5 text-base font-semibold leading-tight num ${color}`}>{value}</div>
-      {sub && <div className={`text-2xs text-ink-3 mt-0.5 ${wrapSub ? 'leading-snug' : 'truncate'}`}>{sub}</div>}
+      {sub && <div className={`text-2xs text-ink-3 mt-0.5 ${wrapSub ? 'leading-snug' : 'leading-snug break-words xl:truncate'}`}>{sub}</div>}
     </div>
   );
 };
@@ -268,14 +271,21 @@ export const PercentileLegend: React.FC<{ className?: string }> = ({ className =
 // SIGNES
 // ============================================
 
+/** Écart signé au format français (« +0,34 », « −2 », « 0 ») */
+export function formatDelta(value: number, digits = 0, suffix = ''): string {
+  const r = Number(value.toFixed(digits));
+  if (r === 0) return `0${suffix}`;
+  const abs = Math.abs(r).toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return `${r > 0 ? '+' : '−'}${abs}${suffix}`;
+}
+
 /**
  * Écart signé coloré selon le sens (progression / recul), avec signe explicite
  */
 export const Delta: React.FC<{ value: number; digits?: number; suffix?: string; threshold?: number; className?: string }> = ({ value, digits = 0, suffix = '', threshold = 0, className = '' }) => {
   const r = Number(value.toFixed(digits));
   const tone = r > threshold ? 'text-pos' : r < -threshold ? 'text-neg' : 'text-ink-3';
-  const text = r === 0 ? `0${suffix}` : `${r > 0 ? '+' : '−'}${Math.abs(r).toFixed(digits)}${suffix}`;
-  return <span className={`num font-medium ${tone} ${className}`}>{text}</span>;
+  return <span className={`num font-medium ${tone} ${className}`}>{formatDelta(value, digits, suffix)}</span>;
 };
 
 // ============================================
@@ -291,15 +301,18 @@ export const PolarTick: React.FC<{
   maxChars?: number;
   active?: boolean;                       // libellé mis en évidence
   onHover?: (value: string | null) => void;
-}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover }) => {
-  const words = String(payload?.value ?? '').split(' ');
+  format?: (value: string) => string;     // libellé affiché (la valeur d'origine reste celle du survol)
+  maxLines?: number;                      // lignes avant ellipse (2 par défaut)
+}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover, format, maxLines = 2 }) => {
+  const raw = String(payload?.value ?? '');
+  const words = (format ? format(raw) : raw).split(' ');
   const lines: string[] = [];
   words.forEach(w => {
     const last = lines[lines.length - 1];
     if (last !== undefined && (last + ' ' + w).length <= maxChars) lines[lines.length - 1] = `${last} ${w}`;
     else lines.push(w);
   });
-  const shown = lines.length > 2 ? [lines[0], `${lines.slice(1).join(' ').slice(0, maxChars - 1)}…`] : lines;
+  const shown = lines.length > maxLines ? [...lines.slice(0, maxLines - 1), `${lines.slice(maxLines - 1).join(' ').slice(0, maxChars - 1)}…`] : lines;
   const anchor = Math.abs(x - cx) < 4 ? 'middle' : x > cx ? 'start' : 'end';
   const dy = y < cy - 4 ? -(shown.length - 1) * 11 : y > cy + 4 ? 4 : -((shown.length - 1) * 11) / 2;
   return (
