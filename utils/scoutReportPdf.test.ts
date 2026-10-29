@@ -152,3 +152,37 @@ describe('buildReportPdf : cas limites', () => {
     expect(audit.emptySections).toEqual([]);
   });
 });
+
+describe('évaluation en aveugle et grille dans le PDF', () => {
+  const grid = { role: 'Renard des surfaces', overall: 3 as const, criteria: [
+    { key: 'npxG per 90', label: 'npxG par 90', kind: 'role_metric' as const, rating: 2 as const },
+    { key: 'communication', label: 'Communication', kind: 'unmeasured' as const, rating: 4 as const, note: 'guide la ligne' },
+  ] };
+  it('dossier en aveugle non révélé : fiche d\'observation sans percentile, indice, valeur ni synthèse, grille vierge du rôle', () => {
+    const r = full();
+    r.evaluation = { blind: true };
+    const { doc, pages, audit } = buildReportPdf(r, { now: NOW, mode: 'complet' });
+    const all = pdfPageTexts(doc).join('\n');
+    expect(all).toContain('FICHE D\'OBSERVATION EN AVEUGLE');
+    expect(all).toContain('Renard des surfaces');
+    expect(all).toContain('Comportement à la perte');
+    expect(all).not.toMatch(/\bP\d{1,3}\b/);                  // aucun percentile
+    expect(all).not.toContain('Point 14 : phrase de test');  // synthèse absente
+    expect(all).not.toContain('IMPACT ET DÉVELOPPEMENT');
+    expect(all).not.toContain('Valeur de marché Transfermarkt');
+    expect(all).toContain('Observation humaine au stade.');  // observations déjà saisies
+    expect(pages).toBeLessThanOrEqual(3);
+    expect(audit.outOfBounds).toEqual([]);
+  });
+  it('dossier révélé : la grille et l\'écart data / observation sont imprimés avec l\'observation', () => {
+    const r = full();
+    r.evaluation = { blind: true, revealedAt: '2026-10-29T12:00:00.000Z' };
+    r.observations = [{ ...r.observations[0], grid }];
+    const all = pdfPageTexts(buildReportPdf(r, { now: NOW }).doc).join('\n');
+    expect(all).toContain('note globale du scout 3/5');
+    expect(all).toContain('npxG par 90 : scout 2/5 · donnée 5/5 \\(P91\\) · écart -3');   // parenthèses échappées dans le flux
+    expect(all).toContain('Communication \\(non mesuré\\) : 4/5 \\(guide la ligne\\)');
+    expect(all).toContain('données révélées le 29/10/2026');
+    expect(all).toContain('IMPACT ET DÉVELOPPEMENT');
+  });
+});

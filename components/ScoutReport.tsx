@@ -14,7 +14,7 @@ import { useAsyncData } from '../hooks/useAsyncData';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   ObservationInput, ReportStoreError, addObservation, deleteReport, exportFileName, exportReportsJson, importReportsJson, loadReports,
-  removeObservation, setRole, setStatus, setTags, subscribeReports, updateObservation,
+  removeObservation, setRole, setStatus, setTags, subscribeReports, updateObservation, reveal, setBlind,
 } from '../services/scoutReportStore';
 import { ScoutReportError } from '../services/scoutReportService';
 import { ReportStatus, ScoutReportRecord } from '../types/scoutReport';
@@ -165,6 +165,8 @@ const ScoutReport: React.FC<{ data: PlayerData[]; onSelectPlayer?: (player: Play
               onAddObservation={(obs: ObservationInput) => guard(() => addObservation(selected.id, obs))}
               onUpdateObservation={(id, obs) => guard(() => updateObservation(selected.id, id, obs))}
               onRemoveObservation={id => guard(() => removeObservation(selected.id, id))}
+              onBlind={blind => guard(() => setBlind(selected.id, blind))}
+              onReveal={() => guard(() => reveal(selected.id))}
               onGenerate={onGenerate} generating={generating} generateError={generateError}
               onExportPdf={mode => onExportPdf(selected, mode)} exporting={exporting} exportError={exportError}
               onDelete={() => { guard(() => deleteReport(selected.id)); setSelectedId(null); back(); }}
