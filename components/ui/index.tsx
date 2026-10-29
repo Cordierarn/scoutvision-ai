@@ -302,7 +302,8 @@ export const PolarTick: React.FC<{
   active?: boolean;                       // libellé mis en évidence
   onHover?: (value: string | null) => void;
   format?: (value: string) => string;     // libellé affiché (la valeur d'origine reste celle du survol)
-}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover, format }) => {
+  maxLines?: number;                      // lignes avant ellipse (2 par défaut)
+}> = ({ x = 0, y = 0, cx = 0, cy = 0, payload, maxChars = 16, active = false, onHover, format, maxLines = 2 }) => {
   const raw = String(payload?.value ?? '');
   const words = (format ? format(raw) : raw).split(' ');
   const lines: string[] = [];
@@ -311,7 +312,7 @@ export const PolarTick: React.FC<{
     if (last !== undefined && (last + ' ' + w).length <= maxChars) lines[lines.length - 1] = `${last} ${w}`;
     else lines.push(w);
   });
-  const shown = lines.length > 2 ? [lines[0], `${lines.slice(1).join(' ').slice(0, maxChars - 1)}…`] : lines;
+  const shown = lines.length > maxLines ? [...lines.slice(0, maxLines - 1), `${lines.slice(maxLines - 1).join(' ').slice(0, maxChars - 1)}…`] : lines;
   const anchor = Math.abs(x - cx) < 4 ? 'middle' : x > cx ? 'start' : 'end';
   const dy = y < cy - 4 ? -(shown.length - 1) * 11 : y > cy + 4 ? 4 : -((shown.length - 1) * 11) / 2;
   return (

@@ -88,8 +88,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   // Custom Metric Config State
   const [activeMetrics, setActiveMetrics] = useState<string[]>([]);
   const [showMetricConfig, setShowMetricConfig] = useState(false);
-  // Radar étroit (téléphone) : rayon réduit pour que les libellés d'axe restent dans le panneau
-  const [radarNarrow, setRadarNarrow] = useState(false);
+  // Largeur du radar (téléphone) : sous 340 px rayon réduit ; sous 260 px (écran de 320 px, zoom 200 %)
+  // libellés sur trois lignes plus étroites, coupés entre les mots, pour rester lisibles sans déborder
+  const [radarWidth, setRadarWidth] = useState(0);
+  const radarNarrow = radarWidth > 0 && radarWidth < 340;
+  const radarCompact = radarWidth > 0 && radarWidth < 260;
   const [metricSearch, setMetricSearch] = useState('');
   
   // Rapport propre au joueur affiché
@@ -502,15 +505,17 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
             </div>
           </div>
 
-          {/* Valeur et contrat : un écart modèle / marché est une piste, pas une alerte */}
-          <div className="grid grid-cols-3 lg:w-[26rem] shrink-0 border border-line rounded-md divide-x divide-line">
+          {/* Valeur et contrat : un écart modèle / marché est une piste, pas une alerte.
+              Sous 640 px, deux colonnes et le contrat dessous : trois colonnes laisseraient ~45 px par tuile à 320 px */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:w-[26rem] shrink-0 border border-line rounded-md">
             <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Marché" full="Valeur marché" />} value={market !== undefined ? formatEuro(market) : 'N/D'}
-              sub={market !== undefined ? 'Transfermarkt, actuelle' : isCurrentSeason ? 'Hors Transfermarkt' : 'Saison en cours seulement'} />
-            <Stat className="px-2.5 sm:px-3 py-2.5" label={<MobileLabel short="Estimée" full="Valeur estimée" />} value={estimate !== undefined ? formatEuro(estimate) : 'N/D'}
+              wrapSub
+              sub={market !== undefined ? <><span className="block">Transfermarkt</span><span className="block">Valeur actuelle</span></> : isCurrentSeason ? 'Hors Transfermarkt' : 'Saison en cours seulement'} />
+            <Stat className="px-2.5 sm:px-3 py-2.5 border-l border-line" label={<MobileLabel short="Estimée" full="Valeur estimée" />} value={estimate !== undefined ? formatEuro(estimate) : 'N/D'}
               wrapSub
               sub={market && estimate ? <MobileLabel short={`${Math.round((estimate / market) * 100)} % du marché`} full={`${Math.round((estimate / market) * 100)} % de la valeur de marché`} /> : estimate !== undefined ? 'Estimation statistique' : isCurrentSeason ? 'Sans valeur de marché' : 'Saison en cours seulement'}
               help={`Valeur estimée par le modèle statistique du pipeline : régression ridge sur le log de la valeur Transfermarkt (âge, minutes, rôle, compétition, note, percentiles du rôle, RAPM), chaque joueur étant prédit par un modèle entraîné sans lui. C'est une estimation statistique, ni un prix ni la valeur « réelle » du joueur.${valuation ? ` R² hors échantillon ${fixed(valuation.r2_cv, 2)}, erreur typique ×${fixed(valuation.median_error_factor, 2)}.` : ''} Un écart avec la valeur de marché est un élément à examiner, pas un verdict.`} />
-            <Stat className="px-2.5 sm:px-3 py-2.5" label="Contrat" value={contract ? contract.slice(0, 7).split('-').reverse().join('/') : 'N/D'}
+            <Stat className="px-2.5 sm:px-3 py-2.5 col-span-2 sm:col-span-1 border-t sm:border-t-0 sm:border-l border-line" label="Contrat" value={contract ? contract.slice(0, 7).split('-').reverse().join('/') : 'N/D'}
               tone={contractMonths !== undefined && contractMonths <= 12 ? 'warn' : 'default'}
               sub={contractMonths !== undefined ? (contractMonths <= 0 ? 'Échu' : `${contractMonths} mois restants`) : 'Inconnu'} />
           </div>
@@ -590,8 +595,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
             </EmptyState>
           ) : (
           <div className="h-[300px] -mx-4 sm:-mx-2 mt-1">
-            <ResponsiveContainer width="100%" height="100%" onResize={w => setRadarNarrow(w < 340)}>
-              <RadarChart cx="50%" cy="50%" outerRadius={radarNarrow ? '52%' : '66%'} data={radarData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}
+            <ResponsiveContainer width="100%" height="100%" onResize={w => setRadarWidth(Math.round(w))}>
+              <RadarChart cx="50%" cy="50%" outerRadius={radarCompact ? '48%' : radarNarrow ? '52%' : '66%'} data={radarData} margin={{ top: 18, right: 30, bottom: 18, left: 30 }}
                 onMouseMove={(state: { activeTooltipIndex?: number | string | null }) => {
                   // Hors du disque (libellés) : pas d'axe actif, la mise en évidence vient du libellé survolé
                   const i = state?.activeTooltipIndex;
@@ -601,7 +606,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 <PolarGrid {...polarGridProps} />
                 <PolarAngleAxis dataKey="subject" tick={(tickProps: object) => {
                   const props = tickProps as React.ComponentProps<typeof PolarTick>;
-                  return <PolarTick {...props} format={radarAxisLabel} active={!!focusMetric && radarData.find(d => d.fullSubject === focusMetric)?.subject === props.payload?.value} onHover={focusBySubject} />;
+                  return <PolarTick {...props} format={radarAxisLabel} {...(radarCompact ? { maxChars: 11, maxLines: 3 } : {})} active={!!focusMetric && radarData.find(d => d.fullSubject === focusMetric)?.subject === props.payload?.value} onHover={focusBySubject} />;
                 }} />
                 <PolarRadiusAxis angle={90} domain={[0, 100]} tickCount={5} tick={false} axisLine={false} />
                 <Radar name="Médiane du groupe" dataKey="median" stroke={CONTEXT} strokeDasharray="3 3" strokeWidth={1} fill="none" isAnimationActive={false} />
