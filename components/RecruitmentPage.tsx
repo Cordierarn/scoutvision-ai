@@ -63,7 +63,7 @@ const RecruitmentPage: React.FC<{
           Besoins par poste du onze type, profil de l'effectif et joueurs projetés dans l'équipe la saison prochaine.
         </EmptyState>
       ) : (
-        <RecruitmentPanel key={team} teamKey={team} playerData={playerData} teamStats={teamStats} onSelectPlayer={onSelectPlayer} />
+        <RecruitmentPanel key={team} teamKey={team} playerData={playerData} teamStats={teamStats} onSelectPlayer={onSelectPlayer} onNavigate={onNavigate} />
       )}
     </div>
   );

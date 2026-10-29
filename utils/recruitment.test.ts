@@ -8,7 +8,7 @@ import { formationPositions, isOutOfPosition, orderFormations, recruitmentFormat
 import { seasonCapabilities } from './prospects';
 import {
   Candidate, DEFAULT_FILTERS, Models, RoleForecast, Target, complementFor, complementReading, displayIndex, forecastMetric,
-  forecastRole, incumbentForecast, isManifestlyOutOfPosition, leagueLevel, leagueRows, markEfficient, monthsUntil, peerIndices,
+  forecastRole, incumbentForecast, isManifestlyOutOfPosition, candidateView, leagueLevel, leagueRows, markEfficient, monthsUntil, peerIndices,
   percentileRank, positionFromSlot, projectionCascade, projectionError, searchCandidates, seasonMarket, slotNeeds, slotPartner,
   needOrder, slotDepth, squadProfile, teamRank, CONTEXT_EFFECT_NOTABLE,
 } from './recruitment';
@@ -632,6 +632,44 @@ describe('affichage de la projection', () => {
     expect(projectionError(t, false)).toEqual({ mae: 11.78, moves: 278, season: '2025-26', leagueChange: false });
     expect(projectionError(transfer, true)).toBeUndefined();
     expect(projectionError(null, true)).toBeUndefined();
+  });
+});
+
+describe('dossier du candidat (CandidateView)', () => {
+  const preset: RolePreset = { positions: ['CB'], metrics: { A: 60 }, weights: { B: 1 } };
+  const market: MarketValues = { scrapedAt: '2026-10-20', players: new Map([['x', { value: 5e6, contract: '2027-03-31', estimated: 9e6 }]]) };
+  const pool = [player({ 'Player ID': 'x', 'Team ID': 'o', Competition: 'BBB', 'League tier': 2, 'A pct': 80, 'B pct': 70, 'C pct': 90, 'Team field tilt': 50, 'Minutes played': 1000 })];
+  const run = (m: MarketValues | null) => searchCandidates({
+    pool, preset, target, models, baseline: 50, complements: [{ metric: 'C', value: 20, weight: 1 }],
+    filters: DEFAULT_FILTERS, market: m, asOf: new Date('2026-10-20'),
+  }).candidates[0];
+  const validation = { season: '2025-26', pairs: 1, movers: 405, clubChanges: 278, up: 1, down: 1, metric: {} as never,
+    index: { movers: { model: 12.18 }, clubChanges: { model: 11.78 } } as never };
+
+  it('blocs séparés : sport, complémentarité, valeur, incertitude, signaux ; aucun score global', () => {
+    const c = run(market);
+    const incumbent = { now: 52, next: 50, parts: { regression: 0, age: 0, league: 0, context: 0, adaptation: 0 }, metrics: {} };
+    const v = candidateView(c, { incumbent, targetCompetition: 'AAA', transfer: { ...transfer, validation }, hasMarket: true });
+    expect(Object.keys(v).sort()).toEqual(['complementarity', 'signals', 'sport', 'uncertainty', 'value']);
+    expect(v.sport.next).toBe(c.forecast.next);
+    expect(v.sport.gain).toBeCloseTo(c.forecast.next - 50, 10);
+    expect(v.sport.leagueChange).toBe(true);
+    expect(v.sport.cascade.rounded).toBe(displayIndex(c.forecast.next));
+    expect(v.complementarity?.metrics[0]).toMatchObject({ metric: 'C', partner: 20, candidate: 90 });
+    expect(v.uncertainty).toEqual({ mae: 12.18, moves: 405, season: '2025-26', leagueChange: true });
+    expect(v.value).toMatchObject({ market: 5e6, estimate: 9e6, contract: '2027-03-31', belowEstimate: true, efficient: true });
+    // valeur et contrat ne sont pas des signaux sportifs
+    expect(c.flags).toContain('contract');
+    expect(v.signals).not.toContain('contract');
+    expect(v.signals).not.toContain('belowEstimate');
+    expect(v.signals).toContain('fewMinutes');
+  });
+
+  it('saison passée : bloc valeur absent ; sans titulaire : pas de gain', () => {
+    const v = candidateView(run(null), { targetCompetition: 'AAA', transfer, hasMarket: false });
+    expect(v.value).toBeNull();
+    expect(v.sport.gain).toBeUndefined();
+    expect(v.uncertainty).toBeUndefined();          // validation absente du modèle de test
   });
 });
 

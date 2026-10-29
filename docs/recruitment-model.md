@@ -4,7 +4,8 @@ The *Recruitment* page (opened from Team Analysis) turns a team's real starting 
 projects candidates into that team. The output is a **shortlist for video and scouting, not a
 verdict**.
 
-Code: `utils/recruitment.ts`, `utils/lineup.ts`, `components/RecruitmentPanel.tsx` (app);
+Code: `utils/recruitment.ts`, `utils/lineup.ts`, `utils/teamLineups.ts`, `components/RecruitmentPanel.tsx` and
+`components/recruitment/` (app);
 `scripts/models.py` (`transfer_model`, fitted by `scripts/prepare_data.py`, written to
 `public/data/models/transfer.json`).
 
@@ -104,6 +105,34 @@ starter projected in the same role. Candidates are ranked by this sports project
 - **Display**: the projection cascade (current index, regression, age, league, context,
   adaptation, projected index) is shown to one decimal with cumulative rounding, so the displayed
   steps add up exactly to the displayed projection; the calculation is unchanged.
+
+## Page
+
+Need → candidates → projection → explanation → complementarity → value → uncertainty.
+
+- **Layout**: from 1,280 px, master / detail: needs, constraints and the candidate list on the left,
+  the selected candidate's file on the right (sticky). Below, three steps at full width (needs,
+  candidates, file); choosing a candidate opens the file and moves the focus to it.
+- **Need**: position searched, formation, starter, role, then his measures (current index,
+  projection, league rank) apart from his signals (contract, rotation, age, cover).
+- **Funnel** (`CandidateFunnel`): real counts at each hard constraint (league players, position,
+  minutes, age, leagues, budget, contract, projectable), exclusions for a missing age, value or
+  contract, insufficient data or missing model counted apart. Nothing is estimated.
+- **Constraints** (age, minutes, leagues, budget, contract) filter; **preferences** (order,
+  complementarity, off by default) only reorder the best projections, and the page says so.
+- **List**: 20 candidates, 20 more on demand (100 kept); rows open the file with Enter or Space.
+  The value / performance scatter is an alternative view of the same list, mounted once its
+  width is measured; the list carries all its information.
+- **Candidate file** (`CandidateView`): A identity and actions (player card, compare with the
+  starter, watchlist), B sports projection with the historical error always shown, C cascade,
+  D projected metrics against the starter, E complementarity, F value (current season only),
+  G signals and limits. No overall score. Risk (injuries), finance (total cost, amortisation)
+  and regulation (UEFA, squad rules) are planned as separate blocks and are not implemented:
+  no validated data or model.
+- **Performance** (CPU ×4, median of 3, real data): choosing a candidate 780 → 372 ms, a scatter
+  point 784 → 272 ms, a position 1,427 → 952 ms, a team 2,236 → 1,094 ms. Choosing a candidate
+  recomputes nothing: needs, constraints and the scatter are memoised components with stable
+  callbacks; only the list selection and the file render.
 
 ## Out-of-sample validation
 

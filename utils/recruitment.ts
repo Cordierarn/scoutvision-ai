@@ -926,3 +926,62 @@ export function projectionError(transfer: TransferModel | null | undefined, leag
     ? { mae: v.index.movers.model, moves: v.movers, season: v.season, leagueChange }
     : { mae: v.index.clubChanges.model, moves: v.clubChanges, season: v.season, leagueChange };
 }
+
+// ============================================
+// LECTURE D'UN CANDIDAT (dossier)
+// ============================================
+
+/**
+ * Un candidat en blocs indépendants, sans score global : la projection sportive, la
+ * complémentarité, la valeur, l'incertitude et les signaux ne se mélangent pas.
+ * Blocs prévus plus tard, NON implémentés (ni donnée ni modèle validé à ce jour) : risque
+ * (blessures), finance (coût total, amortissement), règles (UEFA, effectif). Ils s'ajouteront
+ * comme blocs séparés, jamais comme termes de la projection.
+ */
+export interface CandidateView {
+  sport: {
+    now: number;                       // indice actuel du rôle
+    next: number;                      // projection centrale chez nous, saison prochaine
+    cascade: ProjectionCascade;
+    incumbentNext?: number;            // projection du titulaire dans le même rôle
+    gain?: number;                     // différence entre les deux projections
+    leagueChange: boolean;             // changement de championnat (sinon de club)
+  };
+  complementarity?: ComplementReading;
+  value: {                             // null : saison sans données de marché
+    market?: number;
+    estimate?: number;
+    contract?: string;
+    contractMonths?: number;
+    efficient: boolean;
+    belowEstimate: boolean;
+  } | null;
+  uncertainty?: ReturnType<typeof projectionError>;
+  signals: CandidateFlag[];            // signaux sportifs et de contexte (hors valeur)
+}
+
+const VALUE_FLAGS: CandidateFlag[] = ['contract', 'belowEstimate'];
+
+export function candidateView(c: Candidate, opts: {
+  incumbent?: RoleForecast;
+  targetCompetition: string;
+  transfer: TransferModel | null | undefined;
+  hasMarket: boolean;
+}): CandidateView {
+  const leagueChange = c.player.Competition !== opts.targetCompetition;
+  return {
+    sport: {
+      now: c.forecast.now, next: c.forecast.next, cascade: projectionCascade(c.forecast),
+      incumbentNext: opts.incumbent?.next,
+      gain: opts.incumbent ? c.forecast.next - opts.incumbent.next : undefined,
+      leagueChange,
+    },
+    complementarity: c.complement,
+    value: opts.hasMarket ? {
+      market: c.market?.value, estimate: c.market?.estimated, contract: c.market?.contract, contractMonths: c.contractMonths,
+      efficient: c.efficient, belowEstimate: c.flags.includes('belowEstimate'),
+    } : null,
+    uncertainty: projectionError(opts.transfer, leagueChange),
+    signals: c.flags.filter(f => !VALUE_FLAGS.includes(f)),
+  };
+}
