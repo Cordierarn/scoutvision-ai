@@ -68,7 +68,8 @@ verdict on a player.
   finishing skill, pass-network role, estimated value vs Transfermarkt, development projection,
   shot map, heatmap, PDF export.
 - **Comparison** of up to four players with overlaid radars.
-- **Similar players**: distance on normalised metrics, optionally restricted to the same position.
+- **Similar players**: explainable similarity score on the pipeline percentiles, with the
+  components that drive it ("why similar"), optionally restricted to the same position.
 - **Watchlist** with notes, stored in the browser, CSV export.
 
 ### Tactical profiles
