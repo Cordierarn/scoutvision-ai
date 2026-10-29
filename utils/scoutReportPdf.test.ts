@@ -17,7 +17,7 @@ const OLD_SUMMARY = '### 1. Contexte\n- ANCIENNE VERSION UNIQUEMENT EN ANNEXE';
 
 function record(over: Partial<ScoutReportRecord> = {}): ScoutReportRecord {
   return {
-    id: 'r1', schemaVersion: 1, player: playerRef(STRIKER), createdAt: '2026-10-28T10:00:00.000Z', updatedAt: '2026-10-29T10:00:00.000Z', status: 'to_observe',
+    id: 'r1', schemaVersion: 2, player: playerRef(STRIKER), createdAt: '2026-10-28T10:00:00.000Z', updatedAt: '2026-10-29T10:00:00.000Z', status: 'to_observe',
     role: 'Renard des surfaces', tags: ['prêt'], dataSnapshot: buildSnapshot(STRIKER, { dataIndex: { generatedAt: '2026-10-20T00:00:00.000Z' } as never, shotStats: { total: 20, goals: 6, xG: 5.1, xGDiff: 0.9, onTarget: 9, blocked: 2, conversion: 30, avgXG: 0.26 } }),
     generatedSummaries: [], observations: [], ...over,
   };

@@ -8,8 +8,8 @@
  */
 
 import {
-  GeneratedSummary, ObservationType, OBSERVATION_TYPES, ReportDataSnapshot, ReportPlayerRef, ReportStatus, REPORT_STATUSES,
-  SCOUT_REPORT_SCHEMA_VERSION, ScoutObservation, ScoutReportRecord,
+  CRITERION_RATINGS, CriterionRating, GeneratedSummary, ObservationCriterion, ObservationGrid, ObservationType, OBSERVATION_TYPES, ReportDataSnapshot, ReportEvaluation,
+  ReportPlayerRef, ReportStatus, REPORT_STATUSES, SCOUT_REPORT_SCHEMA_VERSION, SCOUT_REPORT_SCHEMA_VERSIONS_READ, ScoutObservation, ScoutReportRecord,
 } from '../types/scoutReport';
 
 export const SCOUT_REPORTS_KEY = 'scoutvision_scout_reports_v1';
@@ -46,6 +46,29 @@ function parseSummary(raw: unknown): GeneratedSummary | null {
   return { id, model, content, generatedAt, promptVersion, ...(str(raw.requestedModel) ? { requestedModel: str(raw.requestedModel) } : {}) };
 }
 
+const rating = (v: unknown): CriterionRating | undefined => (typeof v === 'number' && CRITERION_RATINGS.includes(v as CriterionRating) ? (v as CriterionRating) : undefined);
+
+/** Grille d'observation : rôle obligatoire, critères valides seulement, notes 1 à 5 entières ; null si illisible */
+function parseGrid(raw: unknown): ObservationGrid | null {
+  if (!isObject(raw)) return null;
+  const role = str(raw.role);
+  if (!role || !Array.isArray(raw.criteria)) return null;
+  const criteria = raw.criteria.filter(isObject).flatMap(c => {
+    const key = str(c.key), label = str(c.label), kind = str(c.kind) as ObservationCriterion['kind'] | undefined;
+    if (!key || !label || (kind !== 'role_metric' && kind !== 'unmeasured')) return [];
+    const r = rating(c.rating), note = str(c.note)?.trim();
+    return [{ key, label, kind, ...(r ? { rating: r } : {}), ...(note ? { note } : {}) }];
+  });
+  const overall = rating(raw.overall);
+  return { role, criteria, ...(overall ? { overall } : {}) };
+}
+
+function parseEvaluation(raw: unknown): ReportEvaluation | undefined {
+  if (!isObject(raw) || typeof raw.blind !== 'boolean') return undefined;
+  const revealedAt = str(raw.revealedAt);
+  return { blind: raw.blind, ...(revealedAt ? { revealedAt } : {}) };
+}
+
 function parseObservation(raw: unknown): ScoutObservation | null {
   if (!isObject(raw)) return null;
   const id = str(raw.id), date = str(raw.date), text = str(raw.text), type = str(raw.type) as ObservationType | undefined;
@@ -56,11 +79,13 @@ function parseObservation(raw: unknown): ScoutObservation | null {
       ...(str(r.timestamp) ? { timestamp: str(r.timestamp) } : {}), ...(str(r.clip) ? { clip: str(r.clip) } : {}),
     }))
     : undefined;
+  const grid = raw.grid === undefined ? null : parseGrid(raw.grid);   // grille illisible : observation gardée sans sa grille
   return {
     id, date, type, text,
     ...(str(raw.strengths) ? { strengths: str(raw.strengths) } : {}),
     ...(str(raw.toReview) ? { toReview: str(raw.toReview) } : {}),
     ...(str(raw.conclusion) ? { conclusion: str(raw.conclusion) } : {}),
+    ...(grid ? { grid } : {}),
     ...(refs && refs.length ? { refs } : {}),
     createdAt: str(raw.createdAt) ?? date,
   };
@@ -96,9 +121,14 @@ function parseSnapshot(raw: unknown): ReportDataSnapshot | null {
   return out;
 }
 
-/** Un enregistrement lu dans le stockage ou un fichier importé ; null s'il est illisible */
+/**
+ * Un enregistrement lu dans le stockage ou un fichier importé ; null s'il est illisible.
+ * Migration : un dossier v1 (sans évaluation ni grille) est accepté tel quel et renvoyé en v2,
+ * tous ses champs conservés ; une version inconnue est refusée.
+ */
 export function parseRecord(raw: unknown): ScoutReportRecord | null {
-  if (!isObject(raw) || raw.schemaVersion !== SCOUT_REPORT_SCHEMA_VERSION) return null;
+  if (!isObject(raw) || !(SCOUT_REPORT_SCHEMA_VERSIONS_READ as readonly unknown[]).includes(raw.schemaVersion)) return null;
+  const evaluation = parseEvaluation(raw.evaluation);
   const id = str(raw.id), createdAt = str(raw.createdAt), updatedAt = str(raw.updatedAt), status = str(raw.status) as ReportStatus | undefined;
   const player = parsePlayer(raw.player);
   const dataSnapshot = parseSnapshot(raw.dataSnapshot);
@@ -107,6 +137,7 @@ export function parseRecord(raw: unknown): ScoutReportRecord | null {
     id, schemaVersion: SCOUT_REPORT_SCHEMA_VERSION, player, createdAt, updatedAt, status,
     ...(str(raw.role) ? { role: str(raw.role) } : {}),
     tags: [...new Set(strings(raw.tags))],
+    ...(evaluation ? { evaluation } : {}),
     dataSnapshot,
     generatedSummaries: Array.isArray(raw.generatedSummaries) ? raw.generatedSummaries.map(parseSummary).filter((s): s is GeneratedSummary => !!s) : [],
     observations: Array.isArray(raw.observations) ? raw.observations.map(parseObservation).filter((o): o is ScoutObservation => !!o) : [],
@@ -221,12 +252,29 @@ export function addSummary(id: string, summary: Omit<GeneratedSummary, 'id'>, sn
 
 export type ObservationInput = Omit<ScoutObservation, 'id' | 'createdAt'>;
 
+/** En mode aveugle, la première note globale saisie révèle les données (date conservée) */
+const revealIfRated = (r: ScoutReportRecord, obs: ObservationInput, at: string): ScoutReportRecord =>
+  r.evaluation?.blind && !r.evaluation.revealedAt && obs.grid?.overall !== undefined ? { ...r, evaluation: { ...r.evaluation, revealedAt: at } } : r;
+
 export function addObservation(id: string, obs: ObservationInput, storage: StorageLike | null = defaultStorage(), now?: string): ScoutReportRecord {
-  return update(id, (r, at) => ({ ...r, observations: [...r.observations, { ...cleanObservation(obs), id: newId(), createdAt: at }] }), storage, now);
+  return update(id, (r, at) => revealIfRated({ ...r, observations: [...r.observations, { ...cleanObservation(obs), id: newId(), createdAt: at }] }, obs, at), storage, now);
 }
 
 export function updateObservation(id: string, obsId: string, obs: ObservationInput, storage: StorageLike | null = defaultStorage()): ScoutReportRecord {
-  return update(id, r => ({ ...r, observations: r.observations.map(o => (o.id === obsId ? { ...o, ...cleanObservation(obs) } : o)) }), storage);
+  return update(id, (r, at) => {
+    const clean = cleanObservation(obs);
+    // Remplacement champ à champ : un champ facultatif retiré disparaît (grille, forces, conclusion)
+    return revealIfRated({ ...r, observations: r.observations.map(o => (o.id === obsId ? { id: o.id, createdAt: o.createdAt, ...clean } : o)) }, obs, at);
+  }, storage);
+}
+
+export function setBlind(id: string, blind: boolean, storage: StorageLike | null = defaultStorage()): ScoutReportRecord {
+  return update(id, r => ({ ...r, evaluation: { ...(r.evaluation ?? {}), blind } }), storage);
+}
+
+/** Révélation manuelle d'un dossier en aveugle (sans note globale) */
+export function reveal(id: string, storage: StorageLike | null = defaultStorage()): ScoutReportRecord {
+  return update(id, (r, at) => ({ ...r, evaluation: { blind: r.evaluation?.blind ?? true, revealedAt: r.evaluation?.revealedAt ?? at } }), storage);
 }
 
 export function removeObservation(id: string, obsId: string, storage: StorageLike | null = defaultStorage()): ScoutReportRecord {
@@ -238,11 +286,14 @@ const cleanObservation = (o: ObservationInput): ObservationInput => {
   if (!o.text.trim()) throw new ReportStoreError('Le texte de l\'observation est obligatoire.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(o.date)) throw new ReportStoreError('Date d\'observation invalide (AAAA-MM-JJ attendu).');
   if (!OBSERVATION_TYPES.includes(o.type)) throw new ReportStoreError('Type d\'observation inconnu.');
+  const grid = o.grid ? parseGrid(o.grid) : null;
+  if (o.grid && !grid) throw new ReportStoreError('Grille d\'observation invalide.');
   return {
     date: o.date, type: o.type, text: o.text.trim(),
     ...(trim(o.strengths) ? { strengths: trim(o.strengths) } : {}),
     ...(trim(o.toReview) ? { toReview: trim(o.toReview) } : {}),
     ...(trim(o.conclusion) ? { conclusion: trim(o.conclusion) } : {}),
+    ...(grid ? { grid } : {}),
     ...(o.refs && o.refs.length ? { refs: o.refs } : {}),
   };
 };
