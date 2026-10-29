@@ -19,6 +19,22 @@ Every index and projection below is a scouting aid. None of them is a verdict on
 - Only players with at least 40% of their team's minutes are included (PitchAPI `player_season`
   threshold).
 
+## Similar players
+
+- Score between a reference and a candidate: for each metric of the position's fixed list
+  (`SIMILARITY_METRICS`, 12 metrics), `delta = |P_ref − P_candidate|` on the pipeline percentiles;
+  similarity = 100 − mean(delta) over the metrics available for both players. The "why similar"
+  panel and the radar read exactly these components (`utils/similarity.ts`).
+- A missing metric is ignored and the mean is renormalised; below 8 comparable metrics out of 12
+  there is no score (measured on 2025-26 and 2026-27, coverage is 12, 11 or 9 for more than 99 %
+  of outfield players; the exceptions are strikers at 7 and goalkeepers at 5-6).
+- Dimensions (`SQUAD_DIMENSIONS`), role indices and team context are shown side by side as
+  explanations; none of them enters the score. Components are declarative so that future metrics
+  are added without changing the computation.
+- Historical "statistical twins" are not part of the page: the laboratory experiment
+  ([laboratory](laboratory.md), *Statistical twins*) is rated **partial** (on par with the age
+  curves for under-23s, not better overall) and only its aggregate result is stored.
+
 ## Indicators
 
 | Indicator | Where | Method |

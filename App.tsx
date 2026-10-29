@@ -189,7 +189,12 @@ const App: React.FC = () => {
       )}
 
       {view === ViewState.SIMILARITY && (
-        <SimilarityFinder data={players} onSelectPlayer={handleSelectPlayer} />
+        <SimilarityFinder
+          data={players}
+          onSelectPlayer={handleSelectPlayer}
+          onNavigate={handleNavigate}
+          selectedId={selectedPlayer ? getPlayerSeasonId(selectedPlayer) : undefined}
+        />
       )}
 
       {view === ViewState.COMPARISON && (
