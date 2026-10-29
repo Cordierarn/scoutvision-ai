@@ -11,8 +11,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import { MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport, resolveGeminiModel } from './scoutReport';
+import { AI_TASKS, AiTask, handleGroundedAi } from './groundedAi';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
+/** Chemins des tâches d'IA ancrée : /api/ai/compare, /api/ai/opposition, /api/ai/hunter */
+export const GROUNDED_AI_PREFIX = '/api/ai/';
 
 // 20 rapports par tranche de 10 minutes et par adresse : large pour un usage normal
 const RATE_LIMIT = 20;
@@ -102,7 +105,8 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const path = (req.url ?? '').split('?')[0];
-    if (path !== SCOUT_REPORT_PATH) return next();
+    const aiTask = path.startsWith(GROUNDED_AI_PREFIX) ? path.slice(GROUNDED_AI_PREFIX.length) : null;
+    if (path !== SCOUT_REPORT_PATH && !(aiTask && (AI_TASKS as string[]).includes(aiTask))) return next();
 
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST');
@@ -126,7 +130,9 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
       return sendJson(res, 400, { error: 'JSON invalide.' });
     }
 
-    const result = await handleScoutReport(body, { apiKey, model, generate, log });
+    const result = aiTask
+      ? await handleGroundedAi(aiTask as AiTask, body, { apiKey, model, generate, log })
+      : await handleScoutReport(body, { apiKey, model, generate, log });
     sendJson(res, result.status, result.body);
   };
 }
