@@ -17,6 +17,8 @@ import { AgeCurves, MarketValues, TeamLineups, TransferModel, dataLoader } from 
 import { queryService } from '../services/queryService';
 import { DEFAULT_ROLE_PRESETS, RolePreset, presetWeights, presetsForPosition } from '../utils/rolePresets';
 import { placeEleven } from '../utils/lineup';
+import { orderFormations } from '../utils/teamLineups';
+import { teamCohort } from '../utils/teamMetrics';
 import {
   Candidate, CandidateFlag, DEFAULT_FILTERS, LeagueScope, Models, NeedFlag, NeedLevel, SearchFilters, SlotNeed,
   Target, complementFor, forecastRole, leagueLevel, leagueRows, needOrder as orderNeeds, peerIndices, rankCandidates,
@@ -606,7 +608,8 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
     };
   }, [ready, teamRows, teamStats]);
 
-  const formations = lineups?.formations ?? [];
+  // Même lecture des compositions que l'Analyse d'équipe : la plus utilisée d'abord, cases sans position écartées
+  const formations = useMemo(() => orderFormations(lineups), [lineups]);
   const formationIdx = Math.min(state.formationIdx, Math.max(0, formations.length - 1));
   const formation = formations[formationIdx];
   const eleven = useMemo(() => (formation ? placeEleven(formation.slots) : []), [formation]);
@@ -671,7 +674,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
     if (!ready) return [];
     const own = teamStats.find(t => t.team_id === ready.teamId && t.competition === ready.competition);
     if (!own) return [];
-    const cohort = teamStats.filter(t => t.competition === ready.competition && t.league === own.league);
+    const cohort = teamCohort(own, teamStats);
     const rows: [string, keyof TeamStats, boolean, (v: number) => string][] = [
       ['xG créés / 90', 'xG per 90', true, v => v.toFixed(2)],
       ['xG concédés / 90', 'xGA per 90', false, v => v.toFixed(2)],

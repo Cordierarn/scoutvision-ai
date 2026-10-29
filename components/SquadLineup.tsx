@@ -10,6 +10,7 @@ import { Users } from 'lucide-react';
 import { PlayerData } from '../types';
 import { dataLoader, TeamLineups } from '../services/dataLoader';
 import { placeEleven } from '../utils/lineup';
+import { lineupCoverage, orderFormations } from '../utils/teamLineups';
 import { bestPreset } from '../utils/rolePresets';
 import { positionLabel } from '../utils/labels';
 import { PhotoOverlay } from './Media';
@@ -19,9 +20,10 @@ interface SquadLineupProps {
   season?: string;
   competition?: string;
   players: PlayerData[];          // effectif de l'équipe dans la compétition (player_season)
+  teamMatches?: number | null;    // matchs de l'équipe (team_season), pour la couverture des compositions
 }
 
-const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, players }) => {
+const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, players, teamMatches = null }) => {
   const [lineups, setLineups] = useState<TeamLineups | null | undefined>(undefined);
   const [formationIdx, setFormationIdx] = useState(0);
 
@@ -40,8 +42,11 @@ const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, 
   }, [teamId, season, competition]);
 
   const byId = useMemo(() => new Map(players.map(p => [p['Player ID'], p])), [players]);
-  const formation = lineups?.formations[formationIdx];
+  // Formations de la plus utilisée à la moins utilisée ; cases sans coordonnées écartées
+  const formations = useMemo(() => orderFormations(lineups), [lineups]);
+  const formation = formations[formationIdx];
   const eleven = useMemo(() => (formation ? placeEleven(formation.slots) : []), [formation]);
+  const coverage = lineupCoverage(lineups, teamMatches);
 
   if (lineups === undefined) {
     return <div className="h-full min-h-[700px] bg-raised animate-pulse" />;
@@ -60,19 +65,31 @@ const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, 
       {/* Formations réellement utilisées */}
       <div className="flex items-center gap-2 px-5 py-2.5 border-b border-line overflow-x-auto">
         <span className="sv-label shrink-0 mr-1">Formation</span>
-        {lineups.formations.map((f, idx) => (
+        {formations.map((f, idx) => (
           <button
             key={f.formation}
             onClick={() => setFormationIdx(idx)}
+            aria-pressed={idx === formationIdx}
             className={`sv-chip shrink-0 ${idx === formationIdx ? 'sv-chip-on' : ''}`}
           >
             {f.formation} <span className="text-ink-3">· {f.matches} match{f.matches > 1 ? 's' : ''}</span>
+            {f.status !== 'complete' && <span className="text-warn"> · {f.status === 'irregular' ? 'Irrégulière' : 'Incomplète'}</span>}
           </button>
         ))}
         <span className="text-2xs text-ink-3 ml-auto shrink-0">
-          Titulaires les plus fréquents par poste, sur {lineups.matches} matchs
+          {coverage.complete
+            ? `Titulaires les plus fréquents par poste, sur ${lineups.matches} matchs`
+            : `${coverage.matchesWithLineups} matchs avec composition sur ${coverage.teamMatches} matchs de l'équipe`}
         </span>
       </div>
+      {formation && (
+        <div className="px-5 py-2 border-b border-line text-xs text-ink-3">
+          <span className="text-ink-2">{formationIdx === 0 ? 'Formation la plus utilisée' : 'Formation'} · {formation.formation} · {formation.matches} match{formation.matches > 1 ? 's' : ''}</span>
+          {formation.matches < 3 && <span> · composition tirée de {formation.matches === 1 ? 'un seul match' : `${formation.matches} matchs`}, pas une composition type</span>}
+          {formation.invalidSlots > 0 && <span className="text-warn"> · {formation.invalidSlots} case{formation.invalidSlots > 1 ? 's' : ''} sans position dans les données, non placée{formation.invalidSlots > 1 ? 's' : ''}</span>}
+          {formation.status === 'irregular' && <span className="text-warn"> · {formation.slots.length} postes distincts dans les données pour une formation à 11</span>}
+        </div>
+      )}
 
       <div className="relative flex-1 min-w-[800px] min-h-[680px] w-full bg-canvas overflow-hidden">
         {/* Terrain : l'équipe attaque vers le haut */}
@@ -81,6 +98,11 @@ const SquadLineup: React.FC<SquadLineupProps> = ({ teamId, season, competition, 
         <div className="absolute top-1/2 left-1/2 w-40 h-40 border-2 border-ink-4/30 rounded-full -translate-x-1/2 -translate-y-1/2 z-0"></div>
         <div className="absolute top-12 left-1/2 w-[40%] h-40 border-2 border-t-0 border-ink-4/30 -translate-x-1/2 z-0"></div>
         <div className="absolute bottom-12 left-1/2 w-[40%] h-40 border-2 border-b-0 border-ink-4/30 -translate-x-1/2 z-0"></div>
+        {eleven.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-ink-3 z-10">
+            Aucune case de cette formation n'a de position dans les données : rien n'est placé sur le terrain.
+          </div>
+        )}
 
         {eleven.map(({ slot, starter, backups }) => {
           const data = starter ? byId.get(starter.id) : undefined;

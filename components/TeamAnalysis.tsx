@@ -1,12 +1,14 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { PlayerData, TeamStats, getPlayerSeasonId, getPlayerSeason, getSeasonLabel } from '../types';
+import { PlayerData, TeamStats, getPlayerSeasonId, getPlayerSeason, getPlayerSeasonTag, getSeasonLabel } from '../types';
 import { useShots } from '../hooks/useShots';
 import TeamStyleMap from './TeamStyleMap';
 import SquadLineup from './SquadLineup';
 import RecruitmentPanel from './RecruitmentPanel';
 import { positionLabel } from '../utils/labels';
-import { getAvailableTeams } from '../utils/scoringUtils';
+import { teamMetric, teamMetricRanks, teamTotals, TeamMetricDef } from '../utils/teamMetrics';
+import { splitTeamShots, summarizeShots, topScorers } from '../utils/teamShots';
+import { formatEuro } from '../utils/format';
 import { Users, Shield, Target, Activity, BarChart3, Trophy, ChevronRight, Search, X, UserSearch } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { queryService } from '../services/queryService';
@@ -25,27 +27,46 @@ interface TeamAnalysisProps {
 
 type Tab = 'DEPTH' | 'TACTICS' | 'SHOTMAP' | 'PLAYERS' | 'RECRUIT';
 
-// Équipe et onglet choisis, retrouvés au retour d'une fiche joueur
-const lastView = { team: '', search: '', tab: 'DEPTH' as Tab };
+// Équipe et onglet choisis, retrouvés au retour d'une fiche joueur ; un état par page
+// (Analyse d'équipe, Recrutement) : un passage par l'une ne change pas l'onglet de l'autre
+type ViewMemory = { team: string; search: string; tab: Tab };
+const lastViews: Record<'team' | 'recruit', ViewMemory> = {
+  team: { team: '', search: '', tab: 'DEPTH' },
+  recruit: { team: '', search: '', tab: 'RECRUIT' },
+};
+
+// Profil tactique : métriques de team_season, rang par teamRank (source unique, comme le Recrutement)
+const TACTICAL_METRICS: TeamMetricDef[] = ['xG per 90', 'xGA per 90', 'Possession, %', 'Pass accuracy, %', 'PPDA', 'Field tilt']
+  .map(k => teamMetric(k)!);
+const TACTICAL_LABELS: Record<string, string> = {
+  'xG per 90': 'xG créés', 'xGA per 90': 'xG concédés', 'Possession, %': 'Possession', 'Pass accuracy, %': 'Passes réussies',
+  PPDA: 'Pressing (PPDA)', 'Field tilt': 'Domination territoriale',
+};
+const DECIMAL = (digits: number) => new Intl.NumberFormat('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const D1 = DECIMAL(1);
+const D2 = DECIMAL(2);
+const formatDecimals = (v: number, digits: number) => (digits === 2 ? D2 : D1).format(v);
 
 /**
  * Équipe dans la liste de recherche : logo, nom et compétition
  */
 const TeamOption: React.FC<{ teamKey: string }> = ({ teamKey }) => {
   const info = queryService.getTeamInfo(teamKey);
+  const first = queryService.getTeamPlayers(teamKey)[0];
   return (
     <span className="flex items-center gap-2 min-w-0">
       <TeamLogo src={info.logo} name={info.name} size="xs" />
       <span className="truncate">{info.name}</span>
       <CompetitionBadge competition={info.competition} className="text-2xs text-ink-3" />
+      {first && <span className="sv-tag shrink-0">{getPlayerSeasonTag(first)}</span>}
     </span>
   );
 };
 
 const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSelectPlayer, initialTab }) => {
   // Une équipe retenue n'est reprise que si elle existe dans les saisons chargées
-  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? lastView.tab);
-  const [selectedLeague, setSelectedLeague] = useState<string>('');
+  const lastView = lastViews[initialTab === 'RECRUIT' ? 'recruit' : 'team'];
+  const [activeTab, setActiveTab] = useState<Tab>(lastView.tab ?? initialTab);
   const [selectedTeam, setSelectedTeam] = useState<string>(() => (queryService.getTeamPlayers(lastView.team).length ? lastView.team : ''));
   const [teamSearchTerm, setTeamSearchTerm] = useState<string>(() => (queryService.getTeamPlayers(lastView.team).length ? lastView.search : ''));
   const [showTeamDropdown, setShowTeamDropdown] = useState<boolean>(false);
@@ -75,85 +96,15 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
   };
 
 
-  // --- TAB 2: TEAM TACTICS LOGIC (US-10) ---
+  // --- Profil tactique : valeurs de team_season, rang dans la compétition-saison (teamRank) ---
+  // Une valeur absente reste absente (N/D) : ni 0, ni P50
   const tacticalProfile = useMemo(() => {
-    if (!selectedTeam) return null;
-    
-    // Utilisation du queryService pour des stats d'équipe rapides
-    const teamData = queryService.getTeamStats(selectedTeam);
-    
-    // Si on a des stats d'équipe, les utiliser
-    if (teamData) {
-      // Cohorte : les équipes de la même compétition et de la même saison
-      const cohort = teamStats.filter(t => t.league === teamData.league);
-      
-      // Métriques team_season PitchAPI (higher: false = moins c'est mieux)
-      const metrics = [
-        { key: 'xG per 90', label: 'xG créés', higher: true },
-        { key: 'xGA per 90', label: 'xG concédés', higher: false },
-        { key: 'Possession, %', label: 'Possession', higher: true },
-        { key: 'Pass accuracy, %', label: 'Passes réussies', higher: true },
-        { key: 'PPDA', label: 'Pressing (PPDA)', higher: false },
-        { key: 'Field tilt', label: 'Domination territoriale', higher: true },
-      ];
+    const own = selectedTeam ? queryService.getTeamStats(selectedTeam) : null;
+    return own ? teamMetricRanks(own, teamStats, TACTICAL_METRICS) : null;
+  }, [teamStats, selectedTeam]);
 
-      return metrics.map(m => {
-        const val = Number(teamData[m.key]) || 0;
-        const values = cohort.map(c => Number(c[m.key]) || 0).filter(v => v > 0).sort((a, b) => a - b);
-        const below = values.filter(v => (m.higher ? v < val : v > val)).length;
-        const percentile = values.length > 0 ? Math.round((below / values.length) * 100) : 50;
-        return { 
-          subject: m.label, 
-          A: percentile, 
-          val: val,
-          fullMark: 100 
-        };
-      });
-    }
-    
-    // Fallback: calculer depuis les données joueurs
-    const teamPlayers = queryService.getTeamPlayers(selectedTeam);
-    if (teamPlayers.length === 0) return null;
-    
-    // Calculer des métriques agrégées depuis les joueurs
-    const avgMetrics = {
-      'Attaque': teamPlayers.reduce((sum, p) => sum + (Number(p['xG per 90']) || 0), 0) / teamPlayers.length,
-      'Création': teamPlayers.reduce((sum, p) => sum + (Number(p['xA per 90']) || 0), 0) / teamPlayers.length,
-      'Passe': teamPlayers.reduce((sum, p) => sum + (Number(p['Accurate passes, %']) || 0), 0) / teamPlayers.length,
-      'Défense': teamPlayers.reduce((sum, p) => sum + (Number(p['Successful defensive actions per 90']) || 0), 0) / teamPlayers.length,
-      'Dribble': teamPlayers.reduce((sum, p) => sum + (Number(p['Successful dribbles, %']) || 0), 0) / teamPlayers.length,
-      'Jeu aérien': teamPlayers.reduce((sum, p) => sum + (Number(p['Aerial duels won, %']) || 0), 0) / teamPlayers.length,
-    };
-
-    // Calculer les percentiles par rapport à toutes les équipes
-    const allTeams = queryService.getAvailableTeams();
-    
-    return Object.entries(avgMetrics).map(([label, val]) => {
-      // Calculer la même métrique pour toutes les équipes (utiliser les stats agrégées du cache)
-      const allValues = allTeams.map(team => {
-        const stats = queryService.getTeamAggregatedStats(team);
-        switch(label) {
-          case 'Attaque': return stats.avgXGPer90;
-          case 'Création': return stats.avgXAPer90;
-          case 'Passe': return stats.avgPassAccuracy;
-          case 'Défense': return stats.avgDefensiveActions;
-          case 'Dribble': return stats.avgDribbleSuccess;
-          case 'Jeu aérien': return stats.avgAerialWon;
-          default: return 0;
-        }
-      }).sort((a, b) => a - b);
-      
-      const rank = allValues.filter(v => v < val).length;
-      const percentile = allValues.length > 0 ? Math.round((rank / allValues.length) * 100) : 50;
-      
-      return {
-        subject: label,
-        A: percentile,
-        val: val,
-        fullMark: 100
-      };
-    });
-  }, [teamStats, selectedTeam, selectedLeague]);
+  // « Toutes les saisons » : plusieurs saisons d'application chargées
+  const allSeasons = useMemo(() => new Set(playerData.map(getPlayerSeason)).size > 1, [playerData]);
 
   // Stats de saison de l'équipe sélectionnée (style de jeu, carte des styles)
   const selectedTeamStats = useMemo(
@@ -170,41 +121,18 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
   }, [selectedTeam]);
   const { shots: competitionShots, isLoading: shotsLoading, error: shotsError, retry: retryShots } = useShots(selectedTeamInfo?.season, selectedTeamInfo?.competition);
 
-  const shotMapData = useMemo(() => {
-      if (!selectedTeamInfo) return [];
-      return competitionShots.filter(s => s.team === selectedTeamInfo.name);
-  }, [competitionShots, selectedTeamInfo]);
+  // Tirs pour de l'équipe : les buts contre son camp sont crédités à l'adversaire et comptés à part
+  const teamShots = useMemo(
+    () => (selectedTeamInfo ? splitTeamShots(competitionShots, selectedTeamInfo.name) : null), [competitionShots, selectedTeamInfo]);
+  const shotMapData = teamShots?.for ?? [];
 
-  // Stats for shot map
   const shotStats = useMemo(() => {
-      const total = shotMapData.length;
-      const goals = shotMapData.filter(s => s.result === 'Goal').length;
-      const xG = shotMapData.reduce((acc, curr) => acc + (curr.xG || 0), 0);
-      const onTarget = shotMapData.filter(s => s.result === 'Goal' || s.result === 'SavedShot').length;
-      const blocked = shotMapData.filter(s => s.result === 'BlockedShot').length;
-      
-      // Top scorers
-      const scorerMap = new Map<string, { goals: number; xG: number; shots: number }>();
-      shotMapData.forEach(s => {
-        const player = s.player || 'Unknown';
-        if (!scorerMap.has(player)) {
-          scorerMap.set(player, { goals: 0, xG: 0, shots: 0 });
-        }
-        const stats = scorerMap.get(player)!;
-        stats.shots++;
-        stats.xG += s.xG || 0;
-        if (s.result === 'Goal') stats.goals++;
-      });
-      
-      // Photo des buteurs depuis l'effectif (absente pour les joueurs sous le seuil de minutes)
-      const photos = new Map(queryService.getTeamPlayers(selectedTeam).map(p => [p.Player, p.Image]));
-      const topScorers = Array.from(scorerMap.entries())
-        .map(([name, stats]) => ({ name, image: photos.get(name), ...stats }))
-        .sort((a, b) => b.goals - a.goals || b.xG - a.xG)
-        .slice(0, 5);
-      
-      return { total, goals, xG, onTarget, blocked, topScorers };
-  }, [shotMapData, selectedTeam]);
+    const summary = summarizeShots(teamShots?.for ?? [], teamShots?.ownGoalsFor ?? []);
+    // Photo des buteurs depuis l'effectif (absente pour les joueurs sous le seuil de minutes)
+    const photos = new Map(queryService.getTeamPlayers(selectedTeam).map(p => [p['Player ID'], p.Image]));
+    const topScorersList = topScorers(teamShots?.for ?? []).map(s => ({ ...s, image: photos.get(s.id) }));
+    return { ...summary, topScorers: topScorersList };
+  }, [teamShots, selectedTeam]);
 
   // --- TAB 4: TEAM PLAYERS LIST ---
   const teamPlayerStats = useMemo(() => {
@@ -228,8 +156,10 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
     { key: 'PLAYERS', label: 'Effectif', icon: BarChart3 },
   ];
   const teamInfo = selectedTeam ? queryService.getTeamInfo(selectedTeam) : null;
-  const sum = (key: string) => teamPlayerStats.reduce((s, p) => s + (Number(p[key]) || 0), 0);
-  const avgAge = teamPlayerStats.length ? sum('Age') / teamPlayerStats.length : 0;
+  // Totaux de l'équipe (team_season), jamais la somme des joueurs suivis, filtrés par temps de jeu
+  const totals = teamTotals(selectedTeamStats);
+  const nd = (v: number | null) => (v === null ? 'N/D' : v);
+  const xg = selectedTeamStats ? [selectedTeamStats['xG per 90'], selectedTeamStats['xGA per 90']] : [];
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -284,15 +214,14 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
             </div>
           )}
 
-          {selectedTeam && teamPlayerStats.length > 0 && (
+          {selectedTeam && (
             <div className="flex items-center divide-x divide-line ml-auto">
-              <Stat className="px-4" label="Joueurs" value={teamPlayerStats.length} />
-              <Stat className="px-4" label="Buts" value={sum('Goals')} />
-              <Stat className="px-4" label="Passes déc." value={sum('Assists')} />
-              <Stat className="px-4" label="Âge moyen" value={avgAge.toFixed(1)} />
-              {selectedTeamStats && typeof selectedTeamStats['xG per 90'] === 'number' && (
-                <Stat className="px-4" label="xG / xGA par 90" value={`${(selectedTeamStats['xG per 90'] as number).toFixed(2)} / ${(Number(selectedTeamStats['xGA per 90']) || 0).toFixed(2)}`} />
-              )}
+              <Stat className="px-4" label="Matchs" value={nd(totals.matches)} />
+              <Stat className="px-4" label="Buts" value={nd(totals.goalsFor)} title="Buts de l'équipe sur la saison (statistiques d'équipe)" />
+              <Stat className="px-4" label="Encaissés" value={nd(totals.goalsAgainst)} />
+              <Stat className="px-4" label="xG / xGA par 90" value={xg.map(v => (typeof v === 'number' && Number.isFinite(v) ? D2.format(v) : 'N/D')).join(' / ') || 'N/D'} />
+              <Stat className="px-4" label="Joueurs suivis" value={teamPlayerStats.length}
+                title="Joueurs au-dessus du seuil de minutes du pipeline : pas l'effectif complet" />
             </div>
           )}
         </div>
@@ -325,18 +254,24 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                 season={selectedTeamInfo?.season}
                 competition={selectedTeamInfo?.competition}
                 players={selectedTeam ? queryService.getTeamPlayers(selectedTeam) : []}
+                teamMatches={totals.matches}
               />
             )}
 
             {activeTab === 'TACTICS' && (
               <div className="p-5 space-y-4">
-                {tacticalProfile ? (
+                {tacticalProfile ? (() => {
+                  const ranked = tacticalProfile.filter(m => m.rank !== undefined);
+                  const radar = ranked.map(m => ({ subject: TACTICAL_LABELS[m.def.key], A: Math.round(m.rank as number), median: 50 }));
+                  const missing = tacticalProfile.length - ranked.length;
+                  return (
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     <Panel className="lg:col-span-5" title="Forces relatives" icon={Shield}
-                      subtitle="Percentile parmi les équipes de la compétition (sens « mieux » : moins concédé, PPDA bas = plus de pressing).">
+                      subtitle="Rang parmi les équipes de la compétition sur la saison (sens « mieux » : moins concédé, PPDA bas = plus de pressing).">
+                      {radar.length >= 3 ? (
                       <div className="h-[300px] -mx-2">
                         <ResponsiveContainer width="100%" height="100%">
-                          <RadarChart cx="50%" cy="50%" outerRadius="68%" data={tacticalProfile.map(d => ({ ...d, median: 50 }))}>
+                          <RadarChart cx="50%" cy="50%" outerRadius="68%" data={radar}>
                             <PolarGrid {...polarGridProps} />
                             <PolarAngleAxis dataKey="subject" tick={<PolarTick />} />
                             <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
@@ -346,26 +281,32 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                           </RadarChart>
                         </ResponsiveContainer>
                       </div>
+                      ) : (
+                        <EmptyState title="Pas assez de métriques renseignées pour un radar." />
+                      )}
                       <div className="flex gap-3">
                         <LegendItem color={BRAND} shape="line">{teamInfo?.name}</LegendItem>
                         <LegendItem color={CONTEXT} shape="line">Médiane de la compétition</LegendItem>
                       </div>
+                      {missing > 0 && <p className="text-2xs text-ink-3 mt-2">{missing} métrique{missing > 1 ? 's' : ''} absente{missing > 1 ? 's' : ''} des données de la compétition (N/D) : hors du radar, sans rang.</p>}
                     </Panel>
                     <Panel className="lg:col-span-7" title="ADN tactique" subtitle="Valeur de la saison et rang percentile dans la compétition.">
                       <div className="space-y-1">
-                        {tacticalProfile.map(stat => (
-                          <PercentileRow key={stat.subject} label={stat.subject} value={stat.val.toFixed(stat.val >= 10 ? 1 : 2)} percentile={stat.A} />
+                        {tacticalProfile.map(m => (
+                          <PercentileRow key={m.def.key} label={TACTICAL_LABELS[m.def.key]} title={`${m.def.sense} · rang sur ${m.teams} équipes`}
+                            value={m.value === null ? 'N/D' : formatDecimals(m.value, m.def.decimals)} percentile={m.rank === undefined ? undefined : Math.round(m.rank)} />
                         ))}
                       </div>
                       <PercentileLegend className="mt-3 pt-3 border-t border-line" />
                     </Panel>
                   </div>
-                ) : (
+                  );
+                })() : (
                   <div className="sv-panel">
                     <EmptyState icon={Shield} title="Aucune donnée tactique pour cette équipe.">Les statistiques d'équipe manquent pour cette compétition.</EmptyState>
                   </div>
                 )}
-                {selectedTeamStats && <TeamStyleMap team={selectedTeamStats} teams={teamStats} />}
+                {selectedTeamStats && <TeamStyleMap team={selectedTeamStats} teams={teamStats} allSeasons={allSeasons} />}
               </div>
             )}
 
@@ -375,11 +316,14 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                   <Panel className="xl:col-span-8" title="Carte des tirs" icon={Target}
                     right={
                       <div className="flex gap-5">
-                        <Stat label="Tirs" value={shotStats.total} />
-                        <Stat label="Buts" value={shotStats.goals} />
-                        <Stat label="xG" value={shotStats.xG.toFixed(2)} />
+                        <Stat label="Tirs" value={shotStats.shots} />
+                        <Stat label="Buts" value={shotStats.totalGoals}
+                          sub={shotStats.ownGoals > 0 ? `dont ${shotStats.ownGoals} c.s.c.` : undefined}
+                          title="Buts sur tirs, plus les buts contre son camp adverses (crédités à l'équipe)" />
+                        <Stat label="xG" value={D2.format(shotStats.xG)} />
                         <Stat label="Cadrés" value={shotStats.onTarget} />
-                        <Stat label="Conversion" value={`${shotStats.total > 0 ? ((shotStats.goals / shotStats.total) * 100).toFixed(1) : 0} %`} />
+                        <Stat label="Conversion" value={shotStats.conversion === null ? 'N/D' : `${D1.format(shotStats.conversion)} %`}
+                          title="Buts sur tirs / tirs, hors buts contre son camp" />
                       </div>
                     }>
                     <ShotPitch shots={shotMapData} showPlayer className="max-w-[420px]" loading={shotsLoading} error={shotsError} onRetry={retryShots}
@@ -393,7 +337,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                       </thead>
                       <tbody>
                         {shotStats.topScorers.map((scorer, idx) => (
-                          <tr key={scorer.name}>
+                          <tr key={scorer.id}>
                             <td className="pl-4 text-ink-4 text-xs">{idx + 1}</td>
                             <td>
                               <span className="flex items-center gap-2">
@@ -402,7 +346,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                               </span>
                             </td>
                             <td className="text-right text-ink font-semibold">{scorer.goals}</td>
-                            <td className="text-right text-ink-2">{scorer.xG.toFixed(2)}</td>
+                            <td className="text-right text-ink-2">{D2.format(scorer.xG)}</td>
                             <td className="text-right text-ink-3 pr-4">{scorer.shots}</td>
                           </tr>
                         ))}
@@ -454,15 +398,13 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                       <td className="text-right text-ink-3">{player.minutesPlayed.toLocaleString('fr-FR')}</td>
                       <td className="text-right text-ink">{player.Goals || 0}</td>
                       <td className="text-right text-ink">{player.Assists || 0}</td>
-                      <td className="text-right text-ink-2">{(Number(player.xG) || 0).toFixed(2)}</td>
-                      <td className="text-right text-ink-2">{(Number(player.xA) || 0).toFixed(2)}</td>
+                      <td className="text-right text-ink-2">{typeof player.xG === 'number' ? D2.format(player.xG) : '–'}</td>
+                      <td className="text-right text-ink-2">{typeof player.xA === 'number' ? D2.format(player.xA) : '–'}</td>
                       <td className="text-right">
                         {typeof player['Rating pct'] === 'number' ? <PercentileValue value={player['Rating pct'] as number} className="text-xs" /> : <span className="text-ink-4">–</span>}
                       </td>
                       <td className="text-right text-ink font-medium pr-5">
-                        {typeof player['Market value'] === 'number' && player['Market value'] > 0
-                          ? `€${(player['Market value'] / 1000000).toFixed(1)}M`
-                          : '–'}
+                        {typeof player['Market value'] === 'number' && player['Market value'] > 0 ? formatEuro(player['Market value']) : '–'}
                       </td>
                     </tr>
                   ))}
