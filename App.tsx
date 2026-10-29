@@ -7,6 +7,7 @@ import SimilarityFinder from './components/SimilarityFinder';
 import PlayerComparison from './components/PlayerComparison';
 import ScoutReport from './components/ScoutReport';
 import TeamAnalysis from './components/TeamAnalysis';
+import RecruitmentPage from './components/RecruitmentPage';
 import Prospects from './components/Prospects';
 import Watchlist from './components/Watchlist';
 import Forecast from './components/Forecast';
@@ -146,21 +147,20 @@ const App: React.FC = () => {
     >
       {view === ViewState.TEAM_ANALYSIS && (
         <TeamAnalysis
-          key="team"
           playerData={players}
           teamStats={teamStats}
           onSelectPlayer={handleSelectPlayer}
+          onNavigate={handleNavigate}
         />
       )}
 
-      {/* Recrutement : l'analyse d'équipe ouverte sur son onglet de recrutement */}
+      {/* Recrutement : page distincte, son propre état ; ouverte depuis l'Analyse d'équipe sur la même équipe */}
       {view === ViewState.RECRUITMENT && (
-        <TeamAnalysis
-          key="recruitment"
-          initialTab="RECRUIT"
+        <RecruitmentPage
           playerData={players}
           teamStats={teamStats}
           onSelectPlayer={handleSelectPlayer}
+          onNavigate={handleNavigate}
         />
       )}
 

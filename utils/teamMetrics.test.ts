@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { TeamStats } from '../types';
 import { percentileRank, teamRank } from './recruitment';
 import {
-  STYLE_METRICS, STYLE_MIN_MATCHES, STYLE_TREND_MATCHES, TEAM_METRICS, styleReliability, teamCohort, teamMetric, teamMetricRank,
+  STYLE_METRICS, STYLE_MIN_MATCHES, STYLE_PCA_VARIANCE, styleMapPopulation, STYLE_TREND_MATCHES, TEAM_METRICS, styleReliability, teamCohort, teamMetric, teamMetricRank,
   teamMetricRanks, teamTotals, teamValue,
 } from './teamMetrics';
 
@@ -97,5 +98,63 @@ describe('fiabilité du style', () => {
   it('les 6 indicateurs du style suivent scripts/models.py (PPDA inversé)', () => {
     expect(STYLE_METRICS.map(m => m.key)).toEqual(['Possession, %', 'Field tilt', 'PPDA', 'Defensive line height', 'Direct speed', 'Passes per sequence']);
     expect(STYLE_METRICS.find(m => m.key === 'PPDA')!.direction).toBe('lower');
+  });
+});
+
+// Données présentes localement (npm run data:pull) : la variance affichée suit les données
+const TEAMS_DIR = 'public/data/teams';
+describe.skipIf(!existsSync(TEAMS_DIR))('variance expliquée de la carte des styles', () => {
+  it('ACP des 6 indicateurs sur toutes les équipes-saisons : PC1 et PC2 à 0,5 point près', () => {
+    const rows: number[][] = [];
+    readdirSync(TEAMS_DIR).filter(f => f.endsWith('.json')).forEach(f => {
+      const d = JSON.parse(readFileSync(`${TEAMS_DIR}/${f}`, 'utf8')) as { columns: string[]; rows: unknown[][] };
+      const idx = STYLE_METRICS.map(m => d.columns.indexOf(m.key));
+      d.rows.forEach(r => {
+        if (!idx.every(i => typeof r[i] === 'number' && Number.isFinite(r[i]))) return;    // équipe sans analytics : hors ACP
+        rows.push(idx.map((i, k) => (STYLE_METRICS[k].direction === 'lower' ? -1 : 1) * (r[i] as number)));
+      });
+    });
+    const n = rows.length, k = 6;
+    const mean = Array.from({ length: k }, (_, j) => rows.reduce((s, r) => s + r[j], 0) / n);
+    const sd = Array.from({ length: k }, (_, j) => Math.sqrt(rows.reduce((s, r) => s + (r[j] - mean[j]) ** 2, 0) / n));
+    const z = rows.map(r => r.map((v, j) => (v - mean[j]) / sd[j]));
+    const c = Array.from({ length: k }, (_, a) => Array.from({ length: k }, (_, b) => z.reduce((s, r) => s + r[a] * r[b], 0) / n));
+    // Deux plus grandes valeurs propres : puissance itérée avec déflation ; total = trace (= 6)
+    const eig: number[] = [];
+    for (let e = 0; e < 2; e++) {
+      let v = Array.from({ length: k }, (_, i) => 1 + i);
+      for (let it = 0; it < 500; it++) {
+        const w = c.map(r => r.reduce((s, x, j) => s + x * v[j], 0));
+        const norm = Math.hypot(...w);
+        v = w.map(x => x / norm);
+      }
+      const lambda = c.reduce((s, r, i) => s + v[i] * r.reduce((t, x, j) => t + x * v[j], 0), 0);
+      eig.push(lambda);
+      for (let a = 0; a < k; a++) for (let b = 0; b < k; b++) c[a][b] -= lambda * v[a] * v[b];
+    }
+    const total = k;
+    expect(Math.abs(eig[0] / total - STYLE_PCA_VARIANCE.pc1)).toBeLessThan(0.005);
+    expect(Math.abs(eig[1] / total - STYLE_PCA_VARIANCE.pc2)).toBeLessThan(0.005);
+  });
+});
+
+describe('carte des styles : une équipe-saison par point', () => {
+  const lens = (season: string, Style: string, x = 1) => team('lens', { team: 'Lens', season, league: `Ligue 1 ${season}`, Style, 'Style x': x, 'Style y': 0 });
+  const teams = [lens('2023-24', 'High press'), lens('2024-25', 'Patient build-up', 2), lens('2025-26', 'Patient build-up', 3),
+    team('psg', { season: '2025-26', Style: 'Patient build-up', 'Style x': 4, 'Style y': 1 }),
+    team('om', { season: '2024-25', league: 'Ligue 1 2024-25', Style: 'High press', 'Style x': 0, 'Style y': 0 }),
+    team('ucl', { competition: 'UCL', Style: 'High press', 'Style x': 0, 'Style y': 0 }),
+    team('kas', { season: '2025-26', Style: undefined })];
+  it('Toutes les saisons : Lens 2023-24, 2024-25 et 2025-26 sont trois points distincts', () => {
+    const pop = styleMapPopulation(teams[2], teams, true);
+    expect(pop.filter(p => p.team.team_id === 'lens').map(p => `${p.team.season}:${p.kind}`)).toEqual(['2023-24:club', '2024-25:club', '2025-26:selected']);
+    expect(pop.find(p => p.team.team_id === 'psg')?.kind).toBe('same');
+    expect(pop.some(p => p.team.competition === 'UCL')).toBe(false);
+    expect(pop.some(p => p.team.team_id === 'kas')).toBe(false);          // sans coordonnées
+  });
+  it('saison sélectionnée : seulement cette saison, aucun mélange', () => {
+    const pop = styleMapPopulation(teams[2], teams, false);
+    expect(pop.map(p => p.team.team_id)).toEqual(['lens', 'psg']);
+    expect(pop.every(p => p.team.season === '2025-26')).toBe(true);
   });
 });

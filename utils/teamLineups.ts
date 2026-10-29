@@ -87,3 +87,60 @@ export function lineupCoverage(lineups: TeamLineups | null | undefined, teamMatc
   const shownMatches = (lineups?.formations ?? []).reduce((s, f) => s + f.matches, 0);
   return { matchesWithLineups, teamMatches, shownMatches, complete: teamMatches === null || matchesWithLineups >= teamMatches };
 }
+
+// ============================================
+// POSTE OCCUPÉ DANS LA FORMATION
+// ============================================
+
+const LINE_OF: Record<string, number> = { GK: 0, CB: 1, FB: 1, WB: 1, DM: 2, CM: 2, AM: 2, W: 3, ST: 3 };
+
+/**
+ * Poste de chaque case, lu dans la formation (« 4-2-3-1 ») : le gardien est la case la plus
+ * basse, puis les lignes de la formation, de l'arrière vers l'avant, par profondeur moyenne,
+ * et de gauche à droite dans chaque ligne. Mesuré sur 2025-26 : le poste de la fiche du
+ * titulaire diffère de cette lecture de famille dans 8,8 % des cas (surtout des milieux
+ * offensifs alignés relayeurs) et de ligne dans 2,7 %, contre 20 % et 7 % avec la seule
+ * géométrie de la case (positionFromSlot). Null si la formation n'a pas ses 11 cases.
+ */
+export function formationPositions(view: Pick<FormationView, 'formation' | 'slots'>): Map<number, string> | null {
+  const lines = (view.formation.match(/\d/g) ?? []).map(Number);
+  if (lines.reduce((s, n) => s + n, 0) !== ELEVEN - 1 || view.slots.length !== ELEVEN) return null;
+  const byDepth = [...view.slots].sort((a, b) => a.x - b.x);
+  const out = new Map<number, string>([[byDepth[0].slot, 'GK']]);
+  const mids = lines.length - 2;          // lignes entre la défense et l'attaque
+  const backThree = lines[0] === 3;
+  let i = 1;
+  lines.forEach((n, li) => {
+    const line = byDepth.slice(i, i + n).sort((a, b) => a.y - b.y);
+    i += n;
+    line.forEach((s, k) => {
+      const edge = n >= 3 && (k === 0 || k === n - 1);
+      let p: string;
+      if (li === 0) p = edge && n === 5 ? 'WB' : edge && n === 4 ? 'FB' : 'CB';
+      else if (li === lines.length - 1) p = edge && n === 3 ? 'W' : 'ST';
+      else {
+        const m = li - 1;                  // rang de la ligne de milieu
+        if (n >= 4 && edge) p = backThree ? 'WB' : 'W';
+        else if (mids > 1 && m === mids - 1 && n <= 3) p = n === 3 && edge ? 'W' : 'AM';
+        else if (mids > 1 && m === 0 && n <= 2) p = 'DM';
+        else p = 'CM';
+      }
+      out.set(s.slot, p);
+    });
+  });
+  return out;
+}
+
+/**
+ * Hors poste : le poste de la fiche est à deux lignes ou plus du poste occupé (ailier aligné
+ * piston ou latéral, par exemple), ou un gardien d'un côté seulement. Plus près (ailier en
+ * meneur, milieu offensif en relayeur), c'est une nuance de rôle, pas un signal : mesuré sur
+ * 2025-26, 34 titulaires sur 6 625 sont à deux lignes ou plus.
+ */
+export function isOutOfPosition(playerPosition: string | undefined, slotPosition: string | undefined): boolean {
+  if (!playerPosition || !slotPosition || !(playerPosition in LINE_OF) || !(slotPosition in LINE_OF)) return false;
+  const a = LINE_OF[playerPosition];
+  const b = LINE_OF[slotPosition];
+  if (a === 0 || b === 0) return a !== b;
+  return Math.abs(a - b) >= 2;
+}

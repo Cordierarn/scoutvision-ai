@@ -11,7 +11,10 @@ import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, Cartes
 import { TeamStats } from '../types';
 import { dataLoader } from '../services/dataLoader';
 import { styleLabel } from '../utils/labels';
-import { STYLE_MIN_MATCHES, STYLE_TREND_MATCHES, styleReliability, teamValue } from '../utils/teamMetrics';
+import { STYLE_MIN_MATCHES, STYLE_PCA_VARIANCE, STYLE_TREND_MATCHES, styleMapPopulation, styleReliability, teamValue } from '../utils/teamMetrics';
+
+const PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const PCT0 = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 0 });
 import { CONTEXT, DIVERGING, INK, SERIES, tooltipProps } from '../theme/charts';
 
 // Palette catégorielle de référence (fond sombre), 2 séries + gris neutre
@@ -51,23 +54,16 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?:
   const reliability = styleReliability(matches, style);
 
   const { selected, club, same, others } = useMemo(() => {
-    const isSelected = (t: TeamStats) => t.team_id === team.team_id && t.season === team.season;
-    const points = teams
-      .filter(t => t.competition === team.competition && (allSeasons || t.season === team.season))
-      .filter(t => typeof t['Style x'] === 'number' && typeof t['Style y'] === 'number')
-      .map(t => ({ t, p: { x: t['Style x'] as number, y: t['Style y'] as number, team: t.team, season: t.season,
-        label: allSeasons ? `${t.team} ${seasonTag(t.season)}` : t.team, styleName: String(t.Style) } as Point }));
-    return {
-      selected: points.filter(({ t }) => isSelected(t)).map(x => x.p),
-      club: points.filter(({ t }) => !isSelected(t) && t.team_id === team.team_id).map(x => x.p),
-      same: points.filter(({ t }) => !isSelected(t) && t.team_id !== team.team_id && String(t.Style) === style).map(x => x.p),
-      others: points.filter(({ t }) => !isSelected(t) && t.team_id !== team.team_id && String(t.Style) !== style).map(x => x.p),
-    };
-  }, [teams, team, style, allSeasons]);
+    const points = styleMapPopulation(team, teams, allSeasons).map(({ team: t, kind }) => ({ kind, p: {
+      x: t['Style x'] as number, y: t['Style y'] as number, team: t.team, season: t.season,
+      label: allSeasons ? `${t.team} ${seasonTag(t.season)}` : t.team, styleName: String(t.Style) } as Point }));
+    const of = (k: string) => points.filter(x => x.kind === k).map(x => x.p);
+    return { selected: of('selected'), club: of('club'), same: of('same'), others: of('other') };
+  }, [teams, team, allSeasons]);
 
   if (!style) return null;
-  const title = reliability === 'insufficient' ? 'Style non établi'
-    : reliability === 'trend' ? `Tendance de style : ${styleLabel(style)}` : `Style observé : ${styleLabel(style)}`;
+  const title = reliability === 'insufficient' ? 'Carte des styles · style non établi'
+    : reliability === 'trend' ? `Carte des styles · tendance : ${styleLabel(style)}` : `Carte des styles · style observé : ${styleLabel(style)}`;
 
   return (
     <div className="sv-panel p-4">
@@ -81,13 +77,16 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?:
             : `${matches} matchs : tendance seulement. Sur les saisons passées, le style des ${STYLE_TREND_MATCHES} à ${STYLE_MIN_MATCHES - 1} premiers matchs était le style final dans 55 à 64 % des cas.`}
         </p>
       )}
+      <p className="text-xs text-ink-3 mb-1">
+        Axe horizontal : contrôle du jeu (PC1, {PCT.format(STYLE_PCA_VARIANCE.pc1)} de la variance) ; axe vertical : pressing et verticalité (PC2, {PCT.format(STYLE_PCA_VARIANCE.pc2)}) ; total : {PCT0.format(STYLE_PCA_VARIANCE.pc1 + STYLE_PCA_VARIANCE.pc2)}.
+      </p>
       <p className="text-xs text-ink-3 mb-4">
-        Axe horizontal : contrôle du jeu ; axe vertical : pressing et verticalité. Six styles issus d'un k-means sur la possession, le territoire, le pressing (PPDA), la hauteur de ligne, le jeu direct et la construction, ajusté sur toutes les équipes-saisons de toutes les compétitions.
+        Six styles issus d'un k-means sur la possession, le territoire, le pressing (PPDA), la hauteur de ligne, le jeu direct et la construction, ajusté sur toutes les équipes-saisons de toutes les compétitions. Un style décrit une saison ; il change pour près d'un club sur deux d'une saison à l'autre.
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <div className="flex items-center gap-4 text-2xs text-ink-3 mb-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-ink-3 mb-2">
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SELECTED }} />{team.team}{allSeasons ? ` ${seasonTag(team.season)}` : ''}</span>
             {club.length > 0 && <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border-2" style={{ borderColor: SELECTED }} />Autres saisons du club</span>}
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: SAME_STYLE }} />Même style</span>

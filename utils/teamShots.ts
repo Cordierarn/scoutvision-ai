@@ -121,3 +121,29 @@ export function topScorers(shots: ShotEvent[], limit = 5): Scorer[] {
   });
   return [...by.values()].sort((a, b) => b.goals - a.goals || b.xG - a.xG || a.name.localeCompare(b.name)).slice(0, limit);
 }
+
+// ============================================
+// FILTRES (données existantes seulement)
+// ============================================
+
+export type SituationFilter = 'all' | 'OpenPlay' | 'FromCorner' | 'SetPiece' | 'DirectFreekick' | 'Penalty';
+export type ResultFilter = 'all' | 'goal' | 'onTarget' | 'offTarget';
+
+export interface ShotFilters {
+  situation: SituationFilter;
+  nonPenalty: boolean;             // hors penalties
+  result: ResultFilter;
+}
+
+export const DEFAULT_SHOT_FILTERS: ShotFilters = { situation: 'all', nonPenalty: false, result: 'all' };
+
+export function filterShots(shots: ShotEvent[], f: ShotFilters): ShotEvent[] {
+  return shots.filter(s => {
+    if (f.situation !== 'all' && s.situation !== f.situation) return false;
+    if (f.nonPenalty && isPenalty(s)) return false;
+    if (f.result === 'goal' && s.result !== 'Goal') return false;
+    if (f.result === 'onTarget' && !isOnTarget(s)) return false;
+    if (f.result === 'offTarget' && isOnTarget(s)) return false;
+    return true;
+  });
+}

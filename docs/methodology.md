@@ -35,6 +35,38 @@ Every index and projection below is a scouting aid. None of them is a verdict on
   ([laboratory](laboratory.md), *Statistical twins*) is rated **partial** (on par with the age
   curves for under-23s, not better overall) and only its aggregate result is stored.
 
+## Team analysis
+
+- Team ranks: one function for the team page and Recruitment, `teamRank` (`utils/recruitment.ts`),
+  read through the `TEAM_METRICS` registry (`utils/teamMetrics.ts`). Cohort = teams of the same
+  competition and season. Mid-rank convention: share of the cohort below, ties counted for half,
+  the team included; the leader of n teams is at 100 − 50/n (97.2 of 18), the last at 50/n. A
+  missing value (`null`, `""`, `NaN`) has no rank, is shown "N/D" and stays out of the cohort.
+- Header totals come from team_season (`Goals per 90 × Matches`), never from the sum of the players
+  in the data, who are filtered by playing time (median 12 per team).
+- Own goals: in the shot files an own goal belongs to the player who scores it, i.e. to the team
+  that concedes. It is credited to the opponent, listed apart, and kept out of xG, shots on target,
+  conversion and the shot map (`utils/teamShots.ts`). Le Havre 2025-26: 32 goals for (31 from shots,
+  1 own goal), as in team_season; the former count was 34. Shots against = shots of the other team
+  in the team's matches.
+- Formations: most used first. A slot without coordinates (`x = y = 0` in the files) is not placed
+  and marks the formation incomplete; when a formation has more than 11 slots, slots at exactly the
+  same coordinates (two position_id grids) are merged (`utils/teamLineups.ts`). Position held = read
+  from the formation string (lines by depth, then left to right): it differs from the player's
+  registered position family in 8.8 % of starters in 2025-26 (2.7 % by line), against 20 % and 7 %
+  with the slot geometry alone. "Out of position" is shown only two lines apart or more (34 of 6,625).
+- Style reliability: measured on 1,286 complete league team-seasons (≥ 20 matches, match-level
+  team data of the PitchAPI cache, existing centroids unchanged). Style of the first N matches = the
+  final style in 30 % of cases after 1 match, 48 % after 3, 55 % after 5, 64 % after 8, 66 % after 10,
+  74 % after 15, 80 % after 20 (most frequent style: 23.5 %). The style is not named below 5 matches,
+  shown as a trend from 5 to 9 and as the observed style from 10. Between two complete seasons, 47 %
+  of clubs change style. Style map: PC1 63.2 % and PC2 24.0 % of the variance (87 %), one point per
+  team-season.
+- Depth (`slotDepth`): starter, backup and third option of each slot of the formation, with the
+  signals Recruitment already uses (no backup, rotation, contract ≤ 12 months, age decline, no
+  regular player). No need level: that stays in `slotNeeds`, which now reads `slotDepth` (identical
+  output on 1,356 teams and 14,905 slots of 2025-26 and 2026-27).
+
 ## Indicators
 
 | Indicator | Where | Method |

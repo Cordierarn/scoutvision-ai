@@ -18,7 +18,7 @@ import { PlayerData, TeamStats } from '../types';
 import { AgeCurves, MarketEntry, MarketValues, TransferModel } from '../services/dataLoader';
 import { RolePreset, midfieldBonus, presetWeights, presetsForPosition, weightedRoleScore } from './rolePresets';
 import { ageEffect } from './development';
-import { PlacedSlot } from './lineup';
+import { PlacedSlot, SlotPlayer } from './lineup';
 
 export interface Models {
   curves: AgeCurves | null;
@@ -347,20 +347,44 @@ export function positionFromSlot(x: number, y: number): string {
   return wide ? 'W' : 'ST';
 }
 
+// ============================================
+// PROFONDEUR D'EFFECTIF (sans besoin de recrutement)
+// ============================================
+
+export interface DepthOption {
+  lineup: SlotPlayer;            // joueur de la case dans les compositions (titularisations)
+  player?: PlayerData;           // sa ligne de la compétition, s'il est au-dessus du seuil de minutes
+}
+
+export interface SlotDepth {
+  placed: PlacedSlot;
+  position: string;              // poste joué (celui du titulaire, sinon d'un remplaçant, sinon la case)
+  regular?: PlayerData;          // titulaire le plus fréquent de la case, présent dans les données
+  // Joueur de référence : le titulaire ; absent des données (sous le seuil), le remplaçant de la
+  // case le plus titularisé, sinon le joueur de la même famille de poste le plus utilisé (rotation)
+  starter?: PlayerData;
+  rotation: boolean;
+  options: DepthOption[];        // titulaire puis remplaçants de la case, par titularisations
+  backup: DepthOption | null;
+  thirdOption: DepthOption | null;
+  slotMatches: number;           // titularisations à ce poste dans la formation
+  coverage: number;              // part des titularisations prises par d'autres que le titulaire (0-1)
+  signals: NeedFlag[];           // noStarter, depth, rotation, contract, decline
+  contractMonths?: number;
+}
+
 /**
- * Besoins par case du onze type : chaque titulaire est projeté à la saison suivante dans
- * son meilleur rôle et situé parmi les joueurs du championnat éligibles à ce rôle
+ * Profondeur de chaque case du onze : titulaire, doublure, troisième option et signaux déjà
+ * utilisés par le Recrutement (pas de doublure, rotation, fin de contrat, déclin lié à l'âge,
+ * aucun joueur régulier). Ne calcule aucun besoin : le niveau (prioritaire, à renforcer,
+ * solide) reste propre à slotNeeds.
  */
-export function slotNeeds(
+export function slotDepth(
   eleven: PlacedSlot[],
   teamPlayers: PlayerData[],
-  leaguePlayers: PlayerData[],
-  models: Models,
-  market: MarketValues | null,
-  asOf: Date,
-): SlotNeed[] {
+  opts: { contractOf?: (p: PlayerData) => string | undefined; asOf?: Date; declining?: (p: PlayerData) => boolean } = {},
+): SlotDepth[] {
   const byId = new Map(teamPlayers.filter(p => p['Player ID']).map(p => [p['Player ID']!, p]));
-  const peerCache = new Map<string, number[]>();
   // Titulaires présents dans les données : ils ne servent pas de référence à une autre case
   const used = new Set(eleven.map(p => p.starter?.id).filter((id): id is string => !!id && byId.has(id)));
 
@@ -382,25 +406,75 @@ export function slotNeeds(
     // Doublure : un autre joueur a débuté au moins 15 % des matchs de la formation à ce poste
     const slotMatches = placed.backups.reduce((sum, b) => sum + b.starts, placed.starter?.starts ?? 0);
     const cover = Math.max(1, Math.round(DEPTH_SHARE * slotMatches));
-    const flags: NeedFlag[] = placed.backups.some(b => b.starts >= cover) ? [] : ['depth'];
+    const depth = !placed.backups.some(b => b.starts >= cover);
     let starter = regular;
+    let rotation = false;
     if (!starter) {
       starter = reference(placed, position);
       if (starter) {
         used.add(starter['Player ID']!);
-        flags.push('rotation');
+        rotation = true;
       }
     }
+    const options: DepthOption[] = [...(placed.starter ? [placed.starter] : []), ...placed.backups]
+      .map(lineup => ({ lineup, player: byId.get(lineup.id) }));
+    const contractMonths = starter && opts.contractOf ? monthsUntil(opts.contractOf(starter), opts.asOf ?? new Date()) : undefined;
+    const signals: NeedFlag[] = [];
+    if (!starter) signals.push('noStarter');
+    if (depth) signals.push('depth');
+    if (rotation) signals.push('rotation');
+    if (contractMonths !== undefined && contractMonths <= CONTRACT_MONTHS) signals.push('contract');
+    if (starter && opts.declining?.(starter)) signals.push('decline');
+    return {
+      placed, position, regular, starter, rotation, options,
+      backup: options[1] ?? null, thirdOption: options[2] ?? null,
+      slotMatches, coverage: slotMatches > 0 ? 1 - (placed.starter?.starts ?? 0) / slotMatches : 0,
+      signals, contractMonths,
+    };
+  });
+}
+
+/** Meilleur rôle d'un joueur : indice actuel le plus haut parmi les rôles de son poste, et sa projection */
+export function bestRoleForecast(player: PlayerData, models: Models): { name: string; preset: RolePreset; forecast: RoleForecast } | undefined {
+  let best: { name: string; preset: RolePreset; forecast: RoleForecast } | undefined;
+  presetsForPosition(player.Position).forEach(([name, preset]) => {
+    const forecast = forecastRole(player, preset, models);
+    if (forecast && (!best || forecast.now > best.forecast.now)) best = { name, preset, forecast };
+  });
+  return best;
+}
+
+/** Déclin lié à l'âge : l'âge seul fait baisser l'indice projeté du meilleur rôle d'au moins 2 points */
+export const isDeclining = (player: PlayerData, models: Models) => {
+  const best = bestRoleForecast(player, models);
+  return !!best && best.forecast.parts.age <= DECLINE_POINTS;
+};
+
+/**
+ * Besoins par case du onze type : chaque titulaire est projeté à la saison suivante dans
+ * son meilleur rôle et situé parmi les joueurs du championnat éligibles à ce rôle.
+ * La profondeur (titulaire de référence, rotation, doublure, contrat) vient de slotDepth.
+ */
+export function slotNeeds(
+  eleven: PlacedSlot[],
+  teamPlayers: PlayerData[],
+  leaguePlayers: PlayerData[],
+  models: Models,
+  market: MarketValues | null,
+  asOf: Date,
+): SlotNeed[] {
+  const peerCache = new Map<string, number[]>();
+  const depths = slotDepth(eleven, teamPlayers, { contractOf: p => market?.players.get(p['Player ID'] ?? '')?.contract, asOf });
+
+  return depths.map(d => {
+    const { placed, position, starter } = d;
+    const flags: NeedFlag[] = d.signals.includes('depth') ? ['depth'] : [];
+    if (d.rotation) flags.push('rotation');
     if (!starter) {
       return { placed, position, need: 100, level: 'unknown' as NeedLevel, flags: ['noStarter' as NeedFlag, ...flags] };
     }
 
-    // Meilleur rôle : indice actuel le plus haut parmi les rôles du poste
-    let best: { name: string; preset: RolePreset; forecast: RoleForecast } | undefined;
-    presetsForPosition(starter.Position).forEach(([name, preset]) => {
-      const forecast = forecastRole(starter, preset, models);
-      if (forecast && (!best || forecast.now > best.forecast.now)) best = { name, preset, forecast };
-    });
+    const best = bestRoleForecast(starter, models);
     if (!best) {
       return { placed, starter, position, need: 100, level: 'unknown' as NeedLevel, flags: ['noStarter' as NeedFlag, ...flags] };
     }
@@ -408,7 +482,7 @@ export function slotNeeds(
     if (!peerCache.has(best.name)) peerCache.set(best.name, peerIndices(leaguePlayers, best.preset, models));
     const rank = percentileRank(peerCache.get(best.name)!, best.forecast.next);
     const need = 100 - rank;
-    const contractMonths = monthsUntil(market?.players.get(starter['Player ID'] ?? '')?.contract, asOf);
+    const contractMonths = d.contractMonths;
     if (contractMonths !== undefined && contractMonths <= CONTRACT_MONTHS) flags.push('contract');
     if (best.forecast.parts.age <= DECLINE_POINTS) flags.push('decline');
 

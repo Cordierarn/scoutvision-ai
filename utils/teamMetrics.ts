@@ -127,3 +127,36 @@ export function styleReliability(matches: number | null | undefined, style: stri
   if (typeof matches !== 'number' || !Number.isFinite(matches) || matches < STYLE_TREND_MATCHES) return 'insufficient';
   return matches < STYLE_MIN_MATCHES ? 'trend' : 'observed';
 }
+
+// ============================================
+// CARTE DES STYLES (ACP de scripts/models.py)
+// ============================================
+
+/**
+ * Variance expliquée par les deux axes de la carte : ACP sur les 6 indicateurs centrés-réduits
+ * de toutes les équipes-saisons (2 328 au moment de la mesure). Le pipeline ne l'exporte pas :
+ * valeurs mesurées sur les données, contrôlées par teamMetrics.test.ts quand elles sont présentes.
+ */
+export const STYLE_PCA_VARIANCE = { pc1: 0.632, pc2: 0.24 } as const;
+
+export interface StylePoint {
+  team: TeamStats;
+  kind: 'selected' | 'club' | 'same' | 'other';   // équipe-saison choisie, autres saisons du club, même style, autres
+}
+
+/**
+ * Population de la carte des styles : une équipe-saison = une observation. Saison seule : la
+ * compétition de cette saison. « Toutes les saisons » : toutes les saisons de la compétition,
+ * chaque saison d'un club étant un point distinct. Équipes sans coordonnées écartées.
+ */
+export function styleMapPopulation(team: TeamStats, teams: TeamStats[], allSeasons: boolean): StylePoint[] {
+  const style = team.Style;
+  return teams
+    .filter(t => t.competition === team.competition && (allSeasons || t.season === team.season))
+    .filter(t => teamValue(t, 'Style x') !== null && teamValue(t, 'Style y') !== null)
+    .map(t => ({
+      team: t,
+      kind: t.team_id === team.team_id && t.season === team.season ? 'selected'
+        : t.team_id === team.team_id ? 'club' : t.Style === style ? 'same' : 'other',
+    }));
+}

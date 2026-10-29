@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LineupSlot, TeamLineups } from '../services/dataLoader';
-import { isValidSlotPosition, lineupCoverage, normalizeFormation, orderFormations } from './teamLineups';
+import { formationPositions, isOutOfPosition, isValidSlotPosition, lineupCoverage, normalizeFormation, orderFormations } from './teamLineups';
 
 const slot = (n: number, x: number, y: number, players: [string, string, number][] = [[`p${n}`, `Joueur ${n}`, 3]]): LineupSlot => ({ slot: n, x, y, players });
 const eleven = (offset = 0): LineupSlot[] => Array.from({ length: 11 }, (_, i) => slot(offset + i, 0.1 + i * 0.07, (i % 4) * 0.25 + 0.1));
@@ -82,5 +82,36 @@ describe('ordre des formations', () => {
     expect(lineupCoverage(lineups, 11)).toEqual({ matchesWithLineups: 11, teamMatches: 11, shownMatches: 11, complete: true });
     expect(lineupCoverage({ matches: 30, formations: [{ formation: 'A', matches: 26, slots: [] }] }, 33))
       .toEqual({ matchesWithLineups: 30, teamMatches: 33, shownMatches: 26, complete: false });
+  });
+});
+
+describe('poste occupé dans la formation', () => {
+  const at = (n: number, x: number, y: number) => slot(n, x, y);
+  it('4-2-3-1 : gardien, latéraux, axiaux, sentinelles, ailiers, meneur, avant-centre', () => {
+    const slots = [at(1, 0.1, 0.5), at(2, 0.3, 0.1), at(3, 0.28, 0.38), at(4, 0.28, 0.62), at(5, 0.3, 0.9), at(6, 0.45, 0.35), at(7, 0.45, 0.65),
+      at(8, 0.68, 0.12), at(9, 0.66, 0.5), at(10, 0.68, 0.88), at(11, 0.86, 0.5)];
+    const p = formationPositions({ formation: '4-2-3-1', slots })!;
+    expect([...p.values()]).toEqual(['GK', 'FB', 'CB', 'CB', 'FB', 'DM', 'DM', 'W', 'AM', 'W', 'ST']);
+  });
+  it('3-4-3 : pistons aux extrémités de la ligne de 4 ; 4-3-3 : milieux centraux', () => {
+    const p343 = formationPositions({ formation: '3-4-3', slots: [at(1, 0.1, 0.5), at(2, 0.3, 0.2), at(3, 0.3, 0.5), at(4, 0.3, 0.8),
+      at(5, 0.5, 0.1), at(6, 0.5, 0.4), at(7, 0.5, 0.6), at(8, 0.5, 0.9), at(9, 0.85, 0.2), at(10, 0.87, 0.5), at(11, 0.85, 0.8)] })!;
+    expect([...p343.values()]).toEqual(['GK', 'CB', 'CB', 'CB', 'WB', 'CM', 'CM', 'WB', 'W', 'ST', 'W']);
+    const p433 = formationPositions({ formation: '4-3-3', slots: [at(1, 0.1, 0.5), at(2, 0.3, 0.1), at(3, 0.28, 0.38), at(4, 0.28, 0.62), at(5, 0.3, 0.9),
+      at(6, 0.5, 0.2), at(7, 0.48, 0.5), at(8, 0.5, 0.8), at(9, 0.85, 0.15), at(10, 0.87, 0.5), at(11, 0.85, 0.85)] })!;
+    expect([...p433.values()].slice(5, 8)).toEqual(['CM', 'CM', 'CM']);
+  });
+  it('formation incomplète ou chaîne illisible : pas de poste', () => {
+    expect(formationPositions({ formation: '4-3-3', slots: eleven().slice(0, 10) })).toBeNull();
+    expect(formationPositions({ formation: 'inconnue', slots: eleven() })).toBeNull();
+  });
+  it('hors poste seulement à deux lignes ou plus (ou gardien)', () => {
+    expect(isOutOfPosition('W', 'WB')).toBe(true);
+    expect(isOutOfPosition('FB', 'W')).toBe(true);
+    expect(isOutOfPosition('W', 'AM')).toBe(false);      // nuance de rôle
+    expect(isOutOfPosition('AM', 'CM')).toBe(false);
+    expect(isOutOfPosition('CB', 'DM')).toBe(false);
+    expect(isOutOfPosition('GK', 'CB')).toBe(true);
+    expect(isOutOfPosition(undefined, 'CB')).toBe(false);
   });
 });

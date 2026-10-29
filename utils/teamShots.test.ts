@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { ShotEvent } from '../types';
-import { matchTeams, shotSide, shotTeams, splitTeamShots, summarizeShots, topScorers } from './teamShots';
+import { DEFAULT_SHOT_FILTERS, filterShots, matchTeams, shotSide, shotTeams, splitTeamShots, summarizeShots, topScorers } from './teamShots';
 
 type Row = [string, number, string, number, number, number, string, string, string, 'h' | 'a', string, string, boolean | null];
 const shot = ([id, minute, result, X, Y, xG, player, player_id, team, h_a, situation, shotType, isOwnGoal]: Row): ShotEvent => ({
@@ -86,5 +86,16 @@ describe('buts contre son camp', () => {
     expect(summarizeShots(s.for, s.ownGoalsFor).totalGoals).toBe(32);
     expect(s.ownGoalsAgainst.length).toBe(3);
     expect(s.ownGoalsFor.length).toBe(1);
+  });
+});
+
+describe('filtres de tirs', () => {
+  const s = splitTeamShots(LE_HAVRE, 'Le Havre');
+  it('situation, hors penalty, résultat', () => {
+    expect(filterShots(s.against, { ...DEFAULT_SHOT_FILTERS, nonPenalty: true }).map(x => x.team)).toEqual(['Monaco', 'Paris FC', 'Lorient']);
+    expect(filterShots(s.against, { ...DEFAULT_SHOT_FILTERS, situation: 'Penalty' }).map(x => x.player)).toEqual(['Ignatius Ganago']);
+    expect(filterShots(s.for, { ...DEFAULT_SHOT_FILTERS, result: 'offTarget' }).map(x => x.result)).toEqual(['BlockedShot']);
+    expect(filterShots(s.for, { ...DEFAULT_SHOT_FILTERS, result: 'goal' })).toHaveLength(3);
+    expect(filterShots(s.for, DEFAULT_SHOT_FILTERS)).toEqual(s.for);
   });
 });

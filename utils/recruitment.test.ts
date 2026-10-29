@@ -6,7 +6,7 @@ import { PlacedSlot } from './lineup';
 import {
   Candidate, DEFAULT_FILTERS, Models, Target, complementFor, forecastMetric, forecastRole, leagueLevel, leagueRows,
   markEfficient, monthsUntil, peerIndices, percentileRank, positionFromSlot, rankCandidates, slotNeeds, slotPartner,
-  needOrder, squadProfile, teamRank,
+  needOrder, slotDepth, squadProfile, teamRank,
 } from './recruitment';
 
 const player = (fields: Record<string, string | number | undefined>): PlayerData => ({
@@ -267,6 +267,46 @@ describe('diagnostic de l\'équipe', () => {
       null, new Date('2026-10-20'));
     expect(need.forecast).toBeUndefined();
     expect(need.flags).toContain('noStarter');
+  });
+
+  it('slotDepth : titulaire, doublure, 3e option, rotation et signaux, sans niveau de besoin', () => {
+    const cb = (id: string, minutes: number, extra: Record<string, unknown> = {}) => player({ 'Player ID': id, 'Minutes played': minutes, ...extra });
+    const team = [cb('s1', 2500), cb('b', 1500), cb('sq', 2000), cb('old', 2200)];
+    const market = new Map([['s1', '2027-03-31'], ['b', '2029-06-30']]);
+    const depth = slotDepth([
+      placed(1, 0.3, 0.3, 's1', [['b', 4], ['x', 1]]),   // doublure b (4), 3e option x (sans données)
+      placed(2, 0.3, 0.7, 'gone', [['b', 4]]),            // titulaire sous le seuil : rotation, référence b (remplaçant de la case)
+      placed(3, 0.3, 0.5, 'old'),                         // aucune doublure
+      placed(4, 0.85, 0.5, 'absent'),                     // personne du poste dans les données
+    ], team, { contractOf: p => market.get(p['Player ID']!), asOf: new Date('2026-10-20'), declining: p => p['Player ID'] === 'old' });
+    const [a, b, c, d] = depth;
+    expect(a.options.map(o => o.lineup.id)).toEqual(['s1', 'b', 'x']);
+    expect(a.backup?.player?.['Player ID']).toBe('b');
+    expect(a.thirdOption).toMatchObject({ lineup: { id: 'x', starts: 1 } });
+    expect(a.thirdOption?.player).toBeUndefined();          // sous le seuil : données insuffisantes
+    expect(a.slotMatches).toBe(25);
+    expect(a.coverage).toBeCloseTo(5 / 25, 10);
+    expect(a.signals).toEqual(['contract']);                // contrat dans 5 mois, doublure suffisante
+    expect(b.starter?.['Player ID']).toBe('b');
+    expect(b.signals).toContain('rotation');
+    expect(c.signals).toEqual(['depth', 'decline']);
+    expect(d.signals).toEqual(['noStarter', 'depth']);
+    expect(d.starter).toBeUndefined();
+    expect(Object.keys(a)).not.toContain('level');
+    expect(Object.keys(a)).not.toContain('need');
+  });
+
+  it('slotDepth et slotNeeds partagent titulaire de référence, rotation, doublure et contrat', () => {
+    const p1 = player({ 'Player ID': 'a', 'Aerial duels won, % pct': 50 });
+    const eleven = [placed(1, 0.3, 0.5, 'a', [['b', 1]]), placed(2, 0.3, 0.7, 'gone', [['a', 2]])];
+    const market: MarketValues = { scrapedAt: '2026-10-20', players: new Map([['a', { value: 1e6, contract: '2027-01-31' }]]) };
+    const needs = slotNeeds(eleven, [p1], [p1], { curves: null, transfer: null }, market, new Date('2026-10-20'));
+    const depth = slotDepth(eleven, [p1], { contractOf: p => market.players.get(p['Player ID']!)?.contract, asOf: new Date('2026-10-20') });
+    needs.forEach((n, i) => {
+      expect(n.starter?.['Player ID']).toBe(depth[i].starter?.['Player ID']);
+      expect(n.contractMonths).toBe(n.starter ? depth[i].contractMonths : undefined);
+      (['depth', 'rotation', 'contract'] as const).forEach(f => expect(n.flags.includes(f)).toBe(depth[i].signals.includes(f)));
+    });
   });
 
   it('needOrder : prioritaires, puis à renforcer, puis solides', () => {

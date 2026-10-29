@@ -19,6 +19,7 @@ import { DEFAULT_ROLE_PRESETS, RolePreset, presetWeights, presetsForPosition } f
 import { placeEleven } from '../utils/lineup';
 import { orderFormations } from '../utils/teamLineups';
 import { teamCohort } from '../utils/teamMetrics';
+import { isSeasonInProgress, resolveTeamLeague } from '../utils/teamContext';
 import {
   Candidate, CandidateFlag, DEFAULT_FILTERS, LeagueScope, Models, NeedFlag, NeedLevel, SearchFilters, SlotNeed,
   Target, complementFor, forecastRole, leagueLevel, leagueRows, needOrder as orderNeeds, peerIndices, rankCandidates,
@@ -26,14 +27,14 @@ import {
 } from '../utils/recruitment';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
 import { CompetitionBadge, PlayerAvatar, TeamLine } from './Media';
-import { Delta, EmptyState, LegendItem, Panel, PercentileValue, Skeleton, Stat } from './ui';
+import { SquadProfilePanel } from './SquadProfile';
+import { Delta, EmptyState, Panel, PercentileValue, Skeleton, Stat } from './ui';
 import { BRAND, CONTEXT, DIVERGING, INK, STATUS as STATUS_COLORS } from '../theme/charts';
 
 // Couleurs des graphiques (theme/charts) : le candidat en cyan, le titulaire et les autres en gris
 // de contexte, paire divergente cyan / rouge autour de la médiane ; palette de statut réservée aux
 // niveaux de besoin (toujours avec icône et libellé)
 const BLUE = BRAND;
-const RED = DIVERGING.below;
 // « À évaluer » n'est pas un statut : icône neutre
 const STATUS: Record<NeedLevel, string> = { high: STATUS_COLORS.critical, unknown: STATUS_COLORS.neutral, medium: STATUS_COLORS.warning, low: STATUS_COLORS.good };
 
@@ -134,13 +135,6 @@ const freshMemory = (inProgress: boolean): PanelMemory => ({
   filters: { ...DEFAULT_FILTERS, ...(inProgress ? { minMinutes: IN_PROGRESS_MIN_MINUTES } : {}) }, sort: 'next',
 });
 
-/**
- * La saison d'une équipe est-elle la saison en cours (la plus récente des données) ?
- */
-function isSeasonInProgress(season: string | undefined): boolean {
-  const seasons = dataLoader.getCachedIndex()?.seasons ?? [];
-  return season !== undefined && seasons[seasons.length - 1]?.id === season;
-}
 
 // ============================================
 // PETITS COMPOSANTS
@@ -212,24 +206,6 @@ const NeedRow: React.FC<{ need: SlotNeed; matches: number; selected: boolean; on
         )}
       </span>
     </button>
-  );
-};
-
-const DivergingRow: React.FC<{ label: string; rank: number; detail: string }> = ({ label, rank, detail }) => {
-  const above = rank >= 50;
-  const width = Math.abs(rank - 50);
-  return (
-    <div className="grid grid-cols-[7.5rem_1fr_3rem] items-center gap-3" title={detail}>
-      <span className="text-xs text-ink-2 truncate">{label}</span>
-      <div className="relative h-2 bg-raised rounded-sm">
-        <div className="absolute -inset-y-0.5 left-1/2 w-px bg-ink-4" />
-        <div
-          className={`absolute inset-y-0 ${above ? 'left-1/2 rounded-r-sm' : 'right-1/2 rounded-l-sm'}`}
-          style={{ width: `${width}%`, backgroundColor: above ? BLUE : RED }}
-        />
-      </div>
-      <span className="text-xs text-ink-2 text-right num">{ordinal(rank)}</span>
-    </div>
   );
 };
 
@@ -544,36 +520,9 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
   }, []);
 
   // Équipe : son championnat (une coupe d'Europe renvoie au championnat de l'équipe)
-  const team = useMemo(() => {
-    const first = queryService.getTeamPlayers(teamKey)[0];
-    if (!first?.['Team ID']) return null;
-    const season = getPlayerSeason(first);
-    const isLeague = (c: string) => (dataLoader.getCompetition(c)?.type ?? 'league') === 'league';
-    const seasonRows = playerData.filter(p => getPlayerSeason(p) === season);
-    let competition = first.Competition;
-    const fromCup = !competition || !isLeague(competition);
-    if (fromCup) {
-      const minutes = new Map<string, number>();
-      seasonRows.forEach(p => {
-        if (p['Team ID'] === first['Team ID'] && p.Competition && isLeague(p.Competition)) {
-          minutes.set(p.Competition, (minutes.get(p.Competition) ?? 0) + (Number(p['Minutes played']) || 0));
-        }
-      });
-      competition = [...minutes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    }
-    if (!competition) return { missingLeague: true as const, name: first.Team, cup: first.Competition };
-    const info = dataLoader.getCompetition(competition);
-    return {
-      missingLeague: false as const,
-      teamId: first['Team ID'], name: first.Team, logo: first['Team logo'] as string | undefined,
-      season, competition, leagueName: info?.name ?? competition,
-      tier: info?.tier ?? (typeof first['League tier'] === 'number' ? first['League tier'] : 2),
-      fromCup, cup: first.Competition, seasonRows, isLeague,
-      inProgress: isSeasonInProgress(season),
-    };
-  }, [teamKey, playerData]);
+  const team = useMemo(() => resolveTeamLeague(teamKey, playerData), [teamKey, playerData]);
 
-  const ready = team && !team.missingLeague ? team : null;
+  const ready = team && team.missingLeague === false ? team : null;
   const fewMinutes = ready?.inProgress ? IN_PROGRESS_FEW_MINUTES : FEW_MINUTES;
 
   useEffect(() => {
@@ -779,25 +728,7 @@ const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ teamKey, playerData
         </Card>
 
         <div className="xl:col-span-5 space-y-4">
-          <Card
-            title="Profil de l'effectif"
-            subtitle={`Rang parmi les équipes de ${ready!.leagueName} : moyenne des percentiles des joueurs (chacun comparé à son rôle), pondérée par les minutes.`}
-          >
-            {profile.length > 0 ? (
-              <>
-                <div className="flex gap-4 mb-2.5">
-                  <LegendItem color={BLUE} shape="bar">Au-dessus de la médiane</LegendItem>
-                  <LegendItem color={RED} shape="bar">En dessous</LegendItem>
-                </div>
-                <div className="space-y-2">
-                  {profile.map(d => (
-                    <DivergingRow key={d.key} label={d.label} rank={d.rank}
-                      detail={`${d.label} : moyenne ${round(d.value)}, rang ${ordinal(d.rank)} percentile sur ${d.teams} équipes`} />
-                  ))}
-                </div>
-              </>
-            ) : <p className="text-xs text-ink-4">Pas assez de données de joueurs.</p>}
-          </Card>
+          <SquadProfilePanel profile={profile} leagueName={ready!.leagueName} />
           {output.length > 0 && (
             <div className="sv-panel grid grid-cols-2 md:grid-cols-4 xl:grid-cols-2 divide-x divide-line [&>*:nth-child(n+3)]:xl:border-t [&>*:nth-child(3)]:xl:border-l-0">
               {output.map(o => (
