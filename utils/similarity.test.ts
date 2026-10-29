@@ -5,6 +5,7 @@ import {
   rolePairs, scoreFromComponents, similarity, similarityComponents,
 } from './similarity';
 import { SIMILARITY_METRICS } from './positionMetrics';
+import { comparisonEntry, resolveSelection } from './comparison';
 
 const ST = SIMILARITY_METRICS.FWD;
 const row = (over: Record<string, unknown> = {}): PlayerData => ({
@@ -48,6 +49,15 @@ describe('score de similarité', () => {
     expect(r.score).toBeCloseTo(100 - 40 / 11, 10);
   });
 
+  it('frontière exacte : 8 métriques → score, 7 → données insuffisantes', () => {
+    const cand = withPct(full(60), { 'Player ID': 'p2' });
+    const eight = withPct(Object.fromEntries(ST.slice(0, 8).map(k => [k, 50])));
+    const seven = withPct(Object.fromEntries(ST.slice(0, 7).map(k => [k, 50])));
+    expect(MIN_COVERAGE).toBe(8);
+    expect(similarity(eight, cand)).toMatchObject({ covered: 8, score: 90 });
+    expect(similarity(seven, cand)).toMatchObject({ covered: 7, score: null });
+  });
+
   it('couverture insuffisante → pas de score', () => {
     const few = Object.fromEntries(ST.slice(0, MIN_COVERAGE - 1).map(k => [k, 50]));
     expect(similarity(withPct(few), withPct(full(50), { 'Player ID': 'p2' })).score).toBeNull();
@@ -88,6 +98,11 @@ describe('candidats et filtres', () => {
     expect(isCandidate(ref, withPct(full(50), { Competition: 'UCL', League: 'UCL 2026-27' }))).toBe(false);
     expect(isCandidate(ref, withPct(full(50), { League: 'Ligue 1 2025-26', Season: '2025-26' }))).toBe(true);
     expect(isCandidate(ref, withPct(full(50), { 'Player ID': 'p2' }))).toBe(true);
+    // même saison, autre club (joueur multi-clubs) : exclu ; autre saison, même club et compétition : candidat
+    expect(isCandidate(ref, withPct(full(50), { 'Team ID': 't2', Team: 'Club B' }))).toBe(false);
+    expect(isCandidate(ref, withPct(full(50), { League: 'Ligue 1 2024-25', Season: '2024-25' }))).toBe(true);
+    // une ligne ne se compare jamais à elle-même, quelle que soit la saison chargée
+    expect(isCandidate(ref, { ...ref })).toBe(false);
   });
 
   it('filtres : poste, âge, minutes, compétition, niveau ; comptage des exclus pour couverture', () => {
@@ -147,5 +162,18 @@ describe('composantes de la paire', () => {
     const c = similarityComponents(withPct(full(50)), withPct(full(50), { 'Player ID': 'p2' }));
     expect(c.map(x => x.key)).toEqual(ST);
     expect(c[0].label).toBe('Buts par 90');
+  });
+});
+
+describe('transmission à la Comparaison', () => {
+  it('l\'entrée désigne la ligne joueur-saison-club-compétition exacte, pas seulement le joueur', () => {
+    const ref = withPct(full(50));
+    const sameSeasonOtherClub = withPct(full(50), { 'Team ID': 't2', Team: 'Club B' });
+    const otherSeason = withPct(full(50), { League: 'Ligue 1 2024-25', Season: '2024-25' });
+    const cup = withPct(full(50), { Competition: 'UCL', League: 'UCL 2026-27' });
+    const data = [cup, otherSeason, sameSeasonOtherClub, ref];
+    expect(resolveSelection([comparisonEntry(ref), comparisonEntry(otherSeason)], data).players).toEqual([ref, otherSeason]);
+    expect(resolveSelection([comparisonEntry(sameSeasonOtherClub)], data).players).toEqual([sameSeasonOtherClub]);
+    expect(resolveSelection([comparisonEntry(cup)], data).players).toEqual([cup]);
   });
 });

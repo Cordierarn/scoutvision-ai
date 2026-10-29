@@ -14,7 +14,7 @@ import { PlayerData, getPlayerSeason, getPlayerSeasonTag } from '../types';
 import { dataLoader } from '../services/dataLoader';
 import { positionLabel, positionName } from '../utils/labels';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
-import { PIPELINE_PERCENTILE_HELP, roleIndexHelp } from '../utils/sampleContext';
+import { roleIndexHelp } from '../utils/sampleContext';
 import { formatEuro } from '../utils/format';
 import { formatMetricValue, metricValue, radarAxisLabel } from '../utils/metricFormat';
 import { LOWER_IS_BETTER } from '../utils/metricDirection';
@@ -28,7 +28,7 @@ import { isRowActivation } from '../utils/rowKeys';
 import { PlayerAvatar, TeamLogo, CompetitionBadge, TeamLine } from './Media';
 import { PlayerSearch } from './PlayerSearch';
 import { prepareComparison } from './PlayerComparison';
-import { PageHeader, Panel, EmptyState, PercentileValue, PolarTick, LegendItem, IndexBar, InfoTip } from './ui';
+import { PageHeader, Panel, EmptyState, PolarTick, LegendItem, IndexBar, InfoTip } from './ui';
 import { BRAND, SERIES, polarGridProps } from '../theme/charts';
 
 interface SimilarityFinderProps {
@@ -196,14 +196,14 @@ const CandidateDetail: React.FC<{ reference: PlayerData; result: SimilarityResul
             {LOWER_IS_BETTER.has(x.key) && <span className="text-2xs text-ink-3"> · moins = mieux</span>}
             <span className="block text-2xs text-ink-3 num" title="Valeurs brutes">{formatMetricValue(x.key, metricValue(reference, x.key))} ↔ {formatMetricValue(x.key, metricValue(c, x.key))}</span>
           </span>
-          <span className="shrink-0 inline-flex items-center gap-1.5 num"><PercentileValue value={x.pRef as number} /><span className="text-ink-4">↔</span><PercentileValue value={x.pCandidate as number} /><span className="ml-1 text-2xs text-ink-3 w-8 text-right">Δ{Math.round(x.delta as number)}</span></span>
+          <span className="shrink-0 inline-flex items-center gap-1.5 num text-xs font-semibold text-ink"><span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: BRAND }} aria-hidden />P{Math.round(x.pRef as number)}<span className="text-ink-4 font-normal">↔</span><span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: CANDIDATE }} aria-hidden />P{Math.round(x.pCandidate as number)}<span className="ml-1 text-2xs font-normal text-ink-3 w-8 text-right">Δ{Math.round(x.delta as number)}</span></span>
         </li>
       ))}
     </ol>
   );
   return (
     <div className="space-y-4" aria-label={`Détail de ${c.Player}`}>
-      <Panel title={<>Similarité globale <InfoTip align="end" text={`100 − écart moyen de percentile sur les métriques du poste disponibles chez les deux joueurs (${MIN_COVERAGE}/${result.total} au minimum). Pxx : ${PIPELINE_PERCENTILE_HELP}`} /></>} icon={Scale}
+      <Panel title={<>Similarité globale <InfoTip align="end" text={`100 − écart moyen de percentile sur les métriques comparables du poste (${MIN_COVERAGE}/${result.total} au minimum).\nLes percentiles restent relatifs au poste, au niveau de compétition et à la saison.`} /></>} icon={Scale}
         right={<div className="flex items-center gap-2">{onCompare && <button onClick={onCompare} className="sv-btn sv-btn-secondary sv-btn-sm"><ArrowLeftRight className="w-3.5 h-3.5" /> Comparer</button>}<button onClick={onOpen} className="sv-btn sv-btn-secondary sv-btn-sm" aria-label={`Voir la fiche de ${c.Player}`}>Voir la fiche</button></div>}>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -225,7 +225,7 @@ const CandidateDetail: React.FC<{ reference: PlayerData; result: SimilarityResul
       </Panel>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <Panel className="xl:col-span-7" title="Pourquoi similaire ?" icon={GitCompare} subtitle="Les composantes mêmes du score : écarts de percentile les plus faibles et les plus forts.">
+        <Panel className="xl:col-span-7" title="Pourquoi similaire ?" icon={GitCompare} subtitle="Les composantes mêmes du score : écarts de percentile les plus faibles et les plus forts. Les couleurs désignent les joueurs, pas une qualité.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
             <div><div className="sv-label mb-1">Plus proches</div>{explain(closest)}</div>
             <div><div className="sv-label mb-1">Plus différents</div>{explain(furthest)}</div>
