@@ -241,7 +241,7 @@ export const PercentileValue: React.FC<{ value: number | undefined; className?: 
 export const PercentileRow: React.FC<{
   label: React.ReactNode;
   value?: React.ReactNode;
-  percentile: number;
+  percentile: number | undefined;   // undefined : donnée absente, affichée « N/D » sans barre
   title?: string;
   active?: boolean;          // ligne mise en évidence (lien avec un graphique)
   className?: string;
@@ -249,8 +249,10 @@ export const PercentileRow: React.FC<{
   <div className={`grid grid-cols-[minmax(0,1fr)_3rem_2.75rem] sm:grid-cols-[minmax(0,1fr)_3.5rem_minmax(4rem,7rem)_2.75rem] items-center gap-2 sm:gap-2.5 h-6 text-xs rounded-sm ${active ? 'bg-raised' : ''} ${className}`} title={title} {...events}>
     <span className={`truncate ${active ? 'text-accent' : 'text-ink-2'}`}>{label}</span>
     <span className="text-right text-ink-3 num">{value}</span>
-    <PercentileBar value={percentile} className="hidden sm:block" />
-    <span className="text-right"><PercentileValue value={percentile} /></span>
+    {percentile === undefined
+      ? <div className="hidden sm:block h-1.5 bg-raised rounded-sm" aria-hidden />
+      : <PercentileBar value={percentile} className="hidden sm:block" />}
+    <span className="text-right">{percentile === undefined ? <span className="text-ink-4">N/D</span> : <PercentileValue value={percentile} />}</span>
   </div>
 );
 

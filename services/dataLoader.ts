@@ -109,7 +109,7 @@ export interface TransferModel {
   validation: TransferValidation | null;
 }
 
-/** Valeur et contrat actuels (Transfermarkt), valables quelle que soit la saison analysée */
+/** Valeur, contrat et estimation à la date du relevé (instantané Transfermarkt de la saison en cours) : ne vaut pas pour une saison passée (recruitment.ts, seasonMarket) */
 export interface MarketEntry {
   value?: number;
   contract?: string;     // "2027-06-30"

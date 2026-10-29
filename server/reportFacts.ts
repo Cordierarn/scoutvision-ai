@@ -149,6 +149,14 @@ export function buildReportFacts(player: PlayerRow, options: ReportOptions = {})
 // PROMPT
 // ============================================
 
+/**
+ * Version méthodologique du prompt, enregistrée avec chaque synthèse. À changer à la main quand
+ * une modification du prompt ou des faits justifie de distinguer les rapports (v1 : ancien rapport
+ * à titres anglais ; v2 : faits structurés, 5 sections françaises, règles de grounding).
+ * Jamais dérivée de la date.
+ */
+export const PROMPT_VERSION = 'scout-report-v2';
+
 const LANGUAGE_NAMES = { en: 'English', fr: 'French', es: 'Spanish', de: 'German' } as const;
 
 // Titres imposés des 5 sections

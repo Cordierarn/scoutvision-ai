@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PlayerData, ShotEvent, extractSeason, getPlayerSeason, getSeasonShortLabel, getSeasonLabel, getPlayerSeasonTag } from '../types';
+import { PlayerData, ShotEvent, extractSeason, getPlayerSeason, getPlayerSeasonId, getSeasonShortLabel, getSeasonLabel, getPlayerSeasonTag } from '../types';
 import { useShots } from '../hooks/useShots';
 import { useAsyncData } from '../hooks/useAsyncData';
 import PlayerHeatmap from './PlayerHeatmap';
@@ -9,12 +9,14 @@ import { ImpactPanel, DevelopmentPanel, buildReportInsights } from './PlayerInsi
 import { dataLoader } from '../services/dataLoader';
 import { ArrowLeft, Sparkles, MapPin, Footprints, Ruler, FileText, Download, Settings2, X, Check, Search, Award, Crosshair, TrendingUp, TrendingDown, Minus, BarChart3, Radar as RadarIcon, ChartBarBig } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
-import { generateScoutReport, reportFooterLabel, ScoutReportError, ScoutReportMeta } from '../services/scoutReportService';
+import { ScoutReportError } from '../services/scoutReportService';
+import { findReportForPlayer, subscribeReports } from '../services/scoutReportStore';
+import { ScoutReportRecord } from '../types/scoutReport';
+import { draftDossier, generateAndStore } from './reports/generateReport';
+import { downloadReportPdf } from '../utils/scoutReportPdf';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
 import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { getFlagUrl } from '../utils/flags';
 import { TeamLogo, CompetitionBadge, CountryFlag, PlayerAvatar } from './Media';
 import { Panel, Stat, PercentileRow, PercentileValue, PercentileLegend, LegendItem, EmptyState, Delta, PolarTick, InfoTip, LoadError, SkeletonBlock, IndexBar } from './ui';
@@ -72,12 +74,18 @@ const COMPARISON_SHORT_LABELS: Record<ComparisonMode, string> = {
 };
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) => {
-  const [report, setReport] = useState<string | null>(null);
-  const [reportMeta, setReportMeta] = useState<ScoutReportMeta | null>(null);
+  // Dossier de scouting enregistré pour cette ligne joueur-saison (synthèses IA versionnées, observations)
+  const [record, setRecord] = useState<ScoutReportRecord | undefined>(() => findReportForPlayer(getPlayerSeasonId(player)));
+  const [summaryId, setSummaryId] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('position');
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  // Boutons désactivés pendant l'action : le focus leur revient ensuite au lieu de retomber sur le document
+  const generateRef = useRef<HTMLButtonElement>(null);
+  const exportRef = useRef<HTMLButtonElement>(null);
+  const refocus = (ref: React.RefObject<HTMLButtonElement | null>) => requestAnimationFrame(() => { if (document.activeElement === document.body) ref.current?.focus(); });
   
   // Get position-based default metrics
   const defaultMetrics = useMemo(() => {
@@ -95,12 +103,19 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
   const radarCompact = radarWidth > 0 && radarWidth < 260;
   const [metricSearch, setMetricSearch] = useState('');
   
-  // Rapport propre au joueur affiché
+  // Dossier propre à la ligne joueur-saison affichée, suivi des modifications du stockage local
   useEffect(() => {
-    setReport(null);
-    setReportMeta(null);
+    const id = getPlayerSeasonId(player);
+    const sync = () => setRecord(findReportForPlayer(id));
+    sync();
+    setSummaryId(null);
     setReportError(null);
+    setExportError(null);
+    return subscribeReports(sync);
   }, [player]);
+  const summaries = record?.generatedSummaries ?? [];
+  const summary = summaries.find(v => v.id === summaryId) ?? summaries[summaries.length - 1];
+  const report = summary?.content ?? null;
 
   // Initialize metrics when player changes
   useEffect(() => {
@@ -109,8 +124,6 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
     setActiveMetrics(available.length > 0 ? available : ['xG', 'xA', 'Goals', 'Assists']);
   }, [player]);
   
-  const printRef = useRef<HTMLDivElement>(null);
-
   // Position category for display
   const positionCategory = useMemo(() => {
     const cat = getPositionCategory(player.Position);
@@ -302,84 +315,31 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
     setReportError(null);
     try {
       const curves = await dataLoader.loadAgeCurves().catch(() => null);
-      // Tirs attendus s'ils sont encore en chargement ; omis du rapport s'ils sont indisponibles (jamais « 0 tir » à tort)
-      const reportShots = player.Competition
-        ? await dataLoader.loadShots(getPlayerSeason(player), player.Competition)
-          .then(all => all.filter(s => isPlayerShot(s, player)))
-          .catch(() => null)
-        : null;
-      const reportGoals = reportShots?.filter(s => s.result === 'Goal').length ?? 0;
-      const reportXG = reportShots?.reduce((acc, s) => acc + s.xG, 0) ?? 0;
-      const percentiles = Object.fromEntries(
-        Object.entries(player)
-          .filter(([key, value]) => key.endsWith(' pct') && typeof value === 'number')
-          .map(([key, value]) => [key.slice(0, -4), value as number]));
-      const result = await generateScoutReport(player, {
-        language: 'fr',
-        percentileProfile: { player, percentiles, zScores: {}, averages: {} },
-        bestRoles: bestRoles.map(r => ({ role: r.name, normalizedScore: r.index })),
-        shotStats: reportShots ? {
-          total: reportShots.length, goals: reportGoals, xG: reportXG, xGDiff: reportGoals - reportXG,
-          onTarget: reportShots.filter(s => s.result === 'Goal' || s.result === 'SavedShot').length,
-          blocked: reportShots.filter(s => s.result === 'BlockedShot').length,
-          conversion: reportShots.length > 0 ? (reportGoals / reportShots.length) * 100 : 0,
-          avgXG: reportShots.length > 0 ? reportXG / reportShots.length : 0,
-        } : undefined,
-        insights: buildReportInsights(player, curves, developmentMetrics),
-        seasonInProgress,
-      });
-      setReport(result.report);
-      setReportMeta(result.meta);
+      // Synthèse rédigée par le serveur puis enregistrée comme nouvelle version du dossier local
+      const outcome = await generateAndStore(player, curves);
+      setRecord(outcome.record);
+      setSummaryId(outcome.summary.id);
     } catch (error) {
       setReportError(error instanceof ScoutReportError ? error.message : 'Le rapport n\'a pas pu être généré. Réessayez.');
     } finally {
       setLoadingReport(false);
+      refocus(generateRef);
     }
   };
 
+  // PDF structuré (texte sélectionnable) du dossier ; sans dossier enregistré, à partir d'un snapshot non enregistré
   const handleExportPDF = async () => {
-    if (!printRef.current) return;
     setIsExporting(true);
-
+    setExportError(null);
     try {
-      const element = printRef.current;
-      const canvas = await html2canvas(element, {
-        scale: 2, // Higher resolution
-        useCORS: true,
-        backgroundColor: '#0B111A', // fond de l'application
-        logging: false,
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      });
-
-      const imgWidth = 210; // A4 width in mm
-      const pageHeight = 297; // A4 height in mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      // Handle multi-page content if the report is long
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save(`${player.Player}_ScoutReport.pdf`);
+      const source = record ?? await draftDossier(player, await dataLoader.loadAgeCurves().catch(() => null));
+      await downloadReportPdf(source, { summaryId: summary?.id, dataGeneratedAt: dataIndex?.generatedAt });
     } catch (error) {
       console.error('Échec de l\'export PDF :', error);
-      alert('Échec de l\'export PDF');
+      setExportError('Échec de l\'export PDF. Réessayez.');
     } finally {
       setIsExporting(false);
+      refocus(exportRef);
     }
   };
 
@@ -453,16 +413,18 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
         <button onClick={onBack} className="sv-btn sv-btn-ghost -ml-2">
           <ArrowLeft className="w-3.5 h-3.5" /> Retour
         </button>
-        <button onClick={handleExportPDF} disabled={isExporting} className="sv-btn sv-btn-secondary">
-          {isExporting
-            ? <span className="w-3.5 h-3.5 border-2 border-ink-4 border-t-ink rounded-full animate-spin" />
-            : <Download className="w-3.5 h-3.5" />}
-          {isExporting ? 'Export en cours…' : 'Exporter en PDF'}
-        </button>
+        <div className="flex items-center gap-3">
+          {exportError && <p role="alert" className="text-xs text-warn">{exportError}</p>}
+          <button ref={exportRef} onClick={handleExportPDF} disabled={isExporting} className="sv-btn sv-btn-secondary">
+            {isExporting
+              ? <span className="w-3.5 h-3.5 border-2 border-ink-4 border-t-ink rounded-full animate-spin" />
+              : <Download className="w-3.5 h-3.5" />}
+            {isExporting ? 'Export en cours…' : 'Exporter en PDF'}
+          </button>
+        </div>
       </div>
 
-      {/* Zone exportée en PDF */}
-      <div ref={printRef} className="space-y-4 bg-canvas">
+      <div className="space-y-4 bg-canvas">
 
       {/* ===== Identité et indicateurs clés ===== */}
       <section className="sv-panel">
@@ -777,10 +739,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
         {/* Rapport IA : fonctionnalité secondaire, en appui des statistiques ScoutVision */}
         <Panel className="xl:col-span-3 flex flex-col" bodyClassName="flex-1 min-h-0 flex flex-col" title="Rapport rédigé" icon={FileText}
           subtitle="Synthèse textuelle générée par IA (Gemini) à partir des statistiques de cette fiche. À relire : elle ne remplace pas l'analyse."
-          right={!report && (
-            <button onClick={handleGenerateReport} disabled={loadingReport} className="sv-btn sv-btn-secondary sv-btn-sm">
+          right={(
+            <button ref={generateRef} onClick={handleGenerateReport} disabled={loadingReport} className="sv-btn sv-btn-secondary sv-btn-sm">
               {loadingReport ? <span className="w-3 h-3 border-2 border-ink-4 border-t-ink rounded-full animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              {loadingReport ? 'Rédaction…' : 'Générer'}
+              {loadingReport ? 'Rédaction…' : report ? 'Nouvelle version' : 'Générer'}
             </button>
           )}>
           {report ? (
@@ -798,9 +760,20 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
               >
                 {report}
               </ReactMarkdown>
-              <div className="mt-4 pt-3 border-t border-line flex items-center justify-between text-2xs text-ink-4">
-                <span>{reportFooterLabel(reportMeta)}</span>
-                <span>{new Date(reportMeta?.generatedAt ?? Date.now()).toLocaleDateString('fr-FR')}</span>
+              {reportError && <p role="alert" className="mt-3 text-xs text-warn">{reportError}</p>}
+              <div className="mt-4 pt-3 border-t border-line flex flex-wrap items-center justify-between gap-2 text-2xs text-ink-4">
+                <span>
+                  Généré par {summary?.model ?? 'IA'} · {new Date(summary?.generatedAt ?? Date.now()).toLocaleDateString('fr-FR')} · prompt {summary?.promptVersion ?? 'inconnu'}
+                  · enregistré dans le dossier de scouting
+                </span>
+                {summaries.length > 1 && (
+                  <label className="flex items-center gap-1.5">
+                    Version
+                    <select value={summary?.id ?? ''} onChange={e => setSummaryId(e.target.value)} className="sv-select sv-select-sm" aria-label="Version de la synthèse">
+                      {summaries.map((v, i) => <option key={v.id} value={v.id}>v{i + 1} · {new Date(v.generatedAt).toLocaleDateString('fr-FR')} · {v.model}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
             </div>
           ) : loadingReport ? (

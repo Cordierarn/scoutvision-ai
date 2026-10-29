@@ -6,17 +6,15 @@
  * Aucun percentile recalculé, aucune donnée absente lue comme 0, aucun score agrégé.
  */
 
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Search, X, Settings2, Users, Info, Trash2, Radar as RadarIcon, Scale, Table2, RotateCcw } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
-import { PlayerData, getPlayerSeason, getPlayerSeasonId, getPlayerSeasonTag } from '../types';
-import { queryService } from '../services/queryService';
-import { dataLoader } from '../services/dataLoader';
+import { PlayerData, getPlayerSeasonId, getPlayerSeasonTag } from '../types';
 import { getMetricKeys } from '../utils/positionMetrics';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
 import { groupMetrics, METRIC_CATEGORIES } from '../utils/metricCategories';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
-import { isSeasonInProgress, PIPELINE_PERCENTILE_HELP, roleIndexHelp } from '../utils/sampleContext';
+import { PIPELINE_PERCENTILE_HELP, roleIndexHelp } from '../utils/sampleContext';
 import { formatEuro } from '../utils/format';
 import { formatMetricValue, isSeasonTotal, metricValue, percentileOf, radarAxisLabel } from '../utils/metricFormat';
 import { LOWER_IS_BETTER, metricDirection } from '../utils/metricDirection';
@@ -25,6 +23,8 @@ import {
   distinctNames, hasDetailedStats, mainDifferences, radarAxes, referenceGroups, resolveSelection,
 } from '../utils/comparison';
 import { PlayerAvatar, TeamLogo, CompetitionBadge } from './Media';
+import { PlayerSearch } from './PlayerSearch';
+import { competitionName, isCup, minutesOf, seasonInProgress } from '../utils/playerContext';
 import { PageHeader, Panel, EmptyState, PercentileValue, PolarTick, LegendItem, IndexBar, InfoTip } from './ui';
 import { SERIES, polarGridProps } from '../theme/charts';
 
@@ -44,109 +44,15 @@ const memory = {
   scrollTop: 0,
 };
 
-const GOALKEEPING = new Set(METRIC_CATEGORIES.find(c => c.id === 'goalkeeping')?.keys ?? []);
-const INTEGER = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
-
-const competitionInfo = (p: PlayerData) => dataLoader.getCompetition(p.Competition);
-const isCup = (p: PlayerData) => { const info = competitionInfo(p); return !!info && info.type !== 'league'; };
-const competitionName = (p: PlayerData) => competitionInfo(p)?.name ?? p.Competition ?? 'Compétition inconnue';
-const minutesOf = (p: PlayerData) => metricValue(p, 'Minutes played');
-
-/** Saison pas terminée à la date des données (même règle que la fiche joueur) */
-function seasonInProgress(p: PlayerData): boolean {
-  const index = dataLoader.getCachedIndex();
-  const seasons = index?.seasons ?? [];
-  const season = getPlayerSeason(p);
-  return seasons[seasons.length - 1]?.id === season && isSeasonInProgress(season, p.Season, index?.generatedAt);
+/** Prépare la comparaison depuis une autre page (Joueurs similaires) : remplace la sélection, garde les métriques des postes */
+export function prepareComparison(players: PlayerData[]): void {
+  memory.entries = players.slice(0, MAX_COMPARED).map(comparisonEntry);
+  memory.customMetrics = null;
+  memory.scrollTop = 0;
 }
 
-// ============================================
-// RECHERCHE : combobox / listbox
-// ============================================
-
-const PlayerSearch: React.FC<{
-  selectedIds: Set<string>;
-  count: number;
-  onAdd: (p: PlayerData) => void;
-  inputRef: React.RefObject<HTMLInputElement>;
-}> = ({ selectedIds, count, onAdd, inputRef }) => {
-  const uid = useId();
-  const listId = `${uid}-list`;
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(-1);
-  const [feedback, setFeedback] = useState('');
-
-  const results = useMemo(() => (query.trim() ? queryService.searchPlayers(query.trim(), { limit: 12 }) : []), [query]);
-  const showList = open && query.trim().length > 0;
-
-  const choose = (i: number) => {
-    const p = results[i];
-    if (!p) return;
-    if (selectedIds.has(getPlayerSeasonId(p))) { setFeedback(`${p.Player} (${p.Team}, ${getPlayerSeasonTag(p)}) est déjà dans la comparaison.`); setActive(i); return; }
-    setQuery(''); setOpen(false); setActive(-1);
-    setFeedback(`${p.Player} ajouté (${count + 1}/${MAX_COMPARED}).`);
-    onAdd(p);
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive(a => Math.min(a + 1, results.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); setActive(a => Math.max(a - 1, 0)); }
-    else if (e.key === 'Enter') { if (showList && results.length) { e.preventDefault(); choose(active >= 0 ? active : 0); } }
-    else if (e.key === 'Escape') { e.preventDefault(); setQuery(''); setOpen(false); setActive(-1); setFeedback(''); }
-  };
-
-  return (
-    <div className="rounded-lg border border-dashed border-line-strong p-2.5 flex flex-col justify-center"
-      onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false); }}>
-      <label htmlFor={`${uid}-input`} className="sv-label mb-1.5 flex items-center justify-between">
-        Ajouter un joueur <span className="num normal-case tracking-normal font-normal text-ink-4">{count}/{MAX_COMPARED}</span>
-      </label>
-      <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-4 pointer-events-none" aria-hidden />
-        <input ref={inputRef} id={`${uid}-input`} type="text" autoComplete="off" placeholder="Nom du joueur ou du club"
-          className="sv-input pl-8" role="combobox" aria-autocomplete="list" aria-expanded={showList} aria-controls={listId}
-          aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
-          value={query} onKeyDown={onKeyDown} onFocus={() => setOpen(true)}
-          onChange={e => { setQuery(e.target.value); setOpen(true); setActive(-1); setFeedback(''); }} />
-        {showList && (
-          <ul id={listId} role="listbox" aria-label="Joueurs trouvés" className="sv-menu absolute left-0 right-0 top-full mt-1 z-30 max-h-80 overflow-y-auto py-1">
-            {results.map((p, i) => {
-              const id = getPlayerSeasonId(p);
-              const duplicate = selectedIds.has(id);
-              const detailed = hasDetailedStats(p);
-              const minutes = minutesOf(p);
-              return (
-                <li key={id} id={`${listId}-${i}`} role="option" aria-selected={i === active} aria-disabled={duplicate || undefined}
-                  onMouseDown={e => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => choose(i)}
-                  className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer ${i === active ? 'bg-line-strong/50' : ''}`}>
-                  <PlayerAvatar player={p} size="xs" />
-                  <span className="min-w-0 flex-1">
-                    <span className={`block text-xs ${duplicate ? 'text-ink-3' : 'text-ink'}`}>{p.Player || 'Inconnu'}</span>
-                    <span className="block text-2xs text-ink-3 leading-snug">
-                      {p.Team} · {competitionName(p)} · {positionLabel(p.Position)} · {minutes !== null ? `${INTEGER.format(minutes)} min` : 'minutes inconnues'}
-                    </span>
-                    {(duplicate || !detailed) && (
-                      <span className="block text-2xs text-ink-2 mt-0.5">
-                        {duplicate ? 'Déjà dans la comparaison' : 'Sans statistiques détaillées sur cette ligne'}
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex flex-col items-end gap-0.5 shrink-0">
-                    <span className="sv-tag">{getPlayerSeasonTag(p)}</span>
-                    {isCup(p) && <span className="sv-tag !font-normal">Coupe</span>}
-                  </span>
-                </li>
-              );
-            })}
-            {results.length === 0 && <li role="presentation" className="px-3 py-2 text-xs text-ink-3">Aucun joueur trouvé dans la saison chargée</li>}
-          </ul>
-        )}
-      </div>
-      <p role="status" aria-live="polite" className="text-2xs text-ink-3 mt-1.5 min-h-[1rem] leading-snug">{feedback}</p>
-    </div>
-  );
-};
+const GOALKEEPING = new Set(METRIC_CATEGORIES.find(c => c.id === 'goalkeeping')?.keys ?? []);
+const INTEGER = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 
 // ============================================
 // CARTE JOUEUR
@@ -566,7 +472,10 @@ const PlayerComparison: React.FC<PlayerComparisonProps> = ({ data, onSelectPlaye
           );
         })}
         {players.length < MAX_COMPARED && (
-          <PlayerSearch selectedIds={selectedIds} count={players.length} onAdd={addPlayer} inputRef={inputRef} />
+          <PlayerSearch framed inputRef={inputRef} selectedIds={selectedIds} onPick={addPlayer}
+            label="Ajouter un joueur" labelRight={<span className="num normal-case tracking-normal font-normal text-ink-4">{players.length}/{MAX_COMPARED}</span>}
+            duplicateMessage={p => `${p.Player} (${p.Team}, ${getPlayerSeasonTag(p)}) est déjà dans la comparaison.`}
+            pickedMessage={p => `${p.Player} ajouté (${players.length + 1}/${MAX_COMPARED}).`} />
         )}
       </div>
       {notice && <p role="status" className="text-xs text-ink-3">{notice}</p>}

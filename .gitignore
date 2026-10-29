@@ -44,3 +44,8 @@ public/data/*
 # Python
 __pycache__/
 *.pyc
+
+# Dossiers de scouting exportés depuis l'application (données locales réelles, jamais commitées)
+/exports/
+ScoutVision_rapports_*.json
+ScoutVision_*.pdf

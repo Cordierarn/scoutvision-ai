@@ -46,8 +46,8 @@ const run = (texts: string[], extra: Partial<Parameters<typeof handleScoutReport
 };
 const reportOf = async (r: ReturnType<typeof run>['result']) => {
   const out = await r;
-  if (!('report' in out.body)) throw new Error(`échec : ${JSON.stringify(out.body)}`);
-  return out.body;
+  if (!('content' in out.body)) throw new Error(`échec : ${JSON.stringify(out.body)}`);
+  return { ...out.body, report: out.body.content };
 };
 
 describe('faits envoyés au modèle', () => {

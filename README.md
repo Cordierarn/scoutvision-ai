@@ -68,7 +68,8 @@ verdict on a player.
   finishing skill, pass-network role, estimated value vs Transfermarkt, development projection,
   shot map, heatmap, PDF export.
 - **Comparison** of up to four players with overlaid radars.
-- **Similar players**: distance on normalised metrics, optionally restricted to the same position.
+- **Similar players**: explainable similarity score on the pipeline percentiles, with the
+  components that drive it ("why similar"), optionally restricted to the same position.
 - **Watchlist** with notes, stored in the browser, CSV export.
 
 ### Tactical profiles
@@ -181,7 +182,7 @@ the report endpoint). To rebuild the data with Python, see [data pipeline](docs/
 | Data preparation | Python, pandas, pyarrow |
 | Statistical models | NumPy and custom modelling code (`scripts/models.py`, `scripts/lab.py`) |
 | AI summaries | Gemini through a server-side endpoint (`server/`) |
-| Exports | jsPDF, html2canvas |
+| Exports | jsPDF (texte natif, radar vectoriel), JSON des dossiers |
 | Automation | GitHub Actions |
 
 ## Data & privacy

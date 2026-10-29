@@ -6,7 +6,7 @@ description: Règles de qualité frontend propres à ScoutVision (React 19, Tail
 # Qualité frontend ScoutVision
 
 ## Pages gelées
-Layout / navigation, Base joueurs, Fiche joueur et Chasseur de pépites sont validés et gelés : n'y toucher que pour un bug réel ou la régression d'un composant partagé.
+Layout / navigation, Base joueurs, Fiche joueur, Chasseur de pépites, Comparaison, Joueurs similaires, Analyse d'équipe et Recrutement sont validés et gelés : n'y toucher que pour un bug réel, la régression d'un composant partagé ou une évolution fonctionnelle explicitement demandée.
 
 ## Périmètre et méthode
 - Mesurer avant de corriger. Classer P0 à P3 et ne présenter comme confirmé que ce qui a été reproduit dans un vrai navigateur, sur les vraies données (`npm run data:pull`). Aucune donnée fictive.
@@ -27,6 +27,9 @@ Layout / navigation, Base joueurs, Fiche joueur et Chasseur de pépites sont val
 - **Sens d'une métrique** : `metricDirection` (`utils/metricDirection.ts`, tiré des poids des rôles officiels). Sens inconnu : aucune « meilleure valeur ».
 - **Recherche avec résultats** : combobox / listbox (`aria-expanded`, `aria-controls`, `aria-activedescendant`, flèches, Entrée, Échap), vrai `label`, et focus rendu à un élément logique après ajout, retrait ou Échap (jamais BODY).
 - **Infobulles `InfoTip` / `data-tip` en fin de ligne** : `align="end"` près du bord droit ; le pseudo-élément (300 px) élargit sinon le conteneur défilant (débordement horizontal mesuré).
+- **Similarité** : `utils/similarity.ts` ; score = 100 − écart moyen de percentile sur les composantes déclaratives du poste ; le score, « Pourquoi similaire ? » et le radar lisent la même liste. Sous `MIN_COVERAGE` (8/12) : pas de score. Aucun facteur d'étalement.
+- **Équipe** : rang d'une équipe = `teamRank` via `TEAM_METRICS` (`utils/teamMetrics.ts`), le même pour l'Analyse d'équipe et le Recrutement ; une valeur absente est « N/D », sans rang. Totaux d'équipe tirés de team_season, jamais de la somme des joueurs (filtrés par temps de jeu). Tirs pour / contre et buts contre son camp : `utils/teamShots.ts`. Formations et cases : `utils/teamLineups.ts`. Profondeur : `slotDepth`, sans niveau de besoin. Terrain : composant `Pitch` (ratio 68 × 105), jamais de hauteur tirée de la fenêtre.
+- **Recrutement** : classement sur la seule projection sportive ; complémentarité en lecture séparée (préférence d'ordre, désactivée par défaut) ; marché par saison (`seasonMarket`, jamais l'instantané Transfermarkt sur une saison passée) ; incertitude = erreur historique (MAE de la validation), jamais « ± » ; dossier en blocs (`CandidateView`), sans score global. Blocs dans un conteneur étroit (dossier, téléphone) : `InfoTip align="end"` ou `overflow-x-clip` à la racine, le pseudo-élément de 300 px crée sinon un défilement horizontal.
 - **Tableaux `.sv-table`** : une colonne numérique met `text-right` sur le `th` et les `td` ; l'en-tête s'aligne alors sur les chiffres.
 - **Performance React** : `useTransition` ou `useDeferredValue` seulement après une mesure avant/après. Mesuré ici : la transition sur le retour de fiche fait passer l'INP de ~1,5 s à ~50 ms, mais des transitions sur la navigation et l'ouverture de fiche retardent l'affichage (de 1,4 s à 3,6 s). Clés React stables (identifiant joueur-saison, jamais l'index). Pas de `React.memo`/`useMemo` systématique, pas de virtualisation sans profil qui la justifie.
 - **États** : chaque chargement asynchrone a un état de chargement (jamais « Aucune donnée » pendant le chargement), une erreur `LoadError` (`role="alert"`, bouton Réessayer) et un état vide qui explique pourquoi.

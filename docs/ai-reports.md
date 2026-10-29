@@ -7,13 +7,21 @@ without it.
 
 ## Architecture
 
-The browser never calls Gemini. The "Générer" button of the player profile posts the player
-row and the computed indicators to `POST /api/scout-report`; the server validates the input,
-builds the prompt and calls Gemini with `GEMINI_API_KEY`.
+The browser never calls Gemini. The "Générer" button of the player profile (and of a scouting
+dossier) posts the player row and the computed indicators to `POST /api/scout-report`; the
+server validates the input, builds the prompt and calls Gemini with `GEMINI_API_KEY`.
 
 ```
-Frontend (PlayerCard) → POST /api/scout-report (server/) → Gemini API
+Frontend (PlayerCard, Rapports) → POST /api/scout-report (server/) → Gemini API
+                                ← { content, meta, facts, promptVersion }
 ```
+
+On success the server answers `{ content, meta, facts, promptVersion }`: the French report,
+the metadata of the model that actually wrote it, the exact structured facts the model
+received (stored with the report as its data snapshot) and the prompt version. `promptVersion`
+is an explicit constant (`PROMPT_VERSION` in `server/reportFacts.ts`, currently
+`scout-report-v2`), bumped by hand when the prompt or the facts change; it is never derived
+from a date.
 
 | File | Role |
 |---|---|
@@ -22,6 +30,10 @@ Frontend (PlayerCard) → POST /api/scout-report (server/) → Gemini API
 | `server/reportAudit.ts` | deterministic check of the generated text |
 | `server/scoutReportPlugin.ts` | Node middleware `(req, res, next)`, Vite plugin, Gemini call |
 | `services/scoutReportService.ts` | client: request, cache, footer label |
+| `services/scoutReportStore.ts` | local scouting dossiers (localStorage), JSON export/import |
+| `components/reports/generateReport.ts` | generation shared by the profile and the Rapports page, stored as a new version |
+| `utils/scoutReportSnapshot.ts` | data snapshot of a dossier, freshness comparison |
+| `utils/scoutReportPdf.ts` | structured PDF export (native text, vector radar) |
 
 ## Configuration
 
@@ -140,6 +152,66 @@ whose server already proxies `/cdn` (images). The endpoint is mounted on the sam
   Express, Connect) next to `dist/`, or wrap `handleScoutReport` (`server/scoutReport.ts`) in the
   serverless function of your platform, and set `GEMINI_API_KEY` in its environment. The same
   host must rewrite `/cdn/*` (see [data-format.md](data-format.md#images)).
+
+## Scouting dossiers (local V1)
+
+The "Rapports de scouting" page keeps one dossier per player-season row, identified by
+`playerSeasonId` (`<Player ID>_<Team ID>_<Competition>_<season>`), never by name, club and
+league: homonyms, league and cup rows, and a player's successive clubs are separate dossiers.
+The client cache of generated reports uses the same identity.
+
+A dossier (`ScoutReportRecord`, `types/scoutReport.ts`, `schemaVersion: 1`) holds:
+
+- `player`: the row reference (identifiers, name, club, competition, season, position);
+- `dataSnapshot`: the `ReportFacts` the model received, the official role indices, structured
+  indicators (RAPM, finishing, pass share, valuation), the one-year projection and the date of
+  the data; never the whole player row;
+- `generatedSummaries`: every Gemini version with its real model, requested model,
+  `promptVersion`, date and text; a new generation is appended, never replaces an older one;
+- `observations`: human notes (video, live, general) with date, text and optional strengths,
+  points to review and conclusion; they are never prefilled by the model and never mixed with
+  percentiles or role indices;
+- `status` (`draft`, `to_observe`, `finalized`, `archived`), `role`, free text `tags`.
+
+Storage is the browser `localStorage`, single key `scoutvision_scout_reports_v1`. Reading is
+tolerant: an unreadable record is ignored and counted, the others are kept. "Exporter mes
+rapports" writes a JSON envelope (`kind: scoutvision-scout-reports`) containing only the
+dossiers, no key, secret or API cache; "Importer des rapports" validates every record and keeps
+the newer version of a dossier already present. Stored dossiers are real local data: they live
+in the user's browser and in the files they export, never in the repository.
+
+When a dossier is opened, its snapshot is compared with the current data of the same row
+(sample, percentiles, values, contract, data date); if they differ, a neutral note says that
+the current data is more recent than the report. Nothing is replaced automatically.
+
+The PDF export (`utils/scoutReportPdf.ts`, primitives in `utils/scoutReportPdfKit.ts`) is built
+only from the stored `ScoutReportRecord` with jsPDF, as native text and vector graphics (nothing
+is rasterised from the DOM, html2canvas is gone). Base document in four A4 pages:
+
+1. player summary: identity (photo and flag when they load in the browser), six KPIs, Transfermarkt
+   value and ScoutVision statistical estimate, role badges ("Indice composite 0–100, et non
+   percentile"), role radar, statistical strengths and limits;
+2. impact and development: model indicators (RAPM, finishing, pass share, relay role, value and
+   performance) each with value, interpretation, context and limit; the ScoutVision statistical
+   projection; team context;
+3. shots and metrics by family (finishing, creation, progression, possession, circulation,
+   defending, duels, goalkeeping, models), the most marked metrics of each family, sized to fit
+   the page; the shot map and heatmap are not part of the snapshot and are not drawn;
+4. scouting in three layers: the generated summary (model, prompt version, date), observation
+   priorities, "Observation du scout" cards and a conclusion made only of the scout's own fields,
+   then a methodology note.
+
+"PDF" exports this summary with the latest generated summary only; "PDF complet" adds an annex
+with the older summaries and every metric. Each page has a one-line footer (player, season,
+status, report date, page X / Y). Long texts paginate without cutting a block, the file name is
+`ScoutVision_<player>_<season>_<date>.pdf`, and the build returns an audit (smallest font used,
+text outside the margins, empty sections) checked by the tests. Fonts: the standard Helvetica
+set, so the text is extractable and a report weighs 20 to 50 KB; characters outside Latin-1 are
+transliterated (an embedded Unicode font such as Inter or Noto Sans would add 300 to 600 KB per
+style without subsetting, which is why it was not adopted).
+
+Without `GEMINI_API_KEY`, generation answers 503 and the dossier still works: snapshot,
+observations, status, tags, JSON export/import and PDF.
 
 ## Limitations
 
