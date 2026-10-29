@@ -478,7 +478,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[13px] text-ink-2">
-                <span className="flex items-center gap-1.5 min-w-0"><TeamLogo src={player['Team logo']} name={player.Team} size="xs" /> <span className="truncate">{player.Team}</span></span>
+                <span className="flex items-center gap-1.5 min-w-0"><TeamLogo src={player['Team logo']} name={player.Team} size="xs" /> <span className="min-w-0 break-words">{player.Team}</span></span>
                 <span className="text-ink-4" aria-hidden>·</span>
                 <CompetitionBadge competition={player.Competition} />
                 {player['Passport country'] && (

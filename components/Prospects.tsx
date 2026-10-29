@@ -26,6 +26,7 @@ import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/s
 import { dataLoader } from '../services/dataLoader';
 import { TeamLine, PlayerAvatar } from './Media';
 import { Panel, EmptyState, InfoTip, IndexBar, PercentileValue } from './ui';
+import { isRowActivation } from '../utils/rowKeys';
 
 interface ProspectsProps {
   data: PlayerData[];
@@ -527,7 +528,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
               <tr
                 className={`group cursor-pointer [&:hover>td]:!bg-raised focus-visible:outline-none [&:focus-visible>td]:!bg-raised ${selected ? 'sv-row-selected' : ''}`}
                 onClick={() => onSelectPlayer(player)}
-                onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelectPlayer(player); } }}
+                onKeyDown={e => { if (isRowActivation(e)) { e.preventDefault(); onSelectPlayer(player); } }}
                 tabIndex={0}
                 aria-label={`${rank}. ${player.Player}, indice ${index} : ouvrir la fiche`}
                 aria-current={selected ? 'true' : undefined}
