@@ -141,17 +141,12 @@ sentence (`sanitizeReport`); a missing season caveat is added once in section 1.
 
 ## Deployment
 
-The repository has no hosting configuration: the app is a Vite single-page app
-whose server already proxies `/cdn` (images). The endpoint is mounted on the same Vite servers:
-
-- `npm run dev` (development) and `npm run build && npm run preview` (production build) serve
-  `/api/scout-report` and `/cdn` with no extra service. This is the supported way to run the app.
-- On a static host (plain `dist/` on a CDN), the endpoint does not exist: the report shows
-  "endpoint absent", the rest of the app works. To enable it, run `scoutReportMiddleware`
-  (`server/scoutReportPlugin.ts`, signature `(req, res, next)`) on any Node server (http,
-  Express, Connect) next to `dist/`, or wrap `handleScoutReport` (`server/scoutReport.ts`) in the
-  serverless function of your platform, and set `GEMINI_API_KEY` in its environment. The same
-  host must rewrite `/cdn/*` (see [data-format.md](data-format.md#images)).
+The AI endpoints (`/api/scout-report`, `/api/ai/*`) are mounted by `server/privateServer.ts`
+**behind the session guard**, on the production server (`npm start`), on `vite preview` and on
+`vite dev`: no request reaches Gemini without a valid session and a same-origin `Origin`.
+`GEMINI_API_KEY` and `GEMINI_MODEL` are runtime variables of the server; they never appear in
+`dist/`, in a response or in the browser. A static host serving `dist/` alone is not supported:
+it would have neither the endpoints nor the data guard. See [deployment](deployment.md).
 
 ## Scouting dossiers (local V1)
 

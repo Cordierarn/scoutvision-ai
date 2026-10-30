@@ -6,6 +6,9 @@ source data is private (see [data-pipeline.md](data-pipeline.md)).
 
 ## Files
 
+`public/data/` is never part of the build (`dist/`): the server serves it as `/data/*` only to
+an authenticated session ([deployment](deployment.md)).
+
 | File | Content |
 |---|---|
 | `public/data/index.json` | available seasons and competitions |
@@ -49,6 +52,7 @@ season only. `--no-market-values` skips it.
 
 Player photos and club logos come from the PitchAPI CDN, flags from
 [flagcdn](https://flagcdn.com). The CDN does not send CORS headers, so images
-are served through the `/cdn` proxy of the Vite server (`vite.config.ts`),
-which lets the PDF export include them. A production host must apply the same
-rewrite: `/cdn/*` → `https://cdn.pitchapi.dev/*`.
+are served same-origin through `/cdn`, which lets the PDF export include them.
+In production (and `vite preview`) the session guard serves `/cdn` itself, only for
+`/cdn/images/(players|teams)/<id>.webp` and only with a valid session; in development
+it is Vite's proxy, behind the same guard. See [deployment](deployment.md).
