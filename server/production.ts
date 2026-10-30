@@ -80,7 +80,12 @@ if (token) {
       running = false;
     }
   };
-  void refresh();
+  // Premier téléchargement : nouvel essai 30 s, 1, 2, 4… jusqu'à 15 min tant qu'aucune donnée n'est installée
+  const firstInstall = async (delay = 30_000) => {
+    await refresh();
+    if (!dataInstalled(dataDir)) setTimeout(() => { void firstInstall(Math.min(delay * 2, 15 * 60_000)); }, delay).unref();
+  };
+  void firstInstall();
   // Entre 1 heure et 7 jours (au-delà, setInterval déborderait et tournerait en boucle)
   const hours = Math.min(Math.max(Number(env.SCOUTVISION_DATA_REFRESH_HOURS) || 6, 1), 24 * 7);
   setInterval(() => { void refresh(); }, hours * 3600_000).unref();

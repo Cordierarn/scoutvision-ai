@@ -2,7 +2,7 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { loadAuthConfig } from './server/auth';
+import { loadAuthConfig, readCookie, sessionCookieName, verifySessionToken } from './server/auth';
 import { createPrivateServer, type ServerMode } from './server/privateServer';
 import { scoutReportMiddleware } from './server/scoutReportPlugin';
 
@@ -36,7 +36,25 @@ function privateServer(env: Record<string, string>, auth: ReturnType<typeof load
   };
   return {
     name: 'scoutvision-private-server',
-    configureServer(server) { server.middlewares.use(make('dev')); },
+    configureServer(server) {
+      server.middlewares.use(make('dev'));
+      // Canal WebSocket de Vite (rechargement à chaud) : hors des middlewares, donc gardé ici.
+      // Sans session valide, la connexion est coupée avant Vite ; le client navigateur n'a
+      // jamais besoin de demander des modules par ce canal (invocation coupée).
+      const http = server.httpServer;
+      if (auth && http) {
+        const emit = http.emit.bind(http) as (event: string, ...args: unknown[]) => boolean;
+        http.emit = ((event: string, ...args: unknown[]) => {
+          if (event === 'upgrade') {
+            const req = args[0] as { headers: { cookie?: string } };
+            const socket = args[1] as { destroy: () => void };
+            if (!verifySessionToken(auth, readCookie(req.headers.cookie, sessionCookieName(false)))) { socket.destroy(); return true; }
+          }
+          return emit(event, ...args);
+        }) as typeof http.emit;
+      }
+      (server as unknown as { environments?: { client?: { hot?: { setInvokeHandler?: (h: undefined) => void } } } }).environments?.client?.hot?.setInvokeHandler?.(undefined);
+    },
     configurePreviewServer(server) { server.middlewares.use(make('preview')); },
   };
 }
@@ -82,8 +100,10 @@ export default defineConfig(({ mode, isSsrBuild }) => {
       throw new Error(`Variables secrètes exposées au navigateur par le préfixe VITE_ : ${exposed.join(', ')}. Renommez-les sans VITE_.`);
     }
     const auth = isSsrBuild ? null : loadAuthConfig(env);    // variables partielles ou invalides : Vite refuse de démarrer
-    // Sans authentification (mode local ouvert), le serveur n'écoute que sur cet ordinateur
-    const host = auth ? '0.0.0.0' : '127.0.0.1';
+    // `vite dev` et `vite preview` n'écoutent que sur cet ordinateur, avec ou sans authentification :
+    // le serveur de développement expose par nature des sources et un canal de modules ; l'accès
+    // depuis un autre appareil passe par le serveur de production (npm run build && npm start)
+    const host = '127.0.0.1';
     const dataDir = path.resolve(__dirname, env.SCOUTVISION_DATA_DIR || 'public/data');
     return {
       server: {

@@ -115,14 +115,17 @@ describe('cookie', () => {
 });
 
 describe('cookie d\'appareil', () => {
-  it('signé, propre à l\'utilisateur, distinct d\'un jeton de session', async () => {
+  it('signé, propre à l\'utilisateur et au mot de passe courant, distinct d\'un jeton de session', async () => {
     const c = await config();
     const token = createDeviceToken(c);
-    expect(verifyDeviceToken(c, token)).toBe(true);
-    expect(verifyDeviceToken(c, `${token}x`)).toBe(false);
-    expect(verifyDeviceToken(c, createSessionToken(c).token)).toBe(false);          // un jeton de session n'est pas un jeton d'appareil
+    expect(verifyDeviceToken(c, token)).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(verifyDeviceToken(c, `${token}x`)).toBeNull();
+    expect(verifyDeviceToken(c, createSessionToken(c).token)).toBeNull();          // un jeton de session n'est pas un jeton d'appareil
     expect(verifySessionToken(c, token)).toBeNull();                                // et inversement
-    expect(verifyDeviceToken(c, token, Date.now() + 181 * 24 * 3600 * 1000)).toBe(false);
+    expect(verifyDeviceToken(c, token, Date.now() + 181 * 24 * 3600 * 1000)).toBeNull();
+    // nouveau mot de passe (même secret de session) : cookie d'appareil volé sans valeur
+    const changed = loadAuthConfig({ SCOUTVISION_AUTH_USER: 'arnaud', SCOUTVISION_AUTH_PASSWORD_HASH: await hashPassword('autre-mot-de-passe-synthétique', FAST), SCOUTVISION_SESSION_SECRET: SECRET })!;
+    expect(verifyDeviceToken(changed, token)).toBeNull();
   });
 });
 
@@ -164,9 +167,25 @@ describe('limite des tentatives', () => {
     expect(stranger).toEqual({ ok: true, slow: true, trusted: false });
     expect(l.reserve('192.0.2.2', 0).ok).toBe(false);              // une seule vérification à la fois sous pression
     // Appareil connu : sa propre place, sans ralentissement, même quand l'autre place est occupée
-    expect(l.reserve('192.0.2.9', 0, true)).toEqual({ ok: true, slow: false, trusted: true });
-    l.release('192.0.2.9', true, true);
+    expect(l.reserve('192.0.2.9', 0, 'appareil-1')).toEqual({ ok: true, slow: false, trusted: true });
+    l.release('192.0.2.9', true, true, 'appareil-1');
     l.release('192.0.2.1', true);                                  // succès : l'adresse repart à zéro
     expect(l.retryAfter('192.0.2.1', 0)).toBe(0);
+  });
+});
+
+describe('appareil connu et limite', () => {
+  it('3 échecs avec un même cookie d\'appareil : plus de place réservée ; place occupée : file normale', () => {
+    const l = new LoginLimiter(50, 60_000, 50, 2);
+    for (let i = 0; i < 3; i++) {
+      const r = l.reserve('203.0.113.9', 0, 'vole');
+      expect(r).toMatchObject({ ok: true, trusted: true });
+      l.release('203.0.113.9', false, true, 'vole', 0);
+    }
+    expect(l.reserve('203.0.113.9', 0, 'vole')).toMatchObject({ ok: true, trusted: false });
+    // Place réservée occupée par un autre appareil : le propriétaire passe par la file normale
+    const l2 = new LoginLimiter(5, 60_000, 50, 2);
+    expect(l2.reserve('1.1.1.1', 0, 'a')).toMatchObject({ ok: true, trusted: true });
+    expect(l2.reserve('2.2.2.2', 0, 'b')).toMatchObject({ ok: true, trusted: false });
   });
 });

@@ -41,7 +41,8 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
 - `npm run build` produces `dist/` (application + login page, **no data**: `copyPublicDir` is
   off) and `dist-server/production.js` (the server, bundled by Vite, no extra dependency).
 - At boot the server downloads `scoutvision-data.tar.gz` from the private `scoutvision-data`
-  release with `PITCHAPI_DATA_TOKEN`, extracts it into a fresh, unique work folder
+  release with `PITCHAPI_DATA_TOKEN` (first download retried after 30 s, 1, 2, 4… up to 15 minutes
+  while no data is installed), extracts it into a fresh, unique work folder
   (`.scoutvision-sync/`, next to the data folder, never served) and swaps it in; two runs never
   overlap. It checks
   the release again every 6 hours (`SCOUTVISION_DATA_REFRESH_HOURS`) and only downloads a new
@@ -49,9 +50,13 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
 - Without a session: a page navigation gets `302 /login?next=…`; any other private request gets
   `401` and never the content. The login page is a separate bundle (`login.html`); its files are
   read from the build manifest and are the only public assets.
-- `vite dev` and `vite preview` mount the same guard. Without the three auth variables they run
-  in an explicit **open local mode**, bound to `127.0.0.1` only (warning in the terminal, no
-  logout button). The production server refuses to start without them. In development, a Vite
+- `vite dev` and `vite preview` mount the same guard and always listen on `127.0.0.1` only: a
+  development server exposes sources and a module channel by nature, so another device reaches
+  ScoutVision through the production server (`npm run build && npm start`), never through Vite.
+  Without the three auth variables they run in an explicit **open local mode** (warning in the
+  terminal, no logout button). With them, Vite's hot-reload WebSocket is closed to any connection
+  without a valid session (the login page itself has no hot reload in development), and module
+  requests over that channel are disabled. The production server refuses to start without them. In development, a Vite
   plugin also refuses to load any file of `public/data`, `dist`, `.cache` or `.env*` as a
   module, whatever the URL (`/@id/`, `@/` alias, absolute path, `?import`, `?raw`), and a request
   without a session only reaches Vite for an allow list: the Vite client and the source files
@@ -68,7 +73,7 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
 | Session | HMAC-SHA256 signed token (user, expiry, id, fingerprint of the password hash) in cookie `__Host-sv_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, 7 days |
 | Logout | `POST /api/auth/logout`: cookie cleared, token id revoked immediately on the server |
 | Rate limit | 5 failed logins per IP per 15 minutes, then `429` with `Retry-After`; the attempt is counted **before** the hash is computed, so a burst of parallel requests cannot exceed it; at most 2 password checks at once (memory bounded), extra requests get `429`; above 50 failures across all IPs per 15 minutes, checks run one at a time with a 1 s delay |
-| Known device | after a successful login the browser also keeps `__Host-sv_device` (`HttpOnly`, `Secure`, `SameSite=Strict`, 180 days, signed, kept after logout). It grants no access by itself; it only gives that browser its own password-check slot, outside the slowdown, so strangers flooding the login cannot keep the owner out (OWASP "device cookies"). The per-IP limit still applies |
+| Known device | after a successful login the browser also keeps `__Host-sv_device` (`HttpOnly`, `Secure`, `SameSite=Strict`, 180 days, signed, kept after logout). It grants no access by itself; it only gives that browser its own password-check slot, outside the slowdown, so strangers flooding the login cannot keep the owner out (OWASP "device cookies"). It is tied to the current password: changing the password or the session secret voids it. After 3 failed checks with the same device cookie it loses its slot for the window, and when the slot is busy the request uses the normal queue. The per-IP limit still applies |
 | Browser | no token in `localStorage` or `sessionStorage`, no secret in the bundle; the password only lives in the form state until the POST |
 
 Endpoints: `POST /api/auth/login` (`{ username, password }` → `{ authenticated, user }` + cookie),
@@ -147,7 +152,8 @@ same name has write access to publish the data and should not be reused on the s
 
 - **Change the password**: run `npm run auth:secret` (or `-- --stdin`), replace
   `SCOUTVISION_AUTH_PASSWORD_HASH` in the Render dashboard, save (Render restarts the service).
-  Every existing session becomes invalid, because the token carries a fingerprint of the hash.
+  Every existing session and every known-device cookie becomes invalid, because both carry a
+  fingerprint of the hash.
 - **Revoke every session** without changing the password: replace `SCOUTVISION_SESSION_SECRET`
   with a new value (`npm run auth:secret` prints one) and save.
 - **Log out**: « Se déconnecter » at the bottom of the sidebar. The cookie is cleared and the

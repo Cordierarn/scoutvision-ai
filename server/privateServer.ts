@@ -308,15 +308,15 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       }
       // Tentative réservée de façon synchrone, avant le calcul du hash (pas de contournement par rafale)
       const ip = clientIp(req, opts.trustProxy);
-      const trusted = verifyDeviceToken(opts.auth, readCookie(req.headers.cookie, deviceCookieName(opts.secureCookies)));
-      const slot = limiter.reserve(ip, Date.now(), trusted);
+      const device = verifyDeviceToken(opts.auth, readCookie(req.headers.cookie, deviceCookieName(opts.secureCookies)));
+      const slot = limiter.reserve(ip, Date.now(), device);
       if ('retryAfter' in slot) return sendJson(res, 429, { error: 'Trop de tentatives. Réessayez plus tard.', retryAfter: slot.retryAfter }, { 'Retry-After': String(slot.retryAfter) });
       let ok = false;
       try {
         if (slot.ok && slot.slow) await new Promise(resolve => setTimeout(resolve, 1000));
         ok = await checkCredentials(opts.auth, username, password);
       } finally {
-        limiter.release(ip, ok, slot.ok && slot.trusted);
+        limiter.release(ip, ok, slot.ok && slot.trusted, device);
       }
       if (!ok) return sendJson(res, 401, { error: 'Identifiants incorrects.' });
       const { token, payload } = createSessionToken(opts.auth);
