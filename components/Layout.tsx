@@ -1,5 +1,6 @@
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Users, Settings, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Star, CalendarDays, FlaskConical, UserSearch, ChevronRight } from 'lucide-react';
+import { Users, Settings, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Star, CalendarDays, FlaskConical, UserSearch, ChevronRight, LogOut } from 'lucide-react';
+import { displayName, logout, useAuth } from '../services/authService';
 import { getWatchlist } from '../services/storageService';
 import { getSeasonLabel } from '../types';
 import { BrandMark } from './Media';
@@ -66,6 +67,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 
 const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, globalSeason, setGlobalSeason, seasonOptions = [], hasData }) => {
+  const auth = useAuth();
   const [watchlistCount, setWatchlistCount] = useState(0);
 
   // Update watchlist count when view changes or periodically
@@ -143,6 +145,17 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
             <Settings className="w-4 h-4" />
             <span className="hidden lg:block">Paramètres</span>
           </button>
+          {/* Session privée : utilisateur et déconnexion (absents en mode local ouvert) */}
+          {auth.user && !auth.open && (
+            <div className="mt-1 pt-1 border-t border-line lg:flex lg:items-center lg:gap-2">
+              <span className="hidden lg:block flex-1 min-w-0 truncate px-2 text-[13px] text-ink-3">{displayName(auth.user)}</span>
+              <button type="button" onClick={() => void logout()} title="Se déconnecter" aria-label="Se déconnecter"
+                className="w-full lg:w-auto flex items-center justify-center lg:justify-start gap-2 h-8 px-2 rounded-md text-[13px] text-ink-4 hover:text-ink-2 hover:bg-raised/60 transition-colors">
+                <LogOut className="w-4 h-4" aria-hidden />
+                <span className="hidden lg:block whitespace-nowrap">Se déconnecter</span>
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 

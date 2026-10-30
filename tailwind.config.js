@@ -10,6 +10,7 @@ const token = name => `rgb(var(--sv-${name}) / <alpha-value>)`;
 export default {
   content: [
     './index.html',
+    './login.html',
     './*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
     './utils/**/*.{ts,tsx}',
