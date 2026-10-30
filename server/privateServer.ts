@@ -17,8 +17,8 @@ import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createGzip } from 'node:zlib';
 import {
-  AuthConfig, LoginLimiter, RevocationList, SessionPayload, checkCredentials, clearSessionCookie, createSessionToken,
-  readCookie, sessionCookie, sessionCookieName, verifySessionToken,
+  AuthConfig, LoginLimiter, RevocationList, SessionPayload, checkCredentials, clearSessionCookie, createDeviceToken, createSessionToken,
+  deviceCookie, deviceCookieName, readCookie, sessionCookie, sessionCookieName, verifyDeviceToken, verifySessionToken,
 } from './auth';
 import { readBody } from './scoutReportPlugin';
 
@@ -69,9 +69,14 @@ export const LOGIN_PATH = '/login';
 export const CDN_PATTERN = /^\/cdn\/images\/(players|teams)\/[A-Za-z0-9_-]{1,80}\.webp$/;
 const CDN_ORIGIN = 'https://cdn.pitchapi.dev';
 /** Dossiers du projet que `vite dev` servirait par leur chemin : refusés sans session */
-const DEV_PRIVATE_PREFIX = /^\/(public|\.cache|dist|dist-server|exports|scripts|@fs|@id)(\/|$)/;
-/** Mêmes dossiers désignés ailleurs dans l'URL (alias @/, chemin absolu, requête ?import) */
-const DEV_PRIVATE_ANYWHERE = /(^|\/)(public\/data|\.cache|dist|dist-server|exports)(\/|$)|\.env/;
+/**
+ * `vite dev` sans session : seuls passent à Vite le client de Vite et les sources de la page de
+ * connexion (code public du dépôt). Tout autre fichier du projet (données, captures, exports,
+ * fichiers locaux non suivis) est refusé : liste blanche, jamais liste noire.
+ */
+const DEV_PUBLIC_EXACT = new Set(['/@vite/client', '/@vite/env', '/@react-refresh', '/login.tsx', '/types.ts']);
+const DEV_PUBLIC_PATTERN = /^\/(?:node_modules\/\.vite\/deps\/[A-Za-z0-9_.@-]+\.(?:js|mjs|css|map)|node_modules\/vite\/dist\/client\/[A-Za-z0-9_.-]+\.m?js|(?:components|services|styles|utils|theme|types|hooks)\/[A-Za-z0-9_\/-]+\.(?:tsx?|jsx?|mjs|css|json))$/;
+export const devPublicPath = (p: string) => DEV_PUBLIC_EXACT.has(p) || DEV_PUBLIC_PATTERN.test(p);
 const CDN_MAX_BYTES = 2 * 1024 * 1024;
 
 export const CONTENT_SECURITY_POLICY = [
@@ -116,8 +121,6 @@ function redirect(res: ServerResponse, location: string) {
   res.end();
 }
 
-const decodeURIComponentSafe = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
-
 /** Chemin décodé de l'URL ; null s'il est invalide (encodage, octet nul) */
 export function requestPath(req: IncomingMessage): string | null {
   const raw = (req.url ?? '/').split('?')[0].split('#')[0] || '/';
@@ -138,12 +141,19 @@ export function requestPath(req: IncomingMessage): string | null {
  */
 export function safeNext(value: string | null | undefined): string {
   if (!value || value.length > 512 || /[\x00-\x20\x7f\\]/.test(value) || !value.startsWith('/') || value.startsWith('//')) return '/';
+  // Segments « . » / « .. », même encodés : « /.//site » deviendrait « //site » une fois normalisé
+  let decoded = value;
+  try { decoded = decodeURIComponent(value.split('?')[0]); } catch { return '/'; }
+  if (/(^|\/)\.{1,2}(\/|$)/.test(decoded) || decoded.startsWith('//')) return '/';
+  const base = 'http://scoutvision.invalid';
   let url: URL;
-  try { url = new URL(value, 'http://scoutvision.invalid'); } catch { return '/'; }
-  if (url.origin !== 'http://scoutvision.invalid') return '/';
+  try { url = new URL(value, base); } catch { return '/'; }
   const p = url.pathname;
+  if (url.origin !== base || p.startsWith('//')) return '/';
   if (p === LOGIN_PATH || p.startsWith('/api/') || p.startsWith('/data/') || p.startsWith('/cdn/')) return '/';
-  return `${p}${url.search}`;
+  const result = `${p}${url.search}`;
+  try { if (new URL(result, base).origin !== base) return '/'; } catch { return '/'; }
+  return result;
 }
 
 /**
@@ -298,18 +308,19 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       }
       // Tentative réservée de façon synchrone, avant le calcul du hash (pas de contournement par rafale)
       const ip = clientIp(req, opts.trustProxy);
-      const slot = limiter.reserve(ip);
+      const trusted = verifyDeviceToken(opts.auth, readCookie(req.headers.cookie, deviceCookieName(opts.secureCookies)));
+      const slot = limiter.reserve(ip, Date.now(), trusted);
       if ('retryAfter' in slot) return sendJson(res, 429, { error: 'Trop de tentatives. Réessayez plus tard.', retryAfter: slot.retryAfter }, { 'Retry-After': String(slot.retryAfter) });
       let ok = false;
       try {
         if (slot.ok && slot.slow) await new Promise(resolve => setTimeout(resolve, 1000));
         ok = await checkCredentials(opts.auth, username, password);
       } finally {
-        limiter.release(ip, ok);
+        limiter.release(ip, ok, slot.ok && slot.trusted);
       }
       if (!ok) return sendJson(res, 401, { error: 'Identifiants incorrects.' });
       const { token, payload } = createSessionToken(opts.auth);
-      res.setHeader('Set-Cookie', sessionCookie(token, opts.secureCookies));
+      res.setHeader('Set-Cookie', [sessionCookie(token, opts.secureCookies), deviceCookie(createDeviceToken(opts.auth), opts.secureCookies)]);
       return sendJson(res, 200, { authenticated: true, user: payload.u });
     }
     return sendJson(res, 404, { error: 'Introuvable.' });
@@ -382,13 +393,13 @@ export function createPrivateServer(opts: PrivateServerOptions) {
 
     if (!authed) {
       if (isApi || isData || isCdn) return sendJson(res, 401, { error: 'Authentification requise.' });
+      // Développement : client de Vite et sources de la page de connexion, avant la détection des navigations
+      // (/@vite/client n'a pas d'extension) ; le paramètre de requête ne peut viser un autre fichier
+      if (opts.mode === 'dev' && devPublicPath(p) && !String(req.headers.accept ?? '').includes('text/html')) return next();
       if (isNavigation(req, p)) {
         const target = safeNext(req.url ?? '/');
         return redirect(res, target === '/' ? LOGIN_PATH : `${LOGIN_PATH}?next=${encodeURIComponent(target)}`);
       }
-      // Développement : sources des modules (code public du dépôt) servies par Vite, sauf les
-      // dossiers que Vite servirait aussi par leur chemin (données, cache des archives, builds)
-      if (opts.mode === 'dev' && !DEV_PRIVATE_PREFIX.test(p) && !DEV_PRIVATE_ANYWHERE.test(decodeURIComponentSafe(req.url ?? ''))) return next();
       return sendText(res, 401, 'Authentification requise.');
     }
 

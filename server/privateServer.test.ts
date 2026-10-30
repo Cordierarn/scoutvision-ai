@@ -244,21 +244,45 @@ describe('garde d\'accès', () => {
     expect(safeNext('/data/players/2026-27.json')).toBe('/');
     expect(safeNext('/?saison=2026-27')).toBe('/?saison=2026-27');
     // Tabulation, retour à la ligne, espace : le navigateur les retirerait et ferait « //site »
+    for (const v of ['/.//evil.example', '/a/..//evil.example/x', '/%2e//evil.example', '/%2E%2E//evil.example', '/x/%2e%2e/%2e%2e//evil.example']) expect(safeNext(v), v).toBe('/');
+    expect((await get('/login?next=%2F.%2F%2Fevil.example', { Cookie: c })).headers.get('location')).toBe('/');
     for (const v of ['/\t/evil.example/x', '/\n/evil.example', '/ /evil.example', '/\x0b/evil.example', '/%09/evil.example'.replace('%09', '\t')]) expect(safeNext(v)).toBe('/');
     expect((await get('/login?next=%2F%09%2Fevil.example%2Fx', { Cookie: c })).headers.get('location')).toBe('/');
   });
 });
 
 describe('mode développement', () => {
-  it('sans session : aucun dossier privé par les routes de modules de Vite (/@id/, alias, chemin absolu)', async () => {
+  it('sans session : liste blanche (client Vite, sources de la page de connexion), tout le reste refusé', async () => {
     server.close();
     await start({ mode: 'dev' });
-    for (const p of ['/@id/@/public/data/index.json?import', `/@id/${root}/data/players/2026-27.json?import`, '/@id/@/dist/.vite/manifest.json?import', '/src/x.js?p=/public/data/index.json', '/.env.local']) {
-      const res = await get(p, { Accept: '*/*' });
-      expect([302, 401]).toContain(res.status);   // 404 signalerait un passage à Vite (next)
+    // Le harnais répond 404 quand la requête passe à Vite (next) : 404 = transmis, 302 / 401 = refusé
+    for (const p of ['/@vite/client', '/@react-refresh', '/login.tsx', '/components/auth/LoginPage.tsx', '/styles/index.css', '/node_modules/.vite/deps/react.js']) {
+      expect((await get(p, { Accept: '*/*' })).status, p).toBe(404);
     }
+    for (const p of ['/@id/@/public/data/index.json?import', `/@id/${root}/data/players/2026-27.json?import`, '/@id/@/dist/.vite/manifest.json?import',
+      '/.screens/02-fiche-joueur.png', '/ScoutVision_rapports_2026.json', '/package.json', '/.env.local', '/public/data.old/x.json',
+      '/.scoutvision-sync/run-1/data/index.json', '/node_modules/.vite/../../public/data/index.json', '/components/../public/data/index.json']) {
+      expect([302, 400, 401], p).toContain((await get(p, { Accept: '*/*' })).status);
+    }
+    // Navigation vers une source autorisée : page de connexion, jamais le fichier
+    expect((await get('/login.tsx', { Accept: 'text/html' })).status).toBe(302);
     server.close();
     await start();
+  });
+});
+
+describe('appareil connu', () => {
+  it('cookie d\'appareil posé à la connexion, conservé à la déconnexion, sans accès par lui-même', async () => {
+    const res = await login('arnaud', PASSWORD);
+    const cookies = res.headers.getSetCookie();
+    const device = cookies.find(c => c.startsWith('__Host-sv_device='))!;
+    expect(device).toBeDefined();
+    ['HttpOnly', 'Secure', 'SameSite=Strict', 'Path=/'].forEach(f => expect(device).toContain(f));
+    const deviceOnly = device.split(';')[0];
+    expect((await get('/data/players/2026-27.json', { Cookie: deviceOnly })).status).toBe(401);
+    expect(await (await get('/api/auth/session', { Cookie: deviceOnly })).json()).toEqual({ authenticated: false });
+    const out = await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Origin: base, Cookie: `${cookies[0].split(';')[0]}; ${deviceOnly}` } });
+    expect(out.headers.getSetCookie().some(c => c.startsWith('__Host-sv_device='))).toBe(false);
   });
 });
 

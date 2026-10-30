@@ -10,7 +10,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -44,9 +44,14 @@ export async function syncData(opts: DataSyncOptions): Promise<DataSyncResult> {
   const log = opts.log ?? (m => console.log(m));
   const headers = { Authorization: `Bearer ${opts.token}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'scoutvision-server' };
   const dataDir = path.resolve(opts.dataDir);
-  const work = `${dataDir}.sync`;
+  // Dossier de travail unique par exécution, caché, à côté du dossier de données (même volume pour
+  // la substitution par renommage) ; le serveur ne sert que le dossier de données lui-même
+  let work: string | null = null;
 
   try {
+    const workRoot = path.join(path.dirname(dataDir), '.scoutvision-sync');
+    mkdirSync(workRoot, { recursive: true });
+    work = mkdtempSync(path.join(workRoot, 'run-'));
     const meta = await fetchImpl(`https://api.github.com/repos/${repo}/releases/tags/${release}`, { headers: { ...headers, Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(30_000) });
     if (!meta.ok) return { status: 'failed', message: `release ${release} inaccessible (HTTP ${meta.status})` };
     const info = await meta.json() as { assets?: { id: number; name: string; size: number; updated_at: string }[] };
@@ -60,7 +65,6 @@ export async function syncData(opts: DataSyncOptions): Promise<DataSyncResult> {
       if (current.id === asset.id && current.updatedAt === asset.updated_at) return { status: 'current', updatedAt: asset.updated_at };
     }
 
-    rmSync(work, { recursive: true, force: true });
     mkdirSync(path.join(work, 'data'), { recursive: true });
     const archive = path.join(work, assetName);
     // L'en-tête Authorization n'est pas transmis à l'hôte de stockage lors de la redirection (autre origine)
@@ -76,8 +80,7 @@ export async function syncData(opts: DataSyncOptions): Promise<DataSyncResult> {
     writeFileSync(path.join(fresh, MARKER), JSON.stringify({ id: asset.id, updatedAt: asset.updated_at }));
 
     // Substitution d'un bloc : les fichiers déjà ouverts restent lisibles jusqu'à la fin de leur envoi
-    const old = `${dataDir}.old`;
-    rmSync(old, { recursive: true, force: true });
+    const old = path.join(work, 'previous');
     if (existsSync(dataDir)) renameSync(dataDir, old);
     mkdirSync(path.dirname(dataDir), { recursive: true });
     renameSync(fresh, dataDir);
@@ -89,6 +92,6 @@ export async function syncData(opts: DataSyncOptions): Promise<DataSyncResult> {
     const text = error instanceof Error ? `${error.name}: ${error.message}` : 'erreur inconnue';
     return { status: 'failed', message: text.split(opts.token).join('***').slice(0, 200) };
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    if (work) rmSync(work, { recursive: true, force: true });
   }
 }

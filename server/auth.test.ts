@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AuthConfigError, LoginLimiter, RevocationList, checkCredentials, clearSessionCookie, createSessionToken, hashPassword,
+  AuthConfigError, LoginLimiter, RevocationList, checkCredentials, clearSessionCookie, createDeviceToken, createSessionToken, hashPassword, verifyDeviceToken,
   loadAuthConfig, parsePasswordHash, readCookie, sessionCookie, verifyPassword, verifySessionToken,
 } from './auth';
 import { hashPassword as cliHash, generatePassword } from '../scripts/auth_secret.mjs';
@@ -114,6 +114,18 @@ describe('cookie', () => {
   });
 });
 
+describe('cookie d\'appareil', () => {
+  it('signé, propre à l\'utilisateur, distinct d\'un jeton de session', async () => {
+    const c = await config();
+    const token = createDeviceToken(c);
+    expect(verifyDeviceToken(c, token)).toBe(true);
+    expect(verifyDeviceToken(c, `${token}x`)).toBe(false);
+    expect(verifyDeviceToken(c, createSessionToken(c).token)).toBe(false);          // un jeton de session n'est pas un jeton d'appareil
+    expect(verifySessionToken(c, token)).toBeNull();                                // et inversement
+    expect(verifyDeviceToken(c, token, Date.now() + 181 * 24 * 3600 * 1000)).toBe(false);
+  });
+});
+
 describe('limite des tentatives', () => {
   it('5 échecs par adresse sur 15 minutes, puis 429 ; jamais de blocage définitif', () => {
     const l = new LoginLimiter(5, 15 * 60 * 1000, 50);
@@ -148,9 +160,12 @@ describe('limite des tentatives', () => {
     const l = new LoginLimiter(5, 60_000, 10, 2);
     for (let i = 0; i < 10; i++) l.fail(`10.0.0.${i}`, 0);
     expect(l.underPressure(0)).toBe(true);
-    const owner = l.reserve('192.0.2.1', 0);
-    expect(owner).toEqual({ ok: true, slow: true });
+    const stranger = l.reserve('192.0.2.1', 0);
+    expect(stranger).toEqual({ ok: true, slow: true, trusted: false });
     expect(l.reserve('192.0.2.2', 0).ok).toBe(false);              // une seule vérification à la fois sous pression
+    // Appareil connu : sa propre place, sans ralentissement, même quand l'autre place est occupée
+    expect(l.reserve('192.0.2.9', 0, true)).toEqual({ ok: true, slow: false, trusted: true });
+    l.release('192.0.2.9', true, true);
     l.release('192.0.2.1', true);                                  // succès : l'adresse repart à zéro
     expect(l.retryAfter('192.0.2.1', 0)).toBe(0);
   });

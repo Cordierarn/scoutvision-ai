@@ -41,7 +41,9 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
 - `npm run build` produces `dist/` (application + login page, **no data**: `copyPublicDir` is
   off) and `dist-server/production.js` (the server, bundled by Vite, no extra dependency).
 - At boot the server downloads `scoutvision-data.tar.gz` from the private `scoutvision-data`
-  release with `PITCHAPI_DATA_TOKEN`, extracts it into a fresh folder and swaps it in. It checks
+  release with `PITCHAPI_DATA_TOKEN`, extracts it into a fresh, unique work folder
+  (`.scoutvision-sync/`, next to the data folder, never served) and swaps it in; two runs never
+  overlap. It checks
   the release again every 6 hours (`SCOUTVISION_DATA_REFRESH_HOURS`) and only downloads a new
   archive. The token is a runtime variable: it never reaches the build, the browser or the logs.
 - Without a session: a page navigation gets `302 /login?next=…`; any other private request gets
@@ -51,7 +53,10 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
   in an explicit **open local mode**, bound to `127.0.0.1` only (warning in the terminal, no
   logout button). The production server refuses to start without them. In development, a Vite
   plugin also refuses to load any file of `public/data`, `dist`, `.cache` or `.env*` as a
-  module, whatever the URL (`/@id/`, `@/` alias, absolute path, `?import`, `?raw`).
+  module, whatever the URL (`/@id/`, `@/` alias, absolute path, `?import`, `?raw`), and a request
+  without a session only reaches Vite for an allow list: the Vite client and the source files
+  of the login page. Any other file of the checkout (data, screenshots, exported reports,
+  untracked files) answers `401`.
 
 ## Authentication
 
@@ -62,7 +67,8 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
 | Check | constant-time comparison; the hash is always computed, even for a wrong username: same message (« Identifiants incorrects. ») and similar time |
 | Session | HMAC-SHA256 signed token (user, expiry, id, fingerprint of the password hash) in cookie `__Host-sv_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, 7 days |
 | Logout | `POST /api/auth/logout`: cookie cleared, token id revoked immediately on the server |
-| Rate limit | 5 failed logins per IP per 15 minutes, then `429` with `Retry-After`; the attempt is counted **before** the hash is computed, so a burst of parallel requests cannot exceed it; at most 2 password checks at once (memory bounded), extra requests get `429`; above 50 failures across all IPs per 15 minutes, checks run one at a time with a 1 s delay, but nobody is ever locked out |
+| Rate limit | 5 failed logins per IP per 15 minutes, then `429` with `Retry-After`; the attempt is counted **before** the hash is computed, so a burst of parallel requests cannot exceed it; at most 2 password checks at once (memory bounded), extra requests get `429`; above 50 failures across all IPs per 15 minutes, checks run one at a time with a 1 s delay |
+| Known device | after a successful login the browser also keeps `__Host-sv_device` (`HttpOnly`, `Secure`, `SameSite=Strict`, 180 days, signed, kept after logout). It grants no access by itself; it only gives that browser its own password-check slot, outside the slowdown, so strangers flooding the login cannot keep the owner out (OWASP "device cookies"). The per-IP limit still applies |
 | Browser | no token in `localStorage` or `sessionStorage`, no secret in the bundle; the password only lives in the form state until the POST |
 
 Endpoints: `POST /api/auth/login` (`{ username, password }` → `{ authenticated, user }` + cookie),
@@ -109,6 +115,7 @@ Never prefix any of these with `VITE_`: the build refuses it. All are read by th
 Optional: `SCOUTVISION_PUBLIC_ORIGIN` (extra accepted origin, e.g. a custom domain),
 `SCOUTVISION_DATA_REFRESH_HOURS` (default 6), `SCOUTVISION_DATA_DIR`, `SCOUTVISION_TRUST_PROXY`
 (automatic on Render), `SCOUTVISION_COOKIE_SECURE` (default on), `SCOUTVISION_HSTS`.
+`SCOUTVISION_DATA_REFRESH_HOURS` is clamped between 1 and 168.
 Render sets `PORT`, `RENDER` and `RENDER_EXTERNAL_URL` itself.
 
 `PITCHAPI_DATA_TOKEN` here is a **separate**, read-only token: the GitHub Actions secret of the

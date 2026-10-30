@@ -182,6 +182,42 @@ export function verifySessionToken(config: AuthConfig, token: string | undefined
 }
 
 // ============================================
+// APPAREIL CONNU (cookie d'appareil, modèle OWASP « device cookies »)
+// ============================================
+
+export const DEVICE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+
+/**
+ * Jeton d'appareil posé après une connexion réussie et conservé après la déconnexion. Il ne
+ * donne aucun accès : il permet seulement à ce navigateur de garder une place de vérification
+ * réservée quand des tiers saturent la connexion. Signé avec le secret de session, préfixe distinct
+ * des jetons de session (jamais interchangeables).
+ */
+export function createDeviceToken(config: AuthConfig, now = Date.now()): string {
+  const body = b64u(Buffer.from(JSON.stringify({ t: 'device', u: config.user, exp: now + DEVICE_TTL_MS, d: b64u(randomBytes(12)) }), 'utf8'));
+  return `${body}.${b64u(sign(config.sessionSecret, `device.${body}`))}`;
+}
+
+export function verifyDeviceToken(config: AuthConfig, token: string | undefined, now = Date.now()): boolean {
+  if (!token || token.length > 512) return false;
+  const [body, sig, extra] = token.split('.');
+  if (!body || !sig || extra !== undefined || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]+$/.test(sig)) return false;
+  const expected = sign(config.sessionSecret, `device.${body}`);
+  const given = fromB64u(sig);
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return false;
+  try {
+    const payload = JSON.parse(fromB64u(body).toString('utf8'));
+    return payload?.t === 'device' && payload.u === config.user && typeof payload.exp === 'number' && payload.exp > now;
+  } catch { return false; }
+}
+
+export const deviceCookieName = (secure: boolean) => (secure ? '__Host-sv_device' : 'sv_device');
+
+export function deviceCookie(token: string, secure: boolean): string {
+  return [`${deviceCookieName(secure)}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${Math.floor(DEVICE_TTL_MS / 1000)}`, ...(secure ? ['Secure'] : [])].join('; ');
+}
+
+// ============================================
 // COOKIE
 // ============================================
 
@@ -211,7 +247,7 @@ export function readCookie(header: string | undefined, name: string): string | u
 // LIMITE DES TENTATIVES
 // ============================================
 
-export type Reservation = { ok: true; slow: boolean } | { ok: false; retryAfter: number; reason: 'ip' | 'busy' };
+export type Reservation = { ok: true; slow: boolean; trusted: boolean } | { ok: false; retryAfter: number; reason: 'ip' | 'busy' };
 
 /**
  * Tentatives de connexion :
@@ -222,12 +258,16 @@ export type Reservation = { ok: true; slow: boolean } | { ok: false; retryAfter:
  * - au plus `maxConcurrent` vérifications scrypt en même temps (mémoire bornée), les autres
  *   reçoivent 429 tout de suite ;
  * - au-delà de `globalSoftLimit` échecs toutes adresses confondues, les vérifications passent une
- *   à une et sont ralenties, sans jamais bloquer : le propriétaire peut toujours se connecter.
+ *   à une et sont ralenties ;
+ * - un navigateur porteur d'un cookie d'appareil connu (connexion réussie auparavant) garde sa
+ *   propre place de vérification, hors ralentissement : des tiers qui saturent la connexion ne
+ *   peuvent pas en exclure le propriétaire. La limite par adresse s'applique toujours.
  */
 export class LoginLimiter {
   private byIp = new Map<string, { count: number; reset: number }>();
   private global = { count: 0, reset: 0 };
   private inFlight = 0;
+  private trustedInFlight = 0;
   constructor(private limit = 5, private windowMs = 15 * 60 * 1000, private globalSoftLimit = 50, private maxConcurrent = 2) {}
 
   /** Secondes avant une nouvelle tentative pour cette adresse ; 0 si autorisée */
@@ -242,19 +282,26 @@ export class LoginLimiter {
   }
 
   /** Réserve une tentative (comptée comme un échec jusqu'à preuve du contraire) */
-  reserve(ip: string, now = Date.now()): Reservation {
+  reserve(ip: string, now = Date.now(), trusted = false): Reservation {
     const wait = this.retryAfter(ip, now);
     if (wait > 0) return { ok: false, retryAfter: wait, reason: 'ip' };
+    if (trusted) {
+      if (this.trustedInFlight >= 1) return { ok: false, retryAfter: 1, reason: 'busy' };
+      this.fail(ip, now);
+      this.trustedInFlight++;
+      return { ok: true, slow: false, trusted: true };
+    }
     const slow = this.underPressure(now);
     if (this.inFlight >= (slow ? 1 : this.maxConcurrent)) return { ok: false, retryAfter: 2, reason: 'busy' };
     this.fail(ip, now);
     this.inFlight++;
-    return { ok: true, slow };
+    return { ok: true, slow, trusted: false };
   }
 
   /** Fin de la vérification : un succès efface les échecs de l'adresse et rend sa part du compteur global */
-  release(ip: string, success: boolean) {
-    this.inFlight = Math.max(0, this.inFlight - 1);
+  release(ip: string, success: boolean, trusted = false) {
+    if (trusted) this.trustedInFlight = Math.max(0, this.trustedInFlight - 1);
+    else this.inFlight = Math.max(0, this.inFlight - 1);
     if (success) {
       this.byIp.delete(ip);
       if (this.global.count > 0) this.global.count--;

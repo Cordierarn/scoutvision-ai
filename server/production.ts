@@ -68,13 +68,21 @@ server.listen(port, '0.0.0.0', () => {
 // Données privées : téléchargées au démarrage puis vérifiées à intervalle régulier
 const token = env.PITCHAPI_DATA_TOKEN?.trim();
 if (token) {
+  let running = false;   // jamais deux téléchargements en même temps
   const refresh = async () => {
-    const result = await syncData({ token, dataDir, repo: env.SCOUTVISION_DATA_REPO || undefined });
-    if (result.status === 'failed') console.error(`Données non mises à jour : ${result.message}${dataInstalled(dataDir) ? ' (les données déjà installées restent servies)' : ''}.`);
-    else if (result.status === 'current') console.log(`Données à jour (${result.updatedAt}).`);
+    if (running) return;
+    running = true;
+    try {
+      const result = await syncData({ token, dataDir, repo: env.SCOUTVISION_DATA_REPO || undefined });
+      if (result.status === 'failed') console.error(`Données non mises à jour : ${result.message}${dataInstalled(dataDir) ? ' (les données déjà installées restent servies)' : ''}.`);
+      else if (result.status === 'current') console.log(`Données à jour (${result.updatedAt}).`);
+    } finally {
+      running = false;
+    }
   };
   void refresh();
-  const hours = Number(env.SCOUTVISION_DATA_REFRESH_HOURS) || 6;
+  // Entre 1 heure et 7 jours (au-delà, setInterval déborderait et tournerait en boucle)
+  const hours = Math.min(Math.max(Number(env.SCOUTVISION_DATA_REFRESH_HOURS) || 6, 1), 24 * 7);
   setInterval(() => { void refresh(); }, hours * 3600_000).unref();
 } else if (!dataInstalled(dataDir)) {
   console.warn(`Aucune donnée dans ${dataDir} et PITCHAPI_DATA_TOKEN absente : /data répondra 503.`);

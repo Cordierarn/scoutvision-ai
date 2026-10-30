@@ -21,12 +21,19 @@ export const LOGIN_PATH = '/login';
  */
 export function safeNext(value: string | null | undefined): string {
   if (!value || value.length > 512 || /[\x00-\x20\x7f\\]/.test(value) || !value.startsWith('/') || value.startsWith('//')) return '/';
+  // Segments « . » / « .. », même encodés : « /.//site » deviendrait « //site » une fois normalisé
+  let decoded = value;
+  try { decoded = decodeURIComponent(value.split('?')[0]); } catch { return '/'; }
+  if (/(^|\/)\.{1,2}(\/|$)/.test(decoded) || decoded.startsWith('//')) return '/';
+  const base = 'http://scoutvision.invalid';
   let url: URL;
-  try { url = new URL(value, 'http://scoutvision.invalid'); } catch { return '/'; }
-  if (url.origin !== 'http://scoutvision.invalid') return '/';
+  try { url = new URL(value, base); } catch { return '/'; }
   const p = url.pathname;
+  if (url.origin !== base || p.startsWith('//')) return '/';
   if (p === LOGIN_PATH || p.startsWith('/api/') || p.startsWith('/data/') || p.startsWith('/cdn/')) return '/';
-  return `${p}${url.search}`;
+  const result = `${p}${url.search}`;
+  try { if (new URL(result, base).origin !== base) return '/'; } catch { return '/'; }
+  return result;
 }
 
 /** Page de connexion avec retour à l'emplacement courant (le fragment, ex. #partage=…, est conservé) */
