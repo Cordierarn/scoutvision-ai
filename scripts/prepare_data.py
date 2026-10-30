@@ -290,23 +290,43 @@ def gh_json(*args: str):
     return json.loads(out)
 
 
+# Releases et leurs archives, lues une fois par exécution via l'API REST (`gh api`) :
+# `gh release list/view/download` passent par GraphQL, indisponible dans certains environnements.
+_releases: dict[str, dict[str, dict]] | None = None
+
+
+def release_assets(tag: str) -> dict[str, dict] | None:
+    """Archives d'une release : nom -> {"id", "size"} ; None si la release n'existe pas."""
+    global _releases
+    if _releases is None:
+        _releases = {}
+        page = 1
+        while True:
+            releases = gh_json("api", f"repos/{DATA_REPO}/releases?per_page=100&page={page}")
+            for r in releases:
+                _releases[r["tag_name"]] = {a["name"]: {"id": a["id"], "size": a["size"]} for a in r["assets"]}
+            if len(releases) < 100:
+                break
+            page += 1
+    return _releases.get(tag)
+
+
 def list_table_assets() -> dict[tuple[str, str], tuple[str, str, int]]:
     """(compétition, saison) -> (release, asset, taille). Une saison close prime sur data-v2-current."""
-    releases = gh_json("release", "list", "-R", DATA_REPO, "--limit", "100", "--json", "tagName")
-    tags = [r["tagName"] for r in releases if r["tagName"].startswith("data-v2-")]
+    release_assets("data-v2-current")
+    tags = [t for t in (_releases or {}) if t.startswith("data-v2-")]
     # data-v2-current en dernier : une saison close publiée ailleurs n'est pas écrasée
     tags.sort(key=lambda t: t == "data-v2-current")
 
     assets: dict[tuple[str, str], tuple[str, str, int]] = {}
     for tag in tags:
-        info = gh_json("release", "view", tag, "-R", DATA_REPO, "--json", "assets")
-        for a in info["assets"]:
-            m = TABLES_ASSET.match(a["name"])
+        for name, a in (_releases or {})[tag].items():
+            m = TABLES_ASSET.match(name)
             if not m or m.group("comp") == "ALL":
                 continue
             key = (m.group("comp"), m.group("season"))
             if key not in assets:
-                assets[key] = (tag, a["name"], a["size"])
+                assets[key] = (tag, name, a["size"])
     return assets
 
 
@@ -315,10 +335,19 @@ def download(tag: str, name: str, size: int | None = None) -> Path:
     dest = CACHE_DIR / tag / name
     if dest.exists() and (size is None or dest.stat().st_size == size):
         return dest
+    asset = (release_assets(tag) or {}).get(name)
+    if asset is None:
+        raise FileNotFoundError(f"{tag}/{name} introuvable dans les releases de {DATA_REPO}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"  ↓ {tag}/{name}", flush=True)
-    subprocess.run(["gh", "release", "download", tag, "-R", DATA_REPO, "-p", name,
-                    "-D", str(dest.parent), "--clobber"], check=True, env=gh_env())
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    with open(tmp, "wb") as fh:
+        subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream",
+                        f"repos/{DATA_REPO}/releases/assets/{asset['id']}"], check=True, stdout=fh, env=gh_env())
+    if tmp.stat().st_size != asset["size"]:
+        tmp.unlink()
+        raise OSError(f"{tag}/{name} : téléchargement incomplet ({tmp.stat().st_size if tmp.exists() else 0} / {asset['size']} octets)")
+    tmp.replace(dest)
     return dest
 
 
@@ -335,8 +364,7 @@ def read_tables(tar_path: Path, tables: set[str]) -> dict[str, pd.DataFrame]:
 
 def read_global_refs() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Référentiels de global.tar : joueurs et équipes (nationalité, photos, logos), compétitions."""
-    info = gh_json("release", "view", "data-v2-current", "-R", DATA_REPO, "--json", "assets")
-    size = next(a["size"] for a in info["assets"] if a["name"] == "global.tar")
+    size = (release_assets("data-v2-current") or {})["global.tar"]["size"]
     path = download("data-v2-current", "global.tar", size)
     refs = read_tables(path, {"player", "team"})
     with tarfile.open(path) as tar:
@@ -633,8 +661,7 @@ def build_results(match: pd.DataFrame | None, team_match: pd.DataFrame | None, c
 def read_fixtures(comp: str, raw_season: str) -> list[dict]:
     """Calendrier d'une compétition (raw/<saison>/<COMP>/fixtures.json.gz de data-v2-current)."""
     name = f"raw-{comp}-{raw_season}.tar"
-    info = gh_json("release", "view", "data-v2-current", "-R", DATA_REPO, "--json", "assets")
-    asset = next((a for a in info["assets"] if a["name"] == name), None)
+    asset = (release_assets("data-v2-current") or {}).get(name)
     if asset is None:
         return []
     with tarfile.open(download("data-v2-current", name, asset["size"])) as tar:
@@ -806,16 +833,15 @@ def age_at_season_start(birth: pd.Series, raw_season: str) -> pd.Series:
 
 def fetch_market() -> Path | None:
     """market_value.parquet de la release privée scoutvision-data ; None si absent."""
-    try:
-        info = gh_json("release", "view", MARKET_RELEASE, "-R", DATA_REPO, "--json", "assets")
-    except subprocess.CalledProcessError:
+    assets = release_assets(MARKET_RELEASE)
+    if assets is None:
         print(f"Release {MARKET_RELEASE} introuvable : pas de valeurs Transfermarkt.")
         return None
-    asset = next((a for a in info["assets"] if a["name"] == "market_value.parquet"), None)
+    asset = assets.get("market_value.parquet")
     if asset is None:
         print(f"Pas de market_value.parquet dans {MARKET_RELEASE} : pas de valeurs Transfermarkt.")
         return None
-    return download(MARKET_RELEASE, asset["name"], asset["size"])
+    return download(MARKET_RELEASE, "market_value.parquet", asset["size"])
 
 
 def read_market(path: Path | None) -> pd.DataFrame | None:

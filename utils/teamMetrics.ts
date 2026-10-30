@@ -137,7 +137,7 @@ export function styleReliability(matches: number | null | undefined, style: stri
  * de toutes les équipes-saisons (2 328 au moment de la mesure). Le pipeline ne l'exporte pas :
  * valeurs mesurées sur les données, contrôlées par teamMetrics.test.ts quand elles sont présentes.
  */
-export const STYLE_PCA_VARIANCE = { pc1: 0.632, pc2: 0.24 } as const;
+export const STYLE_PCA_VARIANCE = { pc1: 0.639, pc2: 0.242 } as const;   // données PitchAPI du 30/10/2026, 2 328 équipes-saisons
 
 export interface StylePoint {
   team: TeamStats;

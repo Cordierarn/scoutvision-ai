@@ -75,7 +75,7 @@ threshold typed by the user is never overwritten. Thresholds used as signals (fo
   final style in 30 % of cases after 1 match, 48 % after 3, 55 % after 5, 64 % after 8, 66 % after 10,
   74 % after 15, 80 % after 20 (most frequent style: 23.5 %). The style is not named below 5 matches,
   shown as a trend from 5 to 9 and as the observed style from 10. Between two complete seasons, 47 %
-  of clubs change style. Style map: PC1 63.2 % and PC2 24.0 % of the variance (87 %), one point per
+  of clubs change style. Style map: PC1 63.9 % and PC2 24.2 % of the variance (88 %, data of 2026-10-30, 2,328 team-seasons), one point per
   team-season.
 - Depth (`slotDepth`): starter, backup and third option of each slot of the formation, with the
   signals Recruitment already uses (no backup, rotation, contract ≤ 12 months, age decline, no
