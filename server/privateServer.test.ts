@@ -113,6 +113,15 @@ describe('connexion', () => {
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
     expect((await login('arnaud', PASSWORD, { 'X-Forwarded-For': '198.51.100.8' })).status).toBe(200);
+    // Entrées de gauche inventées par le client : même adresse (celle ajoutée par le proxy), toujours bloquée
+    expect((await login('arnaud', PASSWORD, { 'X-Forwarded-For': '203.0.113.99, 198.51.100.7' })).status).toBe(429);
+  });
+
+  it('rafale simultanée : au plus 5 vérifications pour une adresse, le reste en 429', async () => {
+    const ip = { 'X-Forwarded-For': '198.51.100.20' };
+    const statuses = await Promise.all(Array.from({ length: 20 }, (_, i) => login('arnaud', `faux-${i}`, ip).then(r => r.status)));
+    expect(statuses.filter(s => s === 401).length).toBeLessThanOrEqual(5);
+    expect(statuses.filter(s => s === 429).length).toBeGreaterThanOrEqual(15);
   });
 
   it('requête mal formée : 400 / 415 / 405', async () => {
@@ -234,6 +243,22 @@ describe('garde d\'accès', () => {
     expect(safeNext('/\\evil.example')).toBe('/');
     expect(safeNext('/data/players/2026-27.json')).toBe('/');
     expect(safeNext('/?saison=2026-27')).toBe('/?saison=2026-27');
+    // Tabulation, retour à la ligne, espace : le navigateur les retirerait et ferait « //site »
+    for (const v of ['/\t/evil.example/x', '/\n/evil.example', '/ /evil.example', '/\x0b/evil.example', '/%09/evil.example'.replace('%09', '\t')]) expect(safeNext(v)).toBe('/');
+    expect((await get('/login?next=%2F%09%2Fevil.example%2Fx', { Cookie: c })).headers.get('location')).toBe('/');
+  });
+});
+
+describe('mode développement', () => {
+  it('sans session : aucun dossier privé par les routes de modules de Vite (/@id/, alias, chemin absolu)', async () => {
+    server.close();
+    await start({ mode: 'dev' });
+    for (const p of ['/@id/@/public/data/index.json?import', `/@id/${root}/data/players/2026-27.json?import`, '/@id/@/dist/.vite/manifest.json?import', '/src/x.js?p=/public/data/index.json', '/.env.local']) {
+      const res = await get(p, { Accept: '*/*' });
+      expect([302, 401]).toContain(res.status);   // 404 signalerait un passage à Vite (next)
+    }
+    server.close();
+    await start();
   });
 });
 

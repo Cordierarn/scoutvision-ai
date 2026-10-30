@@ -19,10 +19,9 @@ const cdnProxy = {
  * Garde d'accès sur `vite` et `vite preview` : mêmes règles qu'en production (session, données
  * privées, endpoints Gemini). Sans variables d'authentification : mode local ouvert, signalé.
  */
-function privateServer(env: Record<string, string>): Plugin {
-  const auth = loadAuthConfig(env);    // variables partielles ou invalides : Vite refuse de démarrer
+function privateServer(env: Record<string, string>, auth: ReturnType<typeof loadAuthConfig>): Plugin {
   const make = (mode: ServerMode) => {
-    if (!auth) console.warn('\n  ScoutVision : authentification non configurée, accès local ouvert (voir docs/deployment.md).\n');
+    if (!auth) console.warn('\n  ScoutVision : authentification non configurée, accès local ouvert, limité à cet ordinateur (127.0.0.1). Voir docs/deployment.md.\n');
     return createPrivateServer({
       mode,
       auth,
@@ -39,6 +38,27 @@ function privateServer(env: Record<string, string>): Plugin {
     name: 'scoutvision-private-server',
     configureServer(server) { server.middlewares.use(make('dev')); },
     configurePreviewServer(server) { server.middlewares.use(make('preview')); },
+  };
+}
+
+/**
+ * Développement : aucun fichier des dossiers privés ne peut être chargé comme module, quelle que
+ * soit l'URL (/@id/, alias @/, chemin absolu, ?import, ?raw). L'application ne fait que fetch()
+ * sur /data, servi par le garde ; elle n'importe jamais ces fichiers.
+ */
+function denyPrivateModules(dataDir: string): Plugin {
+  const roots = [dataDir, path.resolve(__dirname, 'public/data'), path.resolve(__dirname, 'dist'), path.resolve(__dirname, 'dist-server'), path.resolve(__dirname, '.cache'), path.resolve(__dirname, 'exports')];
+  const isPrivate = (id: string) => {
+    const file = path.resolve(id.split('?')[0].replace(/^\/@fs/, ''));
+    return roots.some(r => file === r || file.startsWith(r + path.sep)) || /(^|[\\/])\.env(\.|$)/.test(file);
+  };
+  return {
+    name: 'scoutvision-deny-private-modules',
+    enforce: 'pre',
+    apply: 'serve',
+    load(id) {
+      if (isPrivate(id)) this.error('Fichier privé : jamais servi comme module.');
+    },
   };
 }
 
@@ -61,13 +81,18 @@ export default defineConfig(({ mode, isSsrBuild }) => {
     if (exposed.length > 0) {
       throw new Error(`Variables secrètes exposées au navigateur par le préfixe VITE_ : ${exposed.join(', ')}. Renommez-les sans VITE_.`);
     }
+    const auth = isSsrBuild ? null : loadAuthConfig(env);    // variables partielles ou invalides : Vite refuse de démarrer
+    // Sans authentification (mode local ouvert), le serveur n'écoute que sur cet ordinateur
+    const host = auth ? '0.0.0.0' : '127.0.0.1';
+    const dataDir = path.resolve(__dirname, env.SCOUTVISION_DATA_DIR || 'public/data');
     return {
       server: {
         port: 3000,
-        host: '0.0.0.0',
+        host,
         proxy: { '/cdn': cdnProxy },
       },
-      plugins: [react(), ...(isSsrBuild ? [] : [privateServer(env), publishLogo()])],
+      preview: { host },
+      plugins: [react(), ...(isSsrBuild ? [] : [denyPrivateModules(dataDir), privateServer(env, auth), publishLogo()])],
       publicDir: 'public',
       build: isSsrBuild ? { sourcemap: false, copyPublicDir: false } : {
         // public/ contient les données privées (public/data) : rien n'en est copié dans dist/

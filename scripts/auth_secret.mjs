@@ -13,7 +13,8 @@
 
 import { randomBytes, scrypt } from 'node:crypto';
 
-export const SCRYPT = { N: 2 ** 17, r: 8, p: 1 };
+// Mêmes paramètres que server/auth.ts (DEFAULT_SCRYPT) : 64 Mio par vérification
+export const SCRYPT = { N: 2 ** 16, r: 8, p: 2 };
 
 export function hashPassword(password, params = SCRYPT) {
   const salt = randomBytes(16);

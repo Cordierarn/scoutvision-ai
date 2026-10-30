@@ -31,6 +31,7 @@ describe('hash du mot de passe', () => {
     expect(parsePasswordHash(good.replace(':16384:', ':1024:'))).toBeNull();     // N trop faible
     expect(parsePasswordHash(good.replace(':16384:', ':20000:'))).toBeNull();    // N non puissance de 2
     expect(parsePasswordHash(good.replace(':8:1:', ':1:1:'))).toBeNull();        // r trop faible
+    expect(parsePasswordHash(good.replace(':16384:', ':262144:'))).toBeNull();   // 256 Mio : trop pour l'instance
     expect(parsePasswordHash(good.split(':').slice(0, 5).join(':'))).toBeNull(); // hash absent
     expect(parsePasswordHash(`scrypt:16384:8:1:${Buffer.alloc(4).toString('base64url')}:${Buffer.alloc(32).toString('base64url')}`)).toBeNull(); // sel trop court
   });
@@ -125,9 +126,32 @@ describe('limite des tentatives', () => {
     expect(l.retryAfter('1.1.1.1', t)).toBe(0);
   });
 
-  it('plafond global contre la rotation d\'adresses', () => {
-    const l = new LoginLimiter(5, 60_000, 10);
+  it('réservation synchrone : une rafale simultanée ne dépasse pas la limite', () => {
+    const l = new LoginLimiter(5, 60_000, 50, 100);
+    const results = Array.from({ length: 40 }, () => l.reserve('9.9.9.9', 0));   // aucune ne s'est encore terminée
+    expect(results.filter(r => r.ok)).toHaveLength(5);
+    expect(results.filter(r => !r.ok).every(r => 'reason' in r && r.reason === 'ip')).toBe(true);
+  });
+
+  it('au plus deux vérifications simultanées (mémoire bornée), libérées à la fin', () => {
+    const l = new LoginLimiter(5, 60_000, 50, 2);
+    expect(l.reserve('a', 0).ok).toBe(true);
+    expect(l.reserve('b', 0).ok).toBe(true);
+    const third = l.reserve('c', 0);
+    expect(third.ok).toBe(false);
+    expect('reason' in third && third.reason).toBe('busy');
+    l.release('a', false);
+    expect(l.reserve('c', 0).ok).toBe(true);
+  });
+
+  it('beaucoup d\'échecs toutes adresses confondues : ralentissement, jamais de blocage du propriétaire', () => {
+    const l = new LoginLimiter(5, 60_000, 10, 2);
     for (let i = 0; i < 10; i++) l.fail(`10.0.0.${i}`, 0);
-    expect(l.retryAfter('10.0.0.99', 0)).toBeGreaterThan(0);
+    expect(l.underPressure(0)).toBe(true);
+    const owner = l.reserve('192.0.2.1', 0);
+    expect(owner).toEqual({ ok: true, slow: true });
+    expect(l.reserve('192.0.2.2', 0).ok).toBe(false);              // une seule vérification à la fois sous pression
+    l.release('192.0.2.1', true);                                  // succès : l'adresse repart à zéro
+    expect(l.retryAfter('192.0.2.1', 0)).toBe(0);
   });
 });

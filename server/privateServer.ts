@@ -69,7 +69,9 @@ export const LOGIN_PATH = '/login';
 export const CDN_PATTERN = /^\/cdn\/images\/(players|teams)\/[A-Za-z0-9_-]{1,80}\.webp$/;
 const CDN_ORIGIN = 'https://cdn.pitchapi.dev';
 /** Dossiers du projet que `vite dev` servirait par leur chemin : refusés sans session */
-const DEV_PRIVATE_PREFIX = /^\/(public|\.cache|dist|dist-server|exports|scripts|@fs)(\/|$)/;
+const DEV_PRIVATE_PREFIX = /^\/(public|\.cache|dist|dist-server|exports|scripts|@fs|@id)(\/|$)/;
+/** Mêmes dossiers désignés ailleurs dans l'URL (alias @/, chemin absolu, requête ?import) */
+const DEV_PRIVATE_ANYWHERE = /(^|\/)(public\/data|\.cache|dist|dist-server|exports)(\/|$)|\.env/;
 const CDN_MAX_BYTES = 2 * 1024 * 1024;
 
 export const CONTENT_SECURITY_POLICY = [
@@ -114,6 +116,8 @@ function redirect(res: ServerResponse, location: string) {
   res.end();
 }
 
+const decodeURIComponentSafe = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
+
 /** Chemin décodé de l'URL ; null s'il est invalide (encodage, octet nul) */
 export function requestPath(req: IncomingMessage): string | null {
   const raw = (req.url ?? '/').split('?')[0].split('#')[0] || '/';
@@ -126,20 +130,31 @@ export function requestPath(req: IncomingMessage): string | null {
   } catch { return null; }
 }
 
-/** Destination de retour après connexion : chemin interne uniquement (pas d'URL externe) */
+/**
+ * Destination de retour après connexion : chemin interne uniquement. Tout caractère de contrôle,
+ * espace ou barre oblique inverse est refusé (le navigateur retire tabulations et retours à la
+ * ligne d'une URL : « /\t/site » deviendrait « //site ») ; la valeur est résolue et doit rester
+ * sur la même origine.
+ */
 export function safeNext(value: string | null | undefined): string {
-  if (!value || value.length > 512 || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
-  if (/[\0\r\n]/.test(value)) return '/';
-  const p = value.split('?')[0];
+  if (!value || value.length > 512 || /[\x00-\x20\x7f\\]/.test(value) || !value.startsWith('/') || value.startsWith('//')) return '/';
+  let url: URL;
+  try { url = new URL(value, 'http://scoutvision.invalid'); } catch { return '/'; }
+  if (url.origin !== 'http://scoutvision.invalid') return '/';
+  const p = url.pathname;
   if (p === LOGIN_PATH || p.startsWith('/api/') || p.startsWith('/data/') || p.startsWith('/cdn/')) return '/';
-  return value;
+  return `${p}${url.search}`;
 }
 
-/** Adresse du client : premier X-Forwarded-For derrière le proxy de l'hébergeur, sinon la socket */
+/**
+ * Adresse du client. Derrière le proxy de l'hébergeur, l'entrée la plus à droite de
+ * X-Forwarded-For est celle que le proxy a ajoutée : les entrées de gauche viennent du client et
+ * peuvent être inventées. Sans proxy de confiance : l'adresse de la socket.
+ */
 export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
   if (trustProxy) {
-    const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-    if (fwd) return fwd.slice(0, 64);
+    const hops = String(req.headers['x-forwarded-for'] ?? '').split(',').map(h => h.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1].slice(0, 64);
   }
   return req.socket?.remoteAddress ?? 'inconnu';
 }
@@ -274,9 +289,6 @@ export function createPrivateServer(opts: PrivateServerOptions) {
         return sendJson(res, 200, { authenticated: false });
       }
       if (!opts.auth) return sendJson(res, 404, { error: 'Authentification non configurée.' });
-      const ip = clientIp(req, opts.trustProxy);
-      const wait = limiter.retryAfter(ip);
-      if (wait > 0) return sendJson(res, 429, { error: 'Trop de tentatives. Réessayez plus tard.', retryAfter: wait }, { 'Retry-After': String(wait) });
       if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) return sendJson(res, 415, { error: 'Content-Type application/json attendu.' });
       let body: unknown;
       try { body = JSON.parse(await readBody(req, 4096)); } catch { return sendJson(res, 400, { error: 'Requête invalide.' }); }
@@ -284,12 +296,18 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       if (typeof username !== 'string' || typeof password !== 'string' || username.length > 128 || password.length > 1024) {
         return sendJson(res, 400, { error: 'Requête invalide.' });
       }
-      const ok = await checkCredentials(opts.auth, username, password);
-      if (!ok) {
-        limiter.fail(ip);
-        return sendJson(res, 401, { error: 'Identifiants incorrects.' });
+      // Tentative réservée de façon synchrone, avant le calcul du hash (pas de contournement par rafale)
+      const ip = clientIp(req, opts.trustProxy);
+      const slot = limiter.reserve(ip);
+      if ('retryAfter' in slot) return sendJson(res, 429, { error: 'Trop de tentatives. Réessayez plus tard.', retryAfter: slot.retryAfter }, { 'Retry-After': String(slot.retryAfter) });
+      let ok = false;
+      try {
+        if (slot.ok && slot.slow) await new Promise(resolve => setTimeout(resolve, 1000));
+        ok = await checkCredentials(opts.auth, username, password);
+      } finally {
+        limiter.release(ip, ok);
       }
-      limiter.succeed(ip);
+      if (!ok) return sendJson(res, 401, { error: 'Identifiants incorrects.' });
       const { token, payload } = createSessionToken(opts.auth);
       res.setHeader('Set-Cookie', sessionCookie(token, opts.secureCookies));
       return sendJson(res, 200, { authenticated: true, user: payload.u });
@@ -370,7 +388,7 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       }
       // Développement : sources des modules (code public du dépôt) servies par Vite, sauf les
       // dossiers que Vite servirait aussi par leur chemin (données, cache des archives, builds)
-      if (opts.mode === 'dev' && !DEV_PRIVATE_PREFIX.test(p)) return next();
+      if (opts.mode === 'dev' && !DEV_PRIVATE_PREFIX.test(p) && !DEV_PRIVATE_ANYWHERE.test(decodeURIComponentSafe(req.url ?? ''))) return next();
       return sendText(res, 401, 'Authentification requise.');
     }
 

@@ -48,19 +48,21 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
   `401` and never the content. The login page is a separate bundle (`login.html`); its files are
   read from the build manifest and are the only public assets.
 - `vite dev` and `vite preview` mount the same guard. Without the three auth variables they run
-  in an explicit **open local mode** (warning in the terminal, no logout button). The production
-  server refuses to start without them.
+  in an explicit **open local mode**, bound to `127.0.0.1` only (warning in the terminal, no
+  logout button). The production server refuses to start without them. In development, a Vite
+  plugin also refuses to load any file of `public/data`, `dist`, `.cache` or `.env*` as a
+  module, whatever the URL (`/@id/`, `@/` alias, absolute path, `?import`, `?raw`).
 
 ## Authentication
 
 | Part | Choice |
 |---|---|
 | Account | one user, `SCOUTVISION_AUTH_USER` (`arnaud`); no sign-up, no reset, no third-party login |
-| Password | stored only as a scrypt hash (`node:crypto`, N = 2^17, r = 8, p = 1, 16-byte salt) in `SCOUTVISION_AUTH_PASSWORD_HASH` |
+| Password | stored only as a scrypt hash (`node:crypto`, N = 2^16, r = 8, p = 2, 16-byte salt, one of the OWASP parameter sets: 64 MiB per check) in `SCOUTVISION_AUTH_PASSWORD_HASH` |
 | Check | constant-time comparison; the hash is always computed, even for a wrong username: same message (« Identifiants incorrects. ») and similar time |
 | Session | HMAC-SHA256 signed token (user, expiry, id, fingerprint of the password hash) in cookie `__Host-sv_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, 7 days |
 | Logout | `POST /api/auth/logout`: cookie cleared, token id revoked immediately on the server |
-| Rate limit | 5 failed logins per IP per 15 minutes, then `429` with `Retry-After`; 50 failures across all IPs per 15 minutes; never a permanent lock |
+| Rate limit | 5 failed logins per IP per 15 minutes, then `429` with `Retry-After`; the attempt is counted **before** the hash is computed, so a burst of parallel requests cannot exceed it; at most 2 password checks at once (memory bounded), extra requests get `429`; above 50 failures across all IPs per 15 minutes, checks run one at a time with a 1 s delay, but nobody is ever locked out |
 | Browser | no token in `localStorage` or `sessionStorage`, no secret in the bundle; the password only lives in the form state until the POST |
 
 Endpoints: `POST /api/auth/login` (`{ username, password }` → `{ authenticated, user }` + cookie),
@@ -155,9 +157,11 @@ same name has write access to publish the data and should not be reused on the s
 - Revoked session ids are kept in memory: a token stolen **and** used after a logout followed by a
   server restart stays valid until its expiry (7 days). Rotating `SCOUTVISION_SESSION_SECRET`
   invalidates everything at once.
-- The login rate limit is per instance and in memory (one instance here). Behind Render, the IP
-  comes from `X-Forwarded-For`; the global cap (50 failures / 15 min) bounds attempts even if
-  that header is spoofed, and can delay the legitimate login during an attack.
+- The login rate limit is per instance and in memory (one instance here). Behind Render, the
+  client IP is the right-most `X-Forwarded-For` entry, the one added by Render's proxy (the
+  left-most entries are set by the client and ignored). If Render's edge ever appended its own
+  address instead, every client would share one bucket: an attacker could then delay the owner's
+  login by 15 minutes, never lock it permanently.
 - On the free plan, the first request after 15 minutes of inactivity waits for the instance to
   wake up and for the data download.
 - Data kept in the browser by the app (scouting dossiers, watchlist, saved filters) stays in that

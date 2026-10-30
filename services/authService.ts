@@ -14,12 +14,19 @@ export type SessionCheck = { status: 'authenticated'; session: SessionState } | 
 
 export const LOGIN_PATH = '/login';
 
-/** Destination de retour : chemin interne uniquement (même règle que le serveur) */
+/**
+ * Destination de retour : chemin interne uniquement (même règle que le serveur). Caractères de
+ * contrôle, espaces et barres obliques inverses refusés : le navigateur retire tabulations et
+ * retours à la ligne d'une URL (« /\t/site » deviendrait « //site »).
+ */
 export function safeNext(value: string | null | undefined): string {
-  if (!value || value.length > 512 || !value.startsWith('/') || value.startsWith('//') || value.includes('\\') || /[\0\r\n]/.test(value)) return '/';
-  const p = value.split('?')[0];
+  if (!value || value.length > 512 || /[\x00-\x20\x7f\\]/.test(value) || !value.startsWith('/') || value.startsWith('//')) return '/';
+  let url: URL;
+  try { url = new URL(value, 'http://scoutvision.invalid'); } catch { return '/'; }
+  if (url.origin !== 'http://scoutvision.invalid') return '/';
+  const p = url.pathname;
   if (p === LOGIN_PATH || p.startsWith('/api/') || p.startsWith('/data/') || p.startsWith('/cdn/')) return '/';
-  return value;
+  return `${p}${url.search}`;
 }
 
 /** Page de connexion avec retour à l'emplacement courant (le fragment, ex. #partage=…, est conservé) */

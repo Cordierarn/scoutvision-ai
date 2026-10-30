@@ -21,8 +21,14 @@ import { createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqua
 
 export interface ScryptParams { N: number; r: number; p: number }
 
-/** Paramètres par défaut (recommandation OWASP pour scrypt : N = 2^17, r = 8, p = 1) */
-export const DEFAULT_SCRYPT: ScryptParams = { N: 2 ** 17, r: 8, p: 1 };
+/**
+ * Paramètres par défaut : N = 2^16, r = 8, p = 2 (l'une des combinaisons recommandées par l'OWASP,
+ * même coût de calcul que N = 2^17, p = 1, mais 64 Mio de mémoire par vérification au lieu de 128 :
+ * adapté à une instance de 512 Mo, avec au plus deux vérifications simultanées).
+ */
+export const DEFAULT_SCRYPT: ScryptParams = { N: 2 ** 16, r: 8, p: 2 };
+/** Mémoire maximale acceptée pour un hash (128 × N × r), bornée pour la petite instance */
+const MAX_SCRYPT_MEMORY = 128 * 1024 * 1024;
 const KEY_LENGTH = 32;
 const SALT_LENGTH = 16;
 
@@ -55,6 +61,7 @@ export function parsePasswordHash(value: string | undefined): PasswordHash | nul
   if (![N, r, p].every(Number.isInteger)) return null;
   // N puissance de 2 entre 2^14 et 2^20 ; r et p bornés (pas de paramètre faible ni de déni de service)
   if (N < 2 ** 14 || N > 2 ** 20 || (N & (N - 1)) !== 0 || r < 8 || r > 32 || p < 1 || p > 4) return null;
+  if (128 * N * r > MAX_SCRYPT_MEMORY) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(parts[4]) || !/^[A-Za-z0-9_-]+$/.test(parts[5])) return null;
   const salt = fromB64u(parts[4]);
   const hash = fromB64u(parts[5]);
@@ -204,22 +211,54 @@ export function readCookie(header: string | undefined, name: string): string | u
 // LIMITE DES TENTATIVES
 // ============================================
 
+export type Reservation = { ok: true; slow: boolean } | { ok: false; retryAfter: number; reason: 'ip' | 'busy' };
+
 /**
- * Échecs de connexion par adresse sur une fenêtre glissante simple : au-delà de `limit` échecs,
- * 429 jusqu'à la fin de la fenêtre. Un plafond global protège contre la rotation d'adresses.
- * Jamais de blocage définitif du compte ; une connexion réussie remet le compteur de l'adresse à zéro.
+ * Tentatives de connexion :
+ * - par adresse : au plus `limit` échecs par fenêtre de 15 minutes, puis 429 jusqu'à la fin de la
+ *   fenêtre ; une connexion réussie remet le compteur de l'adresse à zéro ;
+ * - la tentative est comptée AVANT le calcul du hash (réservation synchrone) : une rafale de
+ *   requêtes simultanées ne contourne pas la limite ;
+ * - au plus `maxConcurrent` vérifications scrypt en même temps (mémoire bornée), les autres
+ *   reçoivent 429 tout de suite ;
+ * - au-delà de `globalSoftLimit` échecs toutes adresses confondues, les vérifications passent une
+ *   à une et sont ralenties, sans jamais bloquer : le propriétaire peut toujours se connecter.
  */
 export class LoginLimiter {
   private byIp = new Map<string, { count: number; reset: number }>();
   private global = { count: 0, reset: 0 };
-  constructor(private limit = 5, private windowMs = 15 * 60 * 1000, private globalLimit = 50) {}
+  private inFlight = 0;
+  constructor(private limit = 5, private windowMs = 15 * 60 * 1000, private globalSoftLimit = 50, private maxConcurrent = 2) {}
 
-  /** Secondes avant une nouvelle tentative ; 0 si autorisée */
+  /** Secondes avant une nouvelle tentative pour cette adresse ; 0 si autorisée */
   retryAfter(ip: string, now = Date.now()): number {
     const e = this.byIp.get(ip);
-    const ipWait = e && e.reset > now && e.count >= this.limit ? e.reset - now : 0;
-    const globalWait = this.global.reset > now && this.global.count >= this.globalLimit ? this.global.reset - now : 0;
-    return Math.ceil(Math.max(ipWait, globalWait) / 1000);
+    return e && e.reset > now && e.count >= this.limit ? Math.ceil((e.reset - now) / 1000) : 0;
+  }
+
+  /** Échecs nombreux toutes adresses confondues : vérifications une à une et ralenties */
+  underPressure(now = Date.now()): boolean {
+    return this.global.reset > now && this.global.count >= this.globalSoftLimit;
+  }
+
+  /** Réserve une tentative (comptée comme un échec jusqu'à preuve du contraire) */
+  reserve(ip: string, now = Date.now()): Reservation {
+    const wait = this.retryAfter(ip, now);
+    if (wait > 0) return { ok: false, retryAfter: wait, reason: 'ip' };
+    const slow = this.underPressure(now);
+    if (this.inFlight >= (slow ? 1 : this.maxConcurrent)) return { ok: false, retryAfter: 2, reason: 'busy' };
+    this.fail(ip, now);
+    this.inFlight++;
+    return { ok: true, slow };
+  }
+
+  /** Fin de la vérification : un succès efface les échecs de l'adresse et rend sa part du compteur global */
+  release(ip: string, success: boolean) {
+    this.inFlight = Math.max(0, this.inFlight - 1);
+    if (success) {
+      this.byIp.delete(ip);
+      if (this.global.count > 0) this.global.count--;
+    }
   }
 
   fail(ip: string, now = Date.now()) {
