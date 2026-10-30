@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --ssr server/production.ts --outDir dist-server",
+    "start": "node dist-server/production.js",
     "preview": "vite preview",
+    "auth:secret": "node scripts/auth_secret.mjs",
+    "verify:private": "node scripts/verify_private.mjs",
     "data:pull": "bash scripts/pull_data.sh",
     "data:prepare": "python3 scripts/prepare_data.py",
     "data:lab": "python3 scripts/prepare_lab.py",
@@ -31,5 +34,8 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

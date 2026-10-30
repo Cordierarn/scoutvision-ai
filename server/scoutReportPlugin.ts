@@ -1,15 +1,14 @@
 /**
  * ScoutVision - endpoint POST /api/scout-report
  *
- * Middleware Node (signature connect : req, res, next) branché sur les serveurs Vite
- * de développement et de prévisualisation, comme le proxy /cdn. Il peut aussi être
- * monté tel quel sur un serveur Node (http, Express, Connect) en production.
+ * Middleware Node (signature connect : req, res, next), toujours monté DERRIÈRE le garde
+ * d'accès de server/privateServer.ts (production, `vite preview` et `vite dev`) : aucune
+ * requête n'atteint Gemini sans session valide et origine vérifiée.
  * GEMINI_API_KEY et GEMINI_MODEL sont lues dans l'environnement du serveur ; la clé n'est jamais
  * envoyée au navigateur, qui ne reçoit que le nom du modèle ayant rédigé le rapport.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Plugin } from 'vite';
 import { MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport, resolveGeminiModel } from './scoutReport';
 import { AI_TASKS, AiTask, handleGroundedAi } from './groundedAi';
 
@@ -92,6 +91,25 @@ export interface ScoutReportMiddlewareOptions {
   generate?: GenerateText;                 // remplaçable dans les tests
   rateLimit?: { limit: number; windowMs: number };
   log?: (message: string) => void;
+  /**
+   * Délai total d'une requête IA (toutes tentatives et passe de correction comprises). Heroku coupe
+   * toute requête sans réponse au bout de 30 s (erreur H12) : le serveur de production y fixe 25 s
+   * pour répondre lui-même avant. Absent : seul le délai de 60 s par appel s'applique.
+   */
+  deadlineMs?: number;
+}
+
+export class DeadlineError extends Error {}
+
+/** Générateur borné par l'échéance de la requête : chaque appel reçoit au plus le temps restant */
+export function withDeadline(generate: GenerateText, deadline: number, now: () => number = Date.now): GenerateText {
+  return async prompt => {
+    const remaining = deadline - now();
+    if (remaining < 1000) throw new DeadlineError('délai de la requête dépassé');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DeadlineError('délai de la requête dépassé')), remaining); });
+    try { return await Promise.race([generate(prompt), timeout]); } finally { clearTimeout(timer); }
+  };
 }
 
 /**
@@ -115,7 +133,8 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
     if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
       return sendJson(res, 415, { error: 'Content-Type application/json attendu.' });
     }
-    const client = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket?.remoteAddress || 'inconnu';
+    // Entrée de droite de X-Forwarded-For (ajoutée par le proxy de l'hébergeur), comme le garde
+    const client = String(req.headers['x-forwarded-for'] ?? '').split(',').map(h => h.trim()).filter(Boolean).pop() || req.socket?.remoteAddress || 'inconnu';
     if (!allow(client)) {
       res.setHeader('Retry-After', String(Math.ceil((options.rateLimit?.windowMs ?? RATE_WINDOW_MS) / 1000)));
       return sendJson(res, 429, { error: 'Trop de rapports demandés. Réessayez dans quelques minutes.' });
@@ -130,24 +149,10 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
       return sendJson(res, 400, { error: 'JSON invalide.' });
     }
 
+    const bounded = options.deadlineMs ? withDeadline(generate, Date.now() + options.deadlineMs) : generate;
     const result = aiTask
-      ? await handleGroundedAi(aiTask as AiTask, body, { apiKey, model, generate, log })
-      : await handleScoutReport(body, { apiKey, model, generate, log });
+      ? await handleGroundedAi(aiTask as AiTask, body, { apiKey, model, generate: bounded, log })
+      : await handleScoutReport(body, { apiKey, model, generate: bounded, log });
     sendJson(res, result.status, result.body);
-  };
-}
-
-/**
- * Plugin Vite : l'endpoint sur `vite` (développement) et `vite preview` (build de production)
- */
-export function scoutReportApi(apiKey: string | undefined, model?: string): Plugin {
-  return {
-    name: 'scoutvision-scout-report-api',
-    configureServer(server) {
-      server.middlewares.use(scoutReportMiddleware({ apiKey, model }));
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use(scoutReportMiddleware({ apiKey, model }));
-    },
   };
 }

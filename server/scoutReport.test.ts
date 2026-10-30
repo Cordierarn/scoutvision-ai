@@ -159,3 +159,21 @@ describe('scoutReportMiddleware (serveur HTTP réel)', () => {
     expect((await post(base, JSON.stringify({ player }))).status).toBe(429);
   });
 });
+
+describe('échéance de la requête IA (routeur Heroku : 30 s)', () => {
+  it('chaque appel reçoit au plus le temps restant ; au-delà, erreur de délai', async () => {
+    const { withDeadline, DeadlineError } = await import('./scoutReportPlugin');
+    let now = 0;
+    const slow = () => new Promise<string>(resolve => setTimeout(() => resolve('texte'), 200));
+    // 1,1 s restante pour un appel de 1,5 s : interrompu à l'échéance
+    const slower = () => new Promise<string>(resolve => setTimeout(() => resolve('texte'), 1500));
+    await expect(withDeadline(slower, 1100, () => now)('p')).rejects.toBeInstanceOf(DeadlineError);
+    // assez de temps : le texte passe
+    await expect(withDeadline(slow, 5000, () => now)('p')).resolves.toBe('texte');
+    // échéance déjà atteinte : aucun appel
+    now = 10_000;
+    const spy = vi.fn(slow);
+    await expect(withDeadline(spy, 10_500, () => now)('p')).rejects.toBeInstanceOf(DeadlineError);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

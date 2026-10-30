@@ -49,3 +49,8 @@ __pycache__/
 /exports/
 ScoutVision_rapports_*.json
 ScoutVision_*.pdf
+
+# Serveur de production construit (npm run build)
+dist-server/
+# Dossier de travail du téléchargement des données au démarrage (npm start)
+.scoutvision-sync/

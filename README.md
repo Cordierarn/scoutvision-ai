@@ -178,8 +178,29 @@ GEMINI_API_KEY=your_gemini_api_key_here
 # GEMINI_MODEL=gemini-3.5-flash   # optional, this is the default
 ```
 
-Production build: `npm run build && npm run preview` (serves the app, the `/cdn` image proxy and
-the report endpoint). To rebuild the data with Python, see [data pipeline](docs/data-pipeline.md).
+Production build: `npm run build && npm start` (Node server: the app, the login page, the data,
+the `/cdn` image proxy and the report endpoint, behind the session guard). `npm run preview`
+serves the same build through Vite. To rebuild the data with Python, see
+[data pipeline](docs/data-pipeline.md).
+
+## Private deployment
+
+ScoutVision is deployed as a private, single-user instance on one Heroku Basic dyno (`Procfile`,
+Node 22, deploys from GitHub; covered by the GitHub Student Pack credit): one Node
+server (`server/production.ts`) puts every private resource behind a session, the application,
+`/data/*`, `/cdn/*` and `/api/*` alike. Without a session, a navigation is redirected to the
+login page and any other request gets `401`, never the content. The password is stored only as a
+scrypt hash, the session is an `HttpOnly`, `Secure`, `SameSite=Lax` cookie, failed logins are
+rate limited, and the data is downloaded by the server at boot with a runtime token, never
+bundled. No secret is ever prefixed with `VITE_`.
+
+```bash
+npm run auth:secret                                   # local: password, hash, session secret
+npm run verify:private -- https://<app>.herokuapp.com   # nothing private answers without a session
+```
+
+Variables, first deployment, password change, session revocation and limits:
+[deployment](docs/deployment.md).
 
 ## Architecture
 
@@ -191,6 +212,8 @@ the report endpoint). To rebuild the data with Python, see [data pipeline](docs/
 | Statistical models | NumPy and custom modelling code (`scripts/models.py`, `scripts/lab.py`) |
 | AI summaries | Gemini through a server-side endpoint (`server/`) |
 | Exports | jsPDF (texte natif, radar vectoriel), JSON des dossiers |
+| Server | Node (`node:http`), session guard in front of the app, data, images and AI (`server/`) |
+| Hosting | Heroku Basic dyno, private single-user instance |
 | Automation | GitHub Actions |
 
 ## Data & privacy
@@ -254,6 +277,7 @@ a simulated effect, or its absence.
 | [Laboratory](docs/laboratory.md) | every experiment with its method and verdict |
 | [Data format](docs/data-format.md) | prepared files, seasons, Transfermarkt, images |
 | [Data pipeline](docs/data-pipeline.md) | CI workflow, private release, tokens, manual updates |
+| [Deployment](docs/deployment.md) | private Heroku instance, cost, authentication, Config Vars, password rotation, limits |
 | [AI reports](docs/ai-reports.md) | endpoint, facts, grounding rules, checks, retry, deployment |
 | [Design system](docs/design-system.md) | tokens, primitives, percentile tiers, chart palette, accessibility |
 
