@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
-import { PlayerData, extractSeason, getPlayerSeasonId, getPlayerSeasonTag, getSeasonLabel } from '../types';
+import { PlayerData, TeamStats, extractSeason, getPlayerSeasonId, getPlayerSeasonTag, getSeasonLabel } from '../types';
 import {
   RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, ROLE_CORE_WEIGHT, roleIndex, roleIndexBreakdown,
 } from '../utils/rolePresets';
@@ -28,11 +28,15 @@ import { TeamLine, PlayerAvatar } from './Media';
 import { Panel, EmptyState, InfoTip, IndexBar, PercentileValue } from './ui';
 import { isRowActivation } from '../utils/rowKeys';
 import { formatEuro } from '../utils/format';
+import { adaptiveMinutes, progressLabel, seasonProgress } from '../utils/seasonProgress';
+import { FilterData, HunterFilters, consumeSharedFilters } from '../utils/savedFilters';
+import { SavedFiltersMenu } from './filters/SavedFiltersMenu';
 import { HunterAssistant } from './ai/HunterAssistant';
 import { HunterCatalogue, HunterConfig } from '../services/groundedAiService';
 
 interface ProspectsProps {
   data: PlayerData[];
+  teamStats?: TeamStats[];           // équipes de la saison chargée : avancée de la saison (seuil de minutes)
   onSelectPlayer: (player: PlayerData) => void;
   selectedId?: string;               // dernier joueur consulté, mis en évidence au retour
 }
@@ -69,12 +73,14 @@ const contractLabel = (c?: string) => (c ? c.slice(0, 7).split('-').reverse().jo
 // Postes d'un rôle : « DM, CM »
 const positionsText = (preset: RolePreset) => preset.positions.map(positionLabel).join(', ');
 
-const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId }) => {
+const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPlayer, selectedId }) => {
+  // Réglages reçus par un lien de partage : appliqués une fois, avant la mémoire de la page
+  const [shared] = useState(() => consumeSharedFilters('hunter'));
   // ---------- Rôles : officiels (rolePresets.json) et personnalisés (navigateur) ----------
   const [customPresets, setCustomPresets] = useState<Record<string, RolePreset>>(() => loadCustomPresets(DEFAULT_ROLE_PRESETS));
   const presets = useMemo(() => ({ ...DEFAULT_ROLE_PRESETS, ...customPresets }), [customPresets]);
-  const [roleName, setRoleName] = useState<string>(presets[memory.role] ? memory.role : '');
-  const [strictness, setStrictness] = useState<number>(memory.strictness);
+  const [roleName, setRoleName] = useState<string>(shared && presets[shared.role] ? shared.role : presets[memory.role] ? memory.role : '');
+  const [strictness, setStrictness] = useState<number>(shared?.strictness ?? memory.strictness);
   const preset: RolePreset | undefined = roleName ? presets[roleName] : undefined;
 
   // ---------- Contraintes ----------
@@ -86,9 +92,9 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
       .sort((a, b) => (a.info?.tier ?? 9) - (b.info?.tier ?? 9) || (a.info?.name ?? a.key).localeCompare(b.info?.name ?? b.key, 'fr'));
   }, [data]);
   const [constraints, setConstraints] = useState<ProspectConstraints>(() => ({
-    ...memory.constraints,
+    ...(shared?.constraints ?? memory.constraints),
     // Compétition absente de la saison chargée : toutes
-    competition: competitions.some(c => c.key === memory.constraints.competition) ? memory.constraints.competition : '',
+    competition: competitions.some(c => c.key === (shared?.constraints ?? memory.constraints).competition) ? (shared?.constraints ?? memory.constraints).competition : '',
   }));
   const [constraintsOpen, setConstraintsOpen] = useState(memory.constraintsOpen);
   const [detailsOpen, setDetailsOpen] = useState(false);     // critères du rôle, sur téléphone
@@ -107,6 +113,31 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
   const latestSeason = dataIndex?.seasons[dataIndex.seasons.length - 1]?.id;
   const inProgress = seasons.length === 1 && seasons[0] === latestSeason && isSeasonInProgress(seasons[0], seasons[0], dataIndex?.generatedAt);
   const generatedOn = dataIndex?.generatedAt ? new Date(dataIndex.generatedAt).toLocaleDateString('fr-FR') : '—';
+
+  // ---------- Seuil de minutes adapté à l'avancée de la saison ----------
+  const progress = useMemo(() => (inProgress
+    ? seasonProgress({ season: seasons[0], seasonLabel: constraints.competition ? String(data.find(p => p.Competition === constraints.competition)?.Season ?? '') || undefined : undefined, generatedAt: dataIndex?.generatedAt, teams: teamStats, competition: constraints.competition || undefined })
+    : { progress: 1, basis: 'complete' as const }), [inProgress, seasons, data, dataIndex?.generatedAt, teamStats, constraints.competition]);
+  const suggestedMinutes = adaptiveMinutes(DEFAULT_CONSTRAINTS.minutesMin, progress.progress);
+  const minutesAdjusted = inProgress && constraints.minutesMin === suggestedMinutes && suggestedMinutes !== DEFAULT_CONSTRAINTS.minutesMin;
+  // Première ouverture d'une saison en cours : le seuil de base (500 min) devient le seuil adapté ; un seuil choisi n'est jamais écrasé
+  const adjustedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${seasons[0] ?? ''}|${inProgress}|${shared ? 'partage' : 'memoire'}`;
+    if (adjustedFor.current === key) return;
+    adjustedFor.current = key;
+    if (inProgress && !shared && constraints.minutesMin === DEFAULT_CONSTRAINTS.minutesMin && suggestedMinutes !== DEFAULT_CONSTRAINTS.minutesMin) setConstraint('minutesMin', suggestedMinutes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasons, inProgress, suggestedMinutes]);
+  const resetConstraints = () => setConstraints({ ...DEFAULT_CONSTRAINTS, minutesMin: inProgress ? suggestedMinutes : DEFAULT_CONSTRAINTS.minutesMin });
+
+  // ---------- Filtres enregistrés et lien de partage ----------
+  const currentFilters: FilterData = { page: 'hunter', data: { role: roleName, strictness, constraints } };
+  const applySavedFilters = (d: HunterFilters) => {
+    if (d.role && presets[d.role]) setRoleName(d.role);
+    setStrictness(d.strictness);
+    setConstraints({ ...d.constraints, competition: competitions.some(c => c.key === d.constraints.competition) ? d.constraints.competition : '' });
+  };
 
   // ---------- Recherche ----------
   const search = useMemo(
@@ -197,7 +228,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
   // ---------- Contraintes actives (puces) ----------
   const chips: { key: string; label: string; onRemove?: () => void }[] = [
     { key: 'age', label: `≤ ${constraints.ageMax} ans` },
-    { key: 'min', label: `≥ ${constraints.minutesMin.toLocaleString('fr-FR')} min` },
+    { key: 'min', label: `≥ ${constraints.minutesMin.toLocaleString('fr-FR')} min${minutesAdjusted ? ' · ajusté à la saison' : ''}` },
     ...(caps.marketValue && constraints.valueMax !== null
       ? [{ key: 'value', label: `Valeur ≤ ${formatEuro(constraints.valueMax)}`, onRemove: () => setConstraint('valueMax', null) }] : []),
     ...(caps.contract && constraints.contractMonths > 0
@@ -446,9 +477,14 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
           onChange={e => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) setConstraint('ageMax', Math.round(v)); }} aria-label="Âge maximum" />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="sv-label">Minutes min</span>
+        <span className="sv-label flex items-center gap-1">Minutes min{inProgress && (
+          <InfoTip text={`Saison en cours : ${progressLabel(progress) ?? 'avancée inconnue'}. Le seuil de pleine saison (${DEFAULT_CONSTRAINTS.minutesMin} min) est ramené à ${suggestedMinutes} min pour ne pas exclure les joueurs qui ont joué toutes les journées déjà disputées. Vous pouvez le modifier.`} />
+        )}</span>
         <input type="number" min={0} max={5000} step={100} className="sv-input sv-input-sm !w-24" value={constraints.minutesMin}
           onChange={e => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) setConstraint('minutesMin', Math.round(v)); }} aria-label="Minutes minimum" />
+        {inProgress && !minutesAdjusted && constraints.minutesMin !== suggestedMinutes && (
+          <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm !h-6 !px-1.5" onClick={e => { setConstraint('minutesMin', suggestedMinutes); (e.currentTarget.parentElement?.querySelector('input') as HTMLInputElement | null)?.focus(); }}>Ajuster à la saison ({suggestedMinutes} min)</button>
+        )}
       </label>
       <label className="flex flex-col gap-1">
         <span className="sv-label flex items-center gap-1">Valeur max {marketHelp
@@ -483,7 +519,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, onSelectPlayer, selectedId 
           ? 'Estimation statistique du pipeline (régression ridge hors échantillon) au moins égale à 1,5 fois la valeur Transfermarkt. Une piste à examiner, pas un verdict sur le prix.'
           : marketHelp ?? 'Indisponible pour cette saison.'} />
       </label>
-      <button onClick={() => setConstraints({ ...DEFAULT_CONSTRAINTS })} className="sv-btn sv-btn-ghost sv-btn-sm" data-tip="U23, ≤ €30M, ≥ 500 min">
+      <SavedFiltersMenu current={currentFilters} onApply={d => applySavedFilters(d as HunterFilters)} size="sm" />
+      <button onClick={resetConstraints} className="sv-btn sv-btn-ghost sv-btn-sm" data-tip={`U23, ≤ €30M, ≥ ${inProgress ? suggestedMinutes : DEFAULT_CONSTRAINTS.minutesMin} min`}>
         <RotateCcw className="w-3 h-3" /> Réinitialiser
       </button>
     </div>

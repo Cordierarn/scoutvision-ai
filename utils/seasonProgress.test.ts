@@ -17,8 +17,11 @@ describe('seasonProgress', () => {
     expect(adaptiveMinutes(500, p.progress)).toBe(90);                 // plancher 90
     expect(adaptiveMinutes(900, 9 / 34)).toBe(240);
     expect(progressLabel(p)).toBe('16 % de la saison (6 journées sur 38)');
-    // Sans compétition : toutes les équipes, calendrier non plausible (38 équipes) → calendrier temporel
-    expect(seasonProgress({ season: '2026-27', generatedAt: '2026-10-28T14:17:05Z', teams: [...league('ENG', 20, 6), ...league('FRA', 18, 9)] }).basis).toBe('time');
+    // Sans compétition : médiane des championnats mesurables (ENG 6/38 = 16 %, FRA 9/34 = 26 %, ARG non mesurable)
+    const all = seasonProgress({ season: '2026-27', generatedAt: '2026-10-28T14:17:05Z', teams: [...league('ENG', 20, 6), ...league('FRA', 18, 9), ...league('ARG', 30, 33)] });
+    expect(all).toEqual({ progress: (6 / 38 + 9 / 34) / 2, basis: 'matches', leagues: 2 });
+    expect(progressLabel(all)).toBe('21 % de la saison (médiane de 2 championnats)');
+    expect(seasonProgress({ season: '2026-27', generatedAt: '2026-10-28T14:17:05Z', teams: league('ARG', 30, 33) }).basis).toBe('time');
   });
   it('calendrier non classique ou matchs au-delà du calendrier : part au temps écoulé', () => {
     const arg = seasonProgress({ season: '2026', seasonLabel: '2026', generatedAt: '2026-10-28T14:17:05Z', teams: league('ARG', 30, 33), competition: 'ARG' });

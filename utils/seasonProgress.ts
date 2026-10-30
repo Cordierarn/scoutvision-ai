@@ -6,6 +6,7 @@
  * saison jouée, estimée :
  * - d'abord sur les matchs : matchs joués par l'équipe la plus avancée de la compétition, rapportés
  *   au calendrier d'un championnat classique (2 × (équipes − 1)), quand ce calendrier est plausible ;
+ *   sans compétition choisie, médiane de ces parts sur les championnats mesurables ;
  * - sinon sur le temps écoulé entre le début de la saison et la date des données.
  * Saison terminée : part = 1, le seuil de pleine saison s'applique.
  */
@@ -16,8 +17,9 @@ import { isSeasonInProgress } from './sampleContext';
 export interface SeasonProgress {
   progress: number;                 // part de saison jouée, 0,05 à 1
   basis: 'complete' | 'matches' | 'time';
-  played?: number;                  // matchs joués par l'équipe la plus avancée (base matchs)
-  expected?: number;                // matchs attendus sur la saison (base matchs)
+  played?: number;                  // matchs joués par l'équipe la plus avancée (base matchs, une compétition)
+  expected?: number;                // matchs attendus sur la saison (base matchs, une compétition)
+  leagues?: number;                 // championnats dont la médiane est prise (base matchs, toutes compétitions)
 }
 
 export interface SeasonProgressInput {
@@ -43,13 +45,24 @@ export function seasonWindow(season: string, seasonLabel?: string): { start: Dat
 export function seasonProgress(input: SeasonProgressInput): SeasonProgress {
   if (!isSeasonInProgress(input.season, input.seasonLabel, input.generatedAt)) return { progress: 1, basis: 'complete' };
 
-  const teams = (input.teams ?? []).filter(t => !input.competition || t.competition === input.competition);
-  const played = teams.map(t => t.Matches).filter((m): m is number => typeof m === 'number' && Number.isFinite(m) && m > 0);
-  const n = teams.length;
-  if (played.length > 0 && n >= 8 && n <= 24) {
+  // Base matchs : une compétition, ou la médiane des championnats au calendrier plausible
+  const byCompetition = new Map<string, TeamStats[]>();
+  (input.teams ?? []).forEach(t => { if (!input.competition || t.competition === input.competition) byCompetition.set(t.competition, [...(byCompetition.get(t.competition) ?? []), t]); });
+  const measured: { progress: number; played: number; expected: number }[] = [];
+  byCompetition.forEach(teams => {
+    const played = teams.map(t => t.Matches).filter((m): m is number => typeof m === 'number' && Number.isFinite(m) && m > 0);
+    const n = teams.length;
+    if (played.length === 0 || n < 8 || n > 24) return;
     const expected = 2 * (n - 1);
     const max = Math.max(...played);
-    if (max <= expected) return { progress: clamp(max / expected), basis: 'matches', played: max, expected };
+    if (max <= expected) measured.push({ progress: max / expected, played: max, expected });
+  });
+  if (measured.length === 1) return { progress: clamp(measured[0].progress), basis: 'matches', played: measured[0].played, expected: measured[0].expected };
+  if (measured.length > 1) {
+    const sorted = measured.map(m => m.progress).sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    return { progress: clamp(median), basis: 'matches', leagues: measured.length };
   }
 
   const window = seasonWindow(input.season, input.seasonLabel);
@@ -68,5 +81,6 @@ export function adaptiveMinutes(base: number, progress: number): number {
 export function progressLabel(p: SeasonProgress): string | null {
   if (p.basis === 'complete') return null;
   const pct = `${Math.round(p.progress * 100)} % de la saison`;
-  return p.basis === 'matches' ? `${pct} (${p.played} journées sur ${p.expected})` : `${pct} (au calendrier)`;
+  if (p.basis === 'time') return `${pct} (au calendrier)`;
+  return p.leagues ? `${pct} (médiane de ${p.leagues} championnats)` : `${pct} (${p.played} journées sur ${p.expected})`;
 }

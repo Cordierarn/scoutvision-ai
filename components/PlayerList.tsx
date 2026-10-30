@@ -5,6 +5,8 @@ import { exportToCSV } from '../utils/exportUtils';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 import { getMetricKeys } from '../utils/positionMetrics';
 import { isRowActivation } from '../utils/rowKeys';
+import { FilterData, PlayersFilters, consumeSharedFilters } from '../utils/savedFilters';
+import { SavedFiltersMenu } from './filters/SavedFiltersMenu';
 import { formatEuro } from '../utils/format';
 import { metricLabel, positionLabel, positionName } from '../utils/labels';
 import { TeamLine, CountryFlag, PlayerAvatar } from './Media';
@@ -97,15 +99,25 @@ const metricKeysOf = (data: PlayerData[]) => {
   return keys;
 };
 
+const newFilterId = () => Math.random().toString(36).substr(2, 9);
+const conditionsToFilters = (c: PlayersFilters['conditions']): FilterCondition[] => c.map(x => ({ id: newFilterId(), key: x.key, min: x.min, max: x.max }));
+
 const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedId }) => {
-  const [searchTerm, setSearchTerm] = useState(memory.searchTerm);
-  const [sortField, setSortField] = useState<SortField>(memory.sortField);
-  const [sortOrder, setSortOrder] = useState<SortOrder>(memory.sortOrder);
-  const [positionFilter, setPositionFilter] = useState<string>(memory.positionFilter);
+  // Réglages reçus par un lien de partage : appliqués une fois, avant la mémoire de la page
+  const [shared] = useState(() => consumeSharedFilters('players'));
+  const [searchTerm, setSearchTerm] = useState(shared?.searchTerm ?? memory.searchTerm);
+  const [sortField, setSortField] = useState<SortField>((shared?.sortField as SortField | undefined) ?? memory.sortField);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(shared?.sortOrder ?? memory.sortOrder);
+  const [positionFilter, setPositionFilter] = useState<string>(shared?.positionFilter ?? memory.positionFilter);
 
   // Advanced Filters State
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(memory.showAdvancedFilters);
-  const [activeFilters, setActiveFilters] = useState<FilterCondition[]>(memory.activeFilters);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(shared ? shared.conditions.length > 0 : memory.showAdvancedFilters);
+  const [activeFilters, setActiveFilters] = useState<FilterCondition[]>(shared ? conditionsToFilters(shared.conditions) : memory.activeFilters);
+  const currentFilters: FilterData = { page: 'players', data: { searchTerm, positionFilter, sortField: String(sortField), sortOrder, conditions: activeFilters.map(f => ({ key: f.key, min: f.min === '' ? '' : Number(f.min), max: f.max === '' ? '' : Number(f.max) })) } };
+  const applySavedFilters = (d: PlayersFilters) => {
+    setSearchTerm(d.searchTerm); setSortField(d.sortField as SortField); setSortOrder(d.sortOrder); setPositionFilter(d.positionFilter);
+    setActiveFilters(conditionsToFilters(d.conditions)); if (d.conditions.length) setShowAdvancedFilters(true);
+  };
 
   // Colonnes statistiques choisies
   const [extraStats, setExtraStats] = useState<string[]>(loadExtraStats);
@@ -416,6 +428,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
               </span>
             )}
           </button>
+          <SavedFiltersMenu current={currentFilters} onApply={d => applySavedFilters(d as PlayersFilters)} />
 
           {/* Sélecteur de colonnes statistiques */}
           <div className="relative" ref={columnsRef}>

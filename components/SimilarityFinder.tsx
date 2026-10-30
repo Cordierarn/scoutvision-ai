@@ -10,7 +10,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { GitCompare, ArrowLeftRight, Info, RotateCcw, Scale, Radar as RadarIcon, Award, Layers, MapPin } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
-import { PlayerData, getPlayerSeason, getPlayerSeasonTag } from '../types';
+import { PlayerData, TeamStats, getPlayerSeason, getPlayerSeasonTag } from '../types';
 import { dataLoader } from '../services/dataLoader';
 import { positionLabel, positionName } from '../utils/labels';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
@@ -22,7 +22,7 @@ import { ComparisonEntry, comparisonEntry, resolveSelection } from '../utils/com
 import { competitionName, isCup, loadedSeasonInProgress, minutesOf, seasonInProgress } from '../utils/playerContext';
 import {
   MIN_COVERAGE, MINUTES_OPTIONS, SimilarityFilters, SimilarityResult, defaultFilters, dimensionPairs, explainSimilarity,
-  findSimilar, rolePairs,
+  findSimilar, rolePairs, defaultMinMinutes,
 } from '../utils/similarity';
 import { isRowActivation } from '../utils/rowKeys';
 import { PlayerAvatar, TeamLogo, CompetitionBadge, TeamLine } from './Media';
@@ -30,9 +30,13 @@ import { PlayerSearch } from './PlayerSearch';
 import { prepareComparison } from './PlayerComparison';
 import { PageHeader, Panel, EmptyState, PolarTick, LegendItem, IndexBar, InfoTip } from './ui';
 import { BRAND, SERIES, polarGridProps } from '../theme/charts';
+import { adaptiveMinutes, progressLabel, seasonProgress } from '../utils/seasonProgress';
+import { FilterData, consumeSharedFilters } from '../utils/savedFilters';
+import { SavedFiltersMenu } from './filters/SavedFiltersMenu';
 
 interface SimilarityFinderProps {
   data: PlayerData[];
+  teamStats?: TeamStats[];                  // équipes de la saison chargée : avancée de la saison (seuil de minutes)
   onSelectPlayer: (player: PlayerData) => void;
   onNavigate?: (view: string) => void;
   selectedId?: string;                      // dernière fiche consultée
@@ -271,8 +275,17 @@ const CandidateDetail: React.FC<{ reference: PlayerData; result: SimilarityResul
 // PAGE
 // ============================================
 
-const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlayer, onNavigate, selectedId }) => {
+const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, teamStats = [], onSelectPlayer, onNavigate, selectedId }) => {
   const inProgress = useMemo(() => loadedSeasonInProgress(data), [data]);
+  // Seuil de minutes par défaut adapté à l'avancée de la saison en cours (900 min en pleine saison)
+  const progress = useMemo(() => {
+    const first = data[0];
+    // Toutes compétitions : fenêtre européenne (août → juin) et médiane des championnats mesurables
+    return inProgress && first ? seasonProgress({ season: getPlayerSeason(first), generatedAt: dataLoader.getCachedIndex()?.generatedAt, teams: teamStats }) : { progress: 1, basis: 'complete' as const };
+  }, [data, inProgress, teamStats]);
+  const defaultMinutes = inProgress ? adaptiveMinutes(defaultMinMinutes(false), progress.progress) : defaultMinMinutes(false);
+  // Réglages reçus par un lien de partage : appliqués une fois, avant la mémoire de la page
+  const [shared] = useState(() => consumeSharedFilters('similar'));
   const seasonsLoaded = useMemo(() => new Set(data.map(getPlayerSeason)).size, [data]);
   const competitions = useMemo(() => {
     const keys = Array.from(new Set(data.map(p => p.Competition).filter((c): c is string => typeof c === 'string' && c !== '')));
@@ -283,9 +296,10 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
 
   const [entry, setEntry] = useState<ComparisonEntry | null>(memory.reference);
   const [filters, setFilters] = useState<SimilarityFilters>(() => {
-    const f = memory.filters ?? defaultFilters(inProgress);
+    const f = shared ?? memory.filters ?? { ...defaultFilters(inProgress), minMinutes: defaultMinutes };
     return { ...f, competition: competitions.some(c => c.key === f.competition) ? f.competition : '' };
   });
+  const currentFilters: FilterData = { page: 'similar', data: filters };
   const [candidateId, setCandidateId] = useState<string | null>(memory.candidateId);
   const [notice, setNotice] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
@@ -317,7 +331,8 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
   const referenceInsufficient = !!reference && !!search && search.referenceCovered < MIN_COVERAGE;
 
   const setFilter = <K extends keyof SimilarityFilters>(key: K, value: SimilarityFilters[K]) => setFilters(f => ({ ...f, [key]: value }));
-  const defaults = defaultFilters(inProgress);
+  const defaults: SimilarityFilters = { ...defaultFilters(inProgress), minMinutes: defaultMinutes };
+  const minutesOptions = [...new Set([...MINUTES_OPTIONS, defaultMinutes])].sort((a, b) => a - b);
   // Retrait d'une puce : focus sur la puce suivante, sinon la case « Même poste » (jamais le corps de la page)
   const removeChip = (index: number, action: () => void) => {
     action();
@@ -348,15 +363,20 @@ const SimilarityFinder: React.FC<SimilarityFinderProps> = ({ data, onSelectPlaye
           </div>
           {reference && <ReferenceCard player={reference} onOpen={() => onSelectPlayer(reference)} />}
           {reference && (
-            <Panel title="Filtres" right={!isDefault && <button onClick={() => setFilters(defaults)} className="sv-btn sv-btn-ghost sv-btn-sm"><RotateCcw className="w-3.5 h-3.5" /> Par défaut</button>}>
+            <Panel title="Filtres" right={<>
+              <SavedFiltersMenu current={currentFilters} onApply={d => setFilters({ ...(d as SimilarityFilters), competition: competitions.some(c => c.key === (d as SimilarityFilters).competition) ? (d as SimilarityFilters).competition : '' })} size="sm" />
+              {!isDefault && <button onClick={() => setFilters(defaults)} className="sv-btn sv-btn-ghost sv-btn-sm"><RotateCcw className="w-3.5 h-3.5" /> Par défaut</button>}
+            </>}>
               <div className="space-y-2.5 text-xs">
                 <label className="flex items-center gap-2 cursor-pointer text-ink-2"><input ref={filtersHeadingRef} type="checkbox" checked={filters.samePosition} onChange={e => setFilter('samePosition', e.target.checked)} />Même poste uniquement</label>
                 <label className="flex items-center justify-between gap-2"><span className="sv-label">Âge max</span>
                   <input type="number" min={16} max={45} className="sv-input sv-input-sm !w-20" value={filters.ageMax ?? ''} placeholder="—" aria-label="Âge maximum"
                     onChange={e => { const v = e.target.value === '' ? null : Number(e.target.value); setFilter('ageMax', v !== null && Number.isFinite(v) && v > 0 ? Math.round(v) : null); }} /></label>
-                <label className="flex items-center justify-between gap-2"><span className="sv-label">Minutes min</span>
-                  <select className="sv-select sv-select-sm !w-24" value={filters.minMinutes} onChange={e => setFilter('minMinutes', Number(e.target.value))} aria-label="Minutes minimum">
-                    {MINUTES_OPTIONS.map(m => <option key={m} value={m}>{m === 0 ? 'Toutes' : INTEGER.format(m)}</option>)}
+                <label className="flex items-center justify-between gap-2"><span className="sv-label flex items-center gap-1">Minutes min{inProgress && (
+                  <InfoTip text={`Saison en cours : ${progressLabel(progress) ?? 'avancée inconnue'}. Le seuil de pleine saison (${INTEGER.format(defaultMinMinutes(false))} min) est ramené à ${INTEGER.format(defaultMinutes)} min par défaut.`} />
+                )}</span>
+                  <select className="sv-select sv-select-sm !w-28" value={filters.minMinutes} onChange={e => setFilter('minMinutes', Number(e.target.value))} aria-label="Minutes minimum">
+                    {minutesOptions.map(m => <option key={m} value={m}>{m === 0 ? 'Toutes' : `${INTEGER.format(m)}${m === defaultMinutes && inProgress ? ' · saison' : ''}`}</option>)}
                   </select></label>
                 <label className="flex items-center justify-between gap-2 min-w-0"><span className="sv-label">Compétition</span>
                   <select className="sv-select sv-select-sm min-w-0 w-[11rem] max-w-[62%]" value={filters.competition} onChange={e => setFilter('competition', e.target.value)} aria-label="Compétition">
