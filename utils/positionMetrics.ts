@@ -27,7 +27,9 @@ export function getPositionCategory(position: string): PositionCategory {
 }
 
 /**
- * Métriques par catégorie de position (8 métriques clés pour chaque)
+ * Métriques par catégorie de position (8 métriques d'action, plus une métrique de valeur de
+ * possession déjà calculée par le pipeline, choisie selon le poste : xT pour la progression du
+ * ballon, VAEP pour la contribution totale, VAEP défensive pour les postes de récupération)
  */
 export const POSITION_METRICS: Record<PositionCategory, string[]> = {
   GK: [
@@ -49,7 +51,8 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
     'Shots blocked per 90',
     'Accurate passes, %',
     'Progressive passes per 90',
-    'Accurate long passes, %'
+    'Accurate long passes, %',
+    'VAEP defensive per 90'
   ],
 
   FB: [
@@ -60,7 +63,8 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
     'Dribbles per 90',
     'Key passes per 90',
     'xA per 90',
-    'PAdj Interceptions'
+    'PAdj Interceptions',
+    'xT per 90'
   ],
 
   MID: [
@@ -71,7 +75,8 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
     'Ground duels won, %',
     'PAdj Recoveries',
     'xG buildup per 90',
-    'Successful defensive actions per 90'
+    'Successful defensive actions per 90',
+    'VAEP per 90'
   ],
 
   ATT_MID: [
@@ -82,7 +87,8 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
     'Through passes per 90',
     'Dribbles per 90',
     'Successful dribbles, %',
-    'Goals per 90'
+    'Goals per 90',
+    'xT per 90'
   ],
 
   WING: [
@@ -93,7 +99,8 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
     'Crosses per 90',
     'Progressive runs per 90',
     'Carries into box per 90',
-    'Key passes per 90'
+    'Key passes per 90',
+    'xT per 90'
   ],
 
   FWD: [
@@ -104,7 +111,8 @@ export const POSITION_METRICS: Record<PositionCategory, string[]> = {
     'Shots on target, %',
     'Touches in box per 90',
     'Aerial duels won, %',
-    'xA per 90'
+    'xA per 90',
+    'VAEP per 90'
   ]
 };
 

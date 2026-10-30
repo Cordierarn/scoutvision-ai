@@ -13,7 +13,11 @@ Every index and projection below is a scouting aid. None of them is a verdict on
   minutes are low).
 - Each metric `X` has a percentile `X pct` (0-100) among players of the same role (GK, CB, FB,
   WB, DM, CM, AM, W, ST) and the same competition level. Role scores, the Gem Hunter thresholds
-  and the radars all use these percentiles.
+  and the radars all use these percentiles. Since the P4 work the radar of each position family
+  also carries one possession-value axis already computed by the pipeline (`utils/positionMetrics.ts`):
+  xT per 90 for full-backs, attacking midfielders and wingers, VAEP per 90 for midfielders and
+  strikers, VAEP defensive per 90 for centre-backs, none for goalkeepers. The comparison's default
+  axes and the profile's strengths and limits follow the same lists; no model was added or changed.
 - A percentile ranks the value, not its quality: for metrics where less is better (losses of
   possession, fouls…) the role indices count 100 − percentile.
 - Only players with at least 40% of their team's minutes are included (PitchAPI `player_season`
