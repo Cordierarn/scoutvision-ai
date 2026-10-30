@@ -32,13 +32,15 @@ try {
 }
 if (!auth) fail('SCOUTVISION_AUTH_USER, SCOUTVISION_AUTH_PASSWORD_HASH et SCOUTVISION_SESSION_SECRET sont obligatoires en production.');
 
-const onRender = !!env.RENDER;
-const trustProxy = flag('SCOUTVISION_TRUST_PROXY', onRender);
+// Heroku (variable DYNO présente sur chaque dyno) : le routeur est le seul point d'entrée du dyno ;
+// il ajoute l'adresse du client à droite de X-Forwarded-For et fixe X-Forwarded-Proto
+const onHeroku = !!env.DYNO;
+const trustProxy = flag('SCOUTVISION_TRUST_PROXY', onHeroku);
 const secureCookies = flag('SCOUTVISION_COOKIE_SECURE', true);
 const hsts = flag('SCOUTVISION_HSTS', secureCookies && trustProxy);
 const distDir = path.resolve(env.SCOUTVISION_DIST_DIR || 'dist');
 const dataDir = path.resolve(env.SCOUTVISION_DATA_DIR || 'public/data');
-const allowedOrigins = [env.RENDER_EXTERNAL_URL, env.SCOUTVISION_PUBLIC_ORIGIN]
+const allowedOrigins = [env.SCOUTVISION_PUBLIC_ORIGIN]
   .filter((o): o is string => !!o)
   .map(o => { try { return new URL(o).origin; } catch { return fail(`origine publique invalide : ${o}`); } });
 const port = Number(env.PORT) || 10000;
@@ -53,7 +55,12 @@ const handler = createPrivateServer({
   allowedOrigins,
   hsts,
   cdn: 'proxy',
-  api: scoutReportMiddleware({ apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined }),
+  api: scoutReportMiddleware({
+    apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined,
+    // Routeur Heroku : 30 s au plus avant la première réponse ; le serveur répond avant (25 s)
+    deadlineMs: Number(env.SCOUTVISION_AI_DEADLINE_MS) || (onHeroku ? 25_000 : undefined),
+  }),
+  httpsRedirect: flag('SCOUTVISION_HTTPS_REDIRECT', trustProxy),
   dataReady: () => dataInstalled(dataDir),
 });
 

@@ -42,6 +42,12 @@ export interface PrivateServerOptions {
   allowedOrigins?: string[];
   /** Strict-Transport-Security (seulement quand HTTPS est garanti) */
   hsts: boolean;
+  /**
+   * Derrière le proxy de l'hébergeur : requête arrivée en HTTP (X-Forwarded-Proto: http) redirigée
+   * vers HTTPS (GET / HEAD) ou refusée (autres méthodes). Heroku accepte HTTP sur *.herokuapp.com ;
+   * sans cette redirection, le cookie Secure ne serait jamais enregistré.
+   */
+  httpsRedirect?: boolean;
   /** Middleware des endpoints privés (rapport Gemini, IA ancrée), placé derrière le garde */
   api?: Middleware;
   /** Proxy /cdn : 'proxy' (serveur de production / preview) ou 'next' (proxy de Vite en dev) */
@@ -374,6 +380,16 @@ export function createPrivateServer(opts: PrivateServerOptions) {
   async function handle(req: IncomingMessage, res: ServerResponse, next: Next) {
     setSecurityHeaders(req, res, opts);
     if (opts.mode !== 'production' && !isLoopbackHost(req.headers.host)) return sendText(res, 403, 'Hôte non autorisé.');
+    if (opts.httpsRedirect && opts.trustProxy && String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim() === 'http') {
+      const host = String(req.headers.host ?? '');
+      if (!/^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(host)) return sendText(res, 400, 'Requête invalide.');
+      if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 403, 'HTTPS requis.');
+      res.statusCode = 301;
+      const target = (req.url ?? '/').startsWith('/') ? (req.url ?? '/') : '/';
+      res.setHeader('Location', `https://${host.replace(/:\d+$/, '')}${target}`);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end();
+    }
     const p = requestPath(req);
     if (p === null) return sendText(res, 400, 'Requête invalide.');
     if (p === '/healthz') return sendText(res, 200, 'ok');

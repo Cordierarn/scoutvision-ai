@@ -260,8 +260,11 @@ export async function handleScoutReport(body: unknown, deps: HandlerDeps): Promi
     let issues = auditReport(generation.text, facts, language);
     if (issues.length > 0) {
       deps.log?.(`[scout-report] passe de correction : ${issues.length} problème(s) (${[...new Set(issues.map(i => i.kind))].join(', ')})`);
-      const corrected = await generateWithRetry(deps.generate, buildCorrectionPrompt(prompt, generation.text, issues.map(i => i.rule)), deps);
-      if (corrected.text.trim()) {
+      // Passe de correction facultative : en cas d'échec (délai de la requête, service indisponible),
+      // le premier texte est gardé et ses phrases fautives retirées ci-dessous
+      const corrected = await generateWithRetry(deps.generate, buildCorrectionPrompt(prompt, generation.text, issues.map(i => i.rule)), deps)
+        .catch(error => { deps.log?.(`[scout-report] passe de correction abandonnée : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey)}`); return null; });
+      if (corrected?.text.trim()) {
         generation = corrected;
         issues = auditReport(generation.text, facts, language);
       }

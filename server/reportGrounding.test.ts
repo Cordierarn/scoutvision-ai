@@ -225,6 +225,16 @@ describe('génération contrôlée (fixtures A à D)', () => {
     expect(body.report).toContain('valeur de marché Transfermarkt est de 11 M€');
   });
 
+  it('passe de correction impossible (délai de la requête dépassé) : premier texte gardé, phrase fautive retirée', async () => {
+    const bad = withLine('Fragile dans ses passes sous pression. Récupérations : 16,6.');
+    const generate = vi.fn().mockResolvedValueOnce(bad).mockRejectedValue(new Error('délai de la requête dépassé'));
+    const out = await handleScoutReport({ player: keeper, options }, { apiKey: KEY, generate, log: () => {}, sleep: async () => {} });
+    expect(out.status).toBe(200);
+    const body = out.body as { content: string };
+    expect(body.content).not.toMatch(/pression/i);
+    expect(body.content).toContain('Récupérations : 16,6.');
+  });
+
   it('B. passes sous pression non mesurées : absentes du rapport final', async () => {
     const bad = withLine('Fragile dans ses passes sous pression. Récupérations : 16,6.');
     const body = await reportOf(run([bad, bad]).result);

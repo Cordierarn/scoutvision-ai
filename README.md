@@ -185,7 +185,8 @@ serves the same build through Vite. To rebuild the data with Python, see
 
 ## Private deployment
 
-ScoutVision is deployed as a private, single-user instance on Render (`render.yaml`): one Node
+ScoutVision is deployed as a private, single-user instance on one Heroku Basic dyno (`Procfile`,
+Node 22, deploys from GitHub; covered by the GitHub Student Pack credit): one Node
 server (`server/production.ts`) puts every private resource behind a session, the application,
 `/data/*`, `/cdn/*` and `/api/*` alike. Without a session, a navigation is redirected to the
 login page and any other request gets `401`, never the content. The password is stored only as a
@@ -195,7 +196,7 @@ bundled. No secret is ever prefixed with `VITE_`.
 
 ```bash
 npm run auth:secret                                   # local: password, hash, session secret
-npm run verify:private -- https://<service>.onrender.com   # nothing private answers without a session
+npm run verify:private -- https://<app>.herokuapp.com   # nothing private answers without a session
 ```
 
 Variables, first deployment, password change, session revocation and limits:
@@ -212,7 +213,7 @@ Variables, first deployment, password change, session revocation and limits:
 | AI summaries | Gemini through a server-side endpoint (`server/`) |
 | Exports | jsPDF (texte natif, radar vectoriel), JSON des dossiers |
 | Server | Node (`node:http`), session guard in front of the app, data, images and AI (`server/`) |
-| Hosting | Render, private single-user instance |
+| Hosting | Heroku Basic dyno, private single-user instance |
 | Automation | GitHub Actions |
 
 ## Data & privacy
@@ -276,7 +277,7 @@ a simulated effect, or its absence.
 | [Laboratory](docs/laboratory.md) | every experiment with its method and verdict |
 | [Data format](docs/data-format.md) | prepared files, seasons, Transfermarkt, images |
 | [Data pipeline](docs/data-pipeline.md) | CI workflow, private release, tokens, manual updates |
-| [Deployment](docs/deployment.md) | private Render instance, authentication, variables, password rotation, limits |
+| [Deployment](docs/deployment.md) | private Heroku instance, cost, authentication, Config Vars, password rotation, limits |
 | [AI reports](docs/ai-reports.md) | endpoint, facts, grounding rules, checks, retry, deployment |
 | [Design system](docs/design-system.md) | tokens, primitives, percentile tiers, chart palette, accessibility |
 

@@ -2,7 +2,7 @@
 /**
  * ScoutVision - vérification d'une instance déployée SANS session (aucun cookie, aucun secret)
  *
- *   npm run verify:private -- https://scoutvision-xxxx.onrender.com
+ *   npm run verify:private -- https://<app>.herokuapp.com
  *
  * Échoue (code 1) si une ressource privée répond sans authentification : application, données,
  * CDN, API. Vérifie aussi que la page de connexion répond et que les en-têtes de sécurité sont là.
@@ -49,6 +49,19 @@ for (const [method, path, ok, expected, bodyOk = () => true] of checks) {
   const pass = ok(res) && bodyOk(body) && !leak;
   if (!pass) failed++;
   console.log(`${pass ? 'OK   ' : 'ÉCHEC'}  ${method} ${path} → ${res.status} (attendu ${expected})${leak ? ' : CONTENU DE DONNÉES DANS LA RÉPONSE' : ''}`);
+}
+
+// HTTPS imposé : la même adresse en HTTP doit rediriger vers HTTPS (sans servir de contenu)
+if (base.startsWith('https://')) {
+  try {
+    const plain = await fetch(`${base.replace(/^https:/, 'http:')}/data/index.json`, { redirect: 'manual' });
+    const pass = plain.status === 301 && (plain.headers.get('location') ?? '').startsWith('https://');
+    if (!pass) failed++;
+    console.log(`${pass ? 'OK   ' : 'ÉCHEC'}  GET http://…/data/index.json → ${plain.status} (attendu 301 vers https)`);
+  } catch (error) {
+    console.log(`ÉCHEC  GET http://… : ${error instanceof Error ? error.message : error}`);
+    failed++;
+  }
 }
 
 const login = await fetch(`${base}/login`);

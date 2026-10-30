@@ -10,7 +10,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -51,6 +51,11 @@ export async function syncData(opts: DataSyncOptions): Promise<DataSyncResult> {
   try {
     const workRoot = path.join(path.dirname(dataDir), '.scoutvision-sync');
     mkdirSync(workRoot, { recursive: true });
+    // Restes d'un téléchargement interrompu (arrêt du processus) : supprimés après une heure
+    for (const entry of readdirSync(workRoot)) {
+      const stale = path.join(workRoot, entry);
+      try { if (Date.now() - statSync(stale).mtimeMs > 3600_000) rmSync(stale, { recursive: true, force: true }); } catch { /* déjà supprimé */ }
+    }
     work = mkdtempSync(path.join(workRoot, 'run-'));
     const meta = await fetchImpl(`https://api.github.com/repos/${repo}/releases/tags/${release}`, { headers: { ...headers, Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(30_000) });
     if (!meta.ok) return { status: 'failed', message: `release ${release} inaccessible (HTTP ${meta.status})` };
@@ -75,6 +80,7 @@ export async function syncData(opts: DataSyncOptions): Promise<DataSyncResult> {
 
     // Extraction dans un dossier neuf (GNU tar refuse les chemins absolus et les « .. »)
     await run('tar', ['-xzf', archive, '-C', path.join(work, 'data'), '--no-same-owner', '--no-same-permissions'], { maxBuffer: 1024 * 1024 });
+    rmSync(archive, { force: true });     // archive inutile une fois extraite (disque éphémère limité)
     const fresh = path.join(work, 'data');
     if (!dataInstalled(fresh)) return { status: 'failed', message: 'archive sans index.json' };
     writeFileSync(path.join(fresh, MARKER), JSON.stringify({ id: asset.id, updatedAt: asset.updated_at }));

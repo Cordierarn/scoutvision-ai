@@ -4,30 +4,71 @@ ScoutVision runs online as a **private, single-user** instance. The repository i
 PitchAPI data, the Gemini key and the credentials are not. One Node server sits in front of
 everything and refuses every private resource without a valid session.
 
-## Host: Render (one Node web service)
+## Host: Heroku, one Basic dyno
 
-Why Render, briefly:
+- The app needs a **Node server** in front of `dist/`, `/data/`, `/cdn/` and `/api/` (Gemini key,
+  private data, image proxy). Heroku runs it as a plain `web` process: no Docker, no serverless
+  rewrite, no move to Next.js. ScoutVision stays React + Vite + Node.
+- HTTPS on `<app>.herokuapp.com`, Config Vars for the secrets, deploys from GitHub, custom domain
+  possible later.
+- **Basic dyno**: 512 MB of RAM, never sleeps. A purely static host is excluded: it would publish
+  whatever the build contains.
 
-- the app needs a **Node server** in front of `dist/`, `/data/`, `/cdn/` and `/api/` (Gemini key,
-  private data, image proxy): Render runs `npm start` as a plain web service, no rewrite to
-  serverless functions, no move to Next.js;
-- HTTPS on `<service>.onrender.com`, secret environment variables, deploy on push to `main`,
-  custom domain possible later;
-- a purely static host (Vercel static, Netlify, GitHub Pages) would publish whatever the build
-  contains. Vercel middleware could gate static files, but Gemini would have to move into
-  serverless functions and the 300 MB of data into the deployment: more moving parts for one user.
-  Railway and Fly.io fit the architecture too; Render has the simplest free tier and a
-  Blueprint file (`render.yaml`) that keeps the configuration in the repository without secrets.
+### Cost
 
-Cost: the **free** plan works (512 MB RAM, the instance sleeps after 15 minutes without traffic
-and takes about 30 to 60 s to wake up, then about 6 s to download the data). The **Starter**
-plan (7 USD per month at the time of writing) removes the sleep. Nothing else is billed: no disk,
-no database.
+| Item | Amount |
+|---|---|
+| Heroku Basic dyno | 7 USD per month |
+| GitHub Student Developer Pack | up to 13 USD of Heroku credit per month, for 24 months |
+| Expected net cost for one Basic dyno | 0 USD per month, while the student offer applies |
+
+Heroku asks for a credit card. Usage above the monthly credit can be billed, and unused credit
+does not roll over to the next month. Nothing else is needed: no add-on, no database, no disk.
+
+### How Heroku builds and runs it
+
+- **Build** (Heroku Node.js buildpack, on every deploy): Node from `engines.node` in
+  `package.json` (`22.x`), `npm ci` with the dev dependencies, `npm run build` (client into
+  `dist/`, server into `dist-server/production.js`), then the dev dependencies are pruned. The
+  checkout has no `public/data` (git-ignored): the slug never contains private data. Measured on
+  a clean copy: slug about 25 MB compressed, `dist/` 2.2 MB, no source maps.
+- **Start**: `Procfile` → `web: node dist-server/production.js` (the same command as `npm start`,
+  without an npm process in between: less memory, `SIGTERM` reaches the server directly). The
+  server listens on `0.0.0.0:$PORT` immediately (Heroku allows 60 s to bind) and refuses to start
+  without valid authentication variables.
+- **Data at runtime**: right after start, the server downloads the private release with
+  `PITCHAPI_DATA_TOKEN` (about 6 s). Heroku's filesystem is ephemeral and every dyno restarts at
+  least once a day, on each deploy and on each Config Var change: the download simply runs again.
+  Until it finishes, `/data/*` answers `503` (after login) and the app shows its loading error,
+  never stale or partial data.
+- **Router**: Heroku's router is the only way in. It appends the client address to the right of
+  `X-Forwarded-For` and sets `X-Forwarded-Proto`; the server trusts these headers only on a dyno
+  (`DYNO` is set). It closes a request after **30 s** without a first byte (error H12): the AI
+  endpoints therefore stop at 25 s and answer themselves; if the correction pass of a report has
+  no time left, the first text is kept and its faulty sentences are removed.
+- **HTTPS**: `*.herokuapp.com` also accepts plain HTTP. The server redirects any HTTP `GET`/`HEAD`
+  to HTTPS (`301`) and refuses other HTTP methods, so the `Secure` cookie is always set over HTTPS.
+- **Health**: `GET /healthz` answers `ok` (no secret, no path, no release name, no stack).
+  Heroku's common runtime has no configurable HTTP health check; the route serves
+  `npm run verify:private` and any external monitor.
+
+### Measured on a local copy built and started like a dyno
+
+| Moment | RSS | heapUsed | external |
+|---|---|---|---|
+| Server started | 87 MB | 9 MB | 17 MB |
+| Data installed | 95 MB | 9 MB | 14 MB |
+| After login, player database, profile, PDF, comparison, team analysis, recruitment, season change | 86 to 97 MB | ≤ 13 MB | ≤ 6 MB |
+| Peak (10 simultaneous failed logins, scrypt) | **215 MB** | 10 MB | 6 MB |
+
+The data files are streamed from disk, never loaded into memory. Disk: archive 66 MB, deleted
+right after extraction; data 296 MB once installed; during a refresh the old and new copies
+coexist briefly (about 660 MB with the archive).
 
 ## Architecture
 
 ```
-Browser ──HTTPS──► Render edge ──► node dist-server/production.js
+Browser ──HTTPS──► Heroku router ──► node dist-server/production.js (web dyno)
                                      │
                                      ├─ /healthz, /login, login bundle, /logo.svg   public
                                      ├─ /api/auth/login|session|logout              public endpoints
@@ -86,8 +127,8 @@ Endpoints: `POST /api/auth/login` (`{ username, password }` → `{ authenticated
 
 The session cookie is `SameSite=Lax`: browsers do not send it on cross-site POST, fetch or
 iframe requests. On top of that, every mutation (`login`, `logout`, `/api/*` POST) must carry an
-`Origin` (or `Referer`) equal to the site origin (request host, `RENDER_EXTERNAL_URL`,
-`SCOUTVISION_PUBLIC_ORIGIN`) and must not be `Sec-Fetch-Site: cross-site`; the API endpoints
+`Origin` (or `Referer`) equal to the site origin (`https://` + request host behind the Heroku
+router, or `SCOUTVISION_PUBLIC_ORIGIN`) and must not be `Sec-Fetch-Site: cross-site`; the API endpoints
 also require `Content-Type: application/json`, which a cross-site form cannot send without a
 CORS preflight that the server never grants. No CSRF token is needed for this same-origin,
 single-user app. All GET endpoints are read-only.
@@ -99,7 +140,7 @@ flag images from `flagcdn.com`, `frame-ancestors 'none'`), `X-Content-Type-Optio
 `Referrer-Policy: same-origin`, `Permissions-Policy` (camera, microphone, geolocation, payment,
 USB off), `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy` and
 `Cross-Origin-Resource-Policy: same-origin`, `X-Robots-Tag: noindex, nofollow`, and
-`Strict-Transport-Security` only when the request arrived over HTTPS (Render sets
+`Strict-Transport-Security` only when the request arrived over HTTPS (the Heroku router sets
 `X-Forwarded-Proto`). HTML is `no-store`; private files are `private`. No source maps are
 published.
 
@@ -116,21 +157,23 @@ Never prefix any of these with `VITE_`: the build refuses it. All are read by th
 | `PITCHAPI_DATA_TOKEN` | yes | fine-grained GitHub token, read-only access to the releases of `Cordierarn/PitchApi-big-5` |
 | `GEMINI_API_KEY` | yes | AI reports; absent: the AI functions answer "not configured" |
 | `GEMINI_MODEL` | no | optional, model of the AI reports |
-| `NODE_ENV` | no | `production` |
-| `NODE_VERSION` | no | Node version used by Render (22.x) |
+
+`NODE_ENV=production` and `PORT` are set by Heroku; the Node version comes from `engines.node`.
 
 Optional: `SCOUTVISION_PUBLIC_ORIGIN` (extra accepted origin, e.g. a custom domain),
 `SCOUTVISION_DATA_REFRESH_HOURS` (default 6), `SCOUTVISION_DATA_DIR`, `SCOUTVISION_TRUST_PROXY`
-(automatic on Render), `SCOUTVISION_COOKIE_SECURE` (default on), `SCOUTVISION_HSTS`.
-`SCOUTVISION_DATA_REFRESH_HOURS` is clamped between 1 and 168.
-Render sets `PORT`, `RENDER` and `RENDER_EXTERNAL_URL` itself.
+(automatic on a dyno), `SCOUTVISION_HTTPS_REDIRECT` (automatic behind the proxy),
+`SCOUTVISION_AI_DEADLINE_MS` (25 000 on a dyno), `SCOUTVISION_COOKIE_SECURE` (default on),
+`SCOUTVISION_HSTS`. `SCOUTVISION_DATA_REFRESH_HOURS` is clamped between 1 and 168.
 
 `PITCHAPI_DATA_TOKEN` here is a **separate**, read-only token: the GitHub Actions secret of the
 same name has write access to publish the data and should not be reused on the server.
 
-## First deployment
+## First deployment (Heroku dashboard)
 
-1. **Generate the credentials locally** (nothing is written to disk):
+1. **Student credit**: claim the Heroku offer of the GitHub Student Developer Pack, then add the
+   card Heroku asks for (Account settings → Billing).
+2. **Generate the credentials locally** (nothing is written to disk):
    ```bash
    npm run auth:secret
    ```
@@ -138,31 +181,42 @@ same name has write access to publish the data and should not be reused on the s
    secret. To hash a password you chose instead, pipe it in:
    `npm run auth:secret -- --stdin` (never as an argument: it would stay in the shell history).
    Clear the terminal afterwards.
-2. **Create a read-only GitHub token** (Settings → Developer settings → Fine-grained tokens):
-   repository `Cordierarn/PitchApi-big-5` only, permission *Contents: Read-only*.
-3. **Render**: New → Blueprint → this repository (`render.yaml`). Render asks for the values
-   marked `sync: false`: paste the hash, the session secret, the GitHub token, the Gemini key
-   and the model. Nothing is stored in the repository.
-4. Wait for the first deploy, then check from your own machine that nothing private answers
-   without a session:
+3. **Create a read-only GitHub token** (GitHub → Settings → Developer settings → Fine-grained
+   tokens): repository `Cordierarn/PitchApi-big-5` only, permission *Contents: Read-only*.
+4. **Create the app**: New → Create new app, region Europe. *Resources*: dyno type **Basic**.
+5. **Config Vars** (*Settings* → *Reveal Config Vars*): `SCOUTVISION_AUTH_USER` (`arnaud`),
+   `SCOUTVISION_AUTH_PASSWORD_HASH`, `SCOUTVISION_SESSION_SECRET`, `PITCHAPI_DATA_TOKEN`,
+   `GEMINI_API_KEY`, `GEMINI_MODEL`. Nothing goes into the repository.
+6. **GitHub**: *Deploy* → Deployment method **GitHub** → connect `Cordierarn/scoutvision-ai` →
+   *Enable Automatic Deploys* from `main` (every push to `main` deploys), or *Deploy Branch* for a
+   manual deploy. No Heroku secret is needed in the repository or in GitHub Actions.
+7. After the build, *More* → *View logs* shows `ScoutVision en écoute…` then
+   `Données installées…`. Check from your own machine that nothing private answers without a
+   session:
    ```bash
-   npm run verify:private -- https://<service>.onrender.com
+   npm run verify:private -- https://<app>.herokuapp.com
    ```
-5. Open the URL, sign in as `arnaud`.
+8. Open the URL, sign in as `arnaud`.
+
+The same steps work with the Heroku CLI (`heroku create`, `heroku ps:type web=basic`,
+`heroku config:set NAME=value`, `git push heroku main`); typing a secret on the command line keeps
+it in the shell history, so prefer the dashboard for the secret values.
 
 ## Operations
 
 - **Change the password**: run `npm run auth:secret` (or `-- --stdin`), replace
-  `SCOUTVISION_AUTH_PASSWORD_HASH` in the Render dashboard, save (Render restarts the service).
+  `SCOUTVISION_AUTH_PASSWORD_HASH` in the Config Vars, save (Heroku restarts the dyno).
   Every existing session and every known-device cookie becomes invalid, because both carry a
   fingerprint of the hash.
 - **Revoke every session** without changing the password: replace `SCOUTVISION_SESSION_SECRET`
-  with a new value (`npm run auth:secret` prints one) and save.
+  with a new value (`npm run auth:secret` prints one) in the Config Vars and save.
 - **Log out**: « Se déconnecter » at the bottom of the sidebar. The cookie is cleared and the
   session id revoked on the server.
-- **Redeploy**: push to `main` (auto-deploy), or *Manual Deploy* in the dashboard.
+- **Redeploy**: push to `main` (automatic deploys), or *Deploy* → *Manual deploy* → *Deploy
+  Branch*. *More* → *Restart all dynos* restarts without a build (the data is downloaded again).
 - **Data update**: the weekly workflow publishes a new `scoutvision-data` release; the server
-  picks it up within 6 hours, or at the next restart (*Restart service* in the dashboard).
+  picks it up within 6 hours, at the next daily dyno restart, or right away with *Restart all
+  dynos*.
 - **Local development with authentication**: put the three `SCOUTVISION_*` variables in the
   git-ignored `.env.local`; `npm run dev` then shows the login page on `http://localhost:3000`.
   Without them, the local server stays open.
@@ -172,13 +226,14 @@ same name has write access to publish the data and should not be reused on the s
 - Revoked session ids are kept in memory: a token stolen **and** used after a logout followed by a
   server restart stays valid until its expiry (7 days). Rotating `SCOUTVISION_SESSION_SECRET`
   invalidates everything at once.
-- The login rate limit is per instance and in memory (one instance here). Behind Render, the
-  client IP is the right-most `X-Forwarded-For` entry, the one added by Render's proxy (the
-  left-most entries are set by the client and ignored). If Render's edge ever appended its own
-  address instead, every client would share one bucket: an attacker could then delay the owner's
-  login by 15 minutes, never lock it permanently.
-- On the free plan, the first request after 15 minutes of inactivity waits for the instance to
-  wake up and for the data download.
+- The login rate limit and the revocation list are per dyno and in memory: one dyno here, and
+  both reset at each daily restart. The client IP is the right-most `X-Forwarded-For` entry, the
+  one appended by the Heroku router; left-most entries come from the client and are ignored.
+- After each dyno restart (at least daily, on deploys and Config Var changes), private data is
+  unavailable for the few seconds of the download; a failing GitHub release keeps it unavailable
+  until a retry succeeds (30 s, 1, 2, 4… up to 15 minutes between attempts).
+- An AI request is cut at 25 s by the server (30 s by the Heroku router): a very slow Gemini
+  answer is reported as unavailable instead of timing out silently.
 - Data kept in the browser by the app (scouting dossiers, watchlist, saved filters) stays in that
   browser's `localStorage` after logout; it is the user's own data on the user's own device.
 - Flags are loaded from `flagcdn.com` (public images keyed by country code).

@@ -271,6 +271,53 @@ describe('mode développement', () => {
   });
 });
 
+describe('derrière le proxy Heroku', () => {
+  it('HTTP redirigé vers HTTPS (GET), refusé pour les mutations ; HTTPS servi normalement', async () => {
+    server.close();
+    await start({ httpsRedirect: true });
+    // fetch ne laisse pas fixer Host : requête http brute, comme la reçoit le dyno derrière le routeur
+    const { request } = await import('node:http');
+    const r = await new Promise<{ status: number; location?: string }>((resolve, reject) => {
+      const u = new URL(base);
+      const x = request({ host: u.hostname, port: u.port, path: '/data/players/2026-27.json?x=1', headers: { Host: 'scoutvision-test.herokuapp.com', 'X-Forwarded-Proto': 'http' } },
+        res => { res.resume(); resolve({ status: res.statusCode!, location: res.headers.location }); });
+      x.on('error', reject); x.end();
+    });
+    expect(r.status).toBe(301);
+    expect(r.location).toBe('https://scoutvision-test.herokuapp.com/data/players/2026-27.json?x=1');
+    const post = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { ...origin(), 'X-Forwarded-Proto': 'http' }, body: '{}' });
+    expect(post.status).toBe(403);
+    expect((await get('/login', { 'X-Forwarded-Proto': 'https' })).status).toBe(200);
+    // Origine attendue construite avec le schéma du proxy : https://<hôte>
+    const ok = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', Origin: `https://${new URL(base).host}`, 'X-Forwarded-For': '203.0.113.50' }, body: JSON.stringify({ username: 'arnaud', password: PASSWORD }) });
+    expect(ok.status).toBe(200);
+    server.close();
+    await start();
+  });
+
+  it('données pas encore installées (premier démarrage) : 503 après connexion, 401 sans session', async () => {
+    server.close();
+    await start({ dataReady: () => false });
+    expect((await get('/data/players/2026-27.json')).status).toBe(401);
+    const c = await cookie();
+    const res = await get('/data/players/2026-27.json', { Cookie: c });
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('10');
+    expect((await get('/healthz')).status).toBe(200);
+    expect(await (await get('/healthz')).text()).toBe('ok');
+    server.close();
+    await start();
+  });
+
+  it('adresse du client : entrée de droite de X-Forwarded-For (celle ajoutée par le routeur)', async () => {
+    const { clientIp } = await import('./privateServer');
+    const req = (xff: string) => ({ headers: { 'x-forwarded-for': xff }, socket: { remoteAddress: '10.0.0.1' } }) as never;
+    expect(clientIp(req('198.51.100.1, 203.0.113.7'), true)).toBe('203.0.113.7');
+    expect(clientIp(req('203.0.113.7'), true)).toBe('203.0.113.7');
+    expect(clientIp(req('198.51.100.1, 203.0.113.7'), false)).toBe('10.0.0.1');
+  });
+});
+
 describe('rebond DNS (dev / preview)', () => {
   it('hôte non local refusé avant tout routage ; production non concernée', async () => {
     const { isLoopbackHost } = await import('./privateServer');
