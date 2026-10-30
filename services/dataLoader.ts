@@ -7,6 +7,7 @@
  *   /data/teams/<saison>.json          équipes d'une saison
  *   /data/shots/<saison>/<COMP>.json   tirs d'une compétition (chargés à la demande)
  *   /data/heatmaps/<saison>/<COMP>.json cartes de chaleur des joueurs (chargées à la demande)
+ *   /data/networks/<saison>/<COMP>.json réseaux de passes agrégés par équipe (chargés à la demande)
  *   /data/models/transfer.json         modèle de transfert (recrutement)
  *   /data/market.json                  valeur Transfermarkt et contrat actuels (recrutement)
  */
@@ -241,6 +242,13 @@ export interface TeamLineups {
   formations: { formation: string; matches: number; slots: LineupSlot[] }[];
 }
 
+/** Réseau de passes agrégé d'une équipe sur la saison (fenêtre jusqu'au premier remplacement de chaque match) */
+export interface TeamNetwork {
+  matches: number;                                               // matchs avec un réseau
+  players: Record<string, [string, number, number, number, number, number]>;   // Player ID -> [nom, x (0 = propre but), y (0 = gauche), matchs, passes, reçues]
+  edges: [string, string, number, number][];                     // [de, vers, passes cumulées, matchs où le lien apparaît]
+}
+
 export interface HeatmapFile {
   cols: number;          // 16 : 0 = propre but, 15 = but adverse
   rows: number;          // 12 : 0 = couloir droit de l'attaquant
@@ -299,6 +307,7 @@ class DataLoader {
   private shots = new Map<string, Promise<ShotEvent[]>>();
   private heatmaps = new Map<string, Promise<HeatmapFile | null>>();
   private lineups = new Map<string, Promise<Record<string, TeamLineups> | null>>();
+  private networks = new Map<string, Promise<Record<string, TeamNetwork> | null>>();
   private ageCurves: Promise<AgeCurves> | null = null;
   private transfer: Promise<TransferModel | null> | null = null;
   private market: Promise<MarketValues | null> | null = null;
@@ -407,6 +416,21 @@ class DataLoader {
       pending = fetchOptionalJSON<Record<string, TeamLineups>>(`/data/lineups/${key}.json`);
       pending.catch(() => this.lineups.delete(key));
       this.lineups.set(key, pending);
+    }
+    return pending;
+  }
+
+  /**
+   * Réseaux de passes agrégés des équipes d'une compétition (mis en cache), clé = Team ID.
+   * null si la compétition n'a pas de réseaux cette saison.
+   */
+  loadNetworks(season: string, competition: string): Promise<Record<string, TeamNetwork> | null> {
+    const key = `${season}/${competition}`;
+    let pending = this.networks.get(key);
+    if (!pending) {
+      pending = fetchOptionalJSON<Record<string, TeamNetwork>>(`/data/networks/${key}.json`);
+      pending.catch(() => this.networks.delete(key));
+      this.networks.set(key, pending);
     }
     return pending;
   }

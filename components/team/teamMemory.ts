@@ -4,11 +4,13 @@
  */
 
 import { DEFAULT_SHOT_FILTERS, ShotFilters, ShotSide } from '../../utils/teamShots';
+import { DEFAULT_NETWORK_FILTERS, NetworkFilters } from '../../utils/passNetwork';
 
-export type TeamTab = 'STYLE' | 'LINEUP' | 'SQUAD' | 'SHOTS';
+export type TeamTab = 'STYLE' | 'LINEUP' | 'NETWORK' | 'SQUAD' | 'SHOTS';
 export const TEAM_TABS: { key: TeamTab; label: string }[] = [
   { key: 'STYLE', label: 'Style & forces' },
   { key: 'LINEUP', label: 'Onze & formations' },
+  { key: 'NETWORK', label: 'Réseau de passes' },
   { key: 'SQUAD', label: 'Effectif & profondeur' },
   { key: 'SHOTS', label: 'Tirs' },
 ];
@@ -20,6 +22,8 @@ export interface TeamMemory {
   tab: TeamTab;
   formation: Record<string, string>;             // formation choisie par équipe
   slot: Record<string, number>;                  // case choisie par équipe (numéro de case)
+  network: NetworkFilters;                       // filtres du réseau de passes
+  networkPlayer: Record<string, string>;         // joueur choisi dans le réseau, par équipe (Player ID)
   shotSide: ShotSide;
   shotFilters: ShotFilters;
   squadSort: { key: SquadSortKey; dir: 'asc' | 'desc' };
@@ -31,6 +35,8 @@ export const teamMemory: TeamMemory = {
   tab: 'STYLE',
   formation: {},
   slot: {},
+  network: DEFAULT_NETWORK_FILTERS,
+  networkPlayer: {},
   shotSide: 'for',
   shotFilters: DEFAULT_SHOT_FILTERS,
   squadSort: { key: 'Minutes played', dir: 'desc' },

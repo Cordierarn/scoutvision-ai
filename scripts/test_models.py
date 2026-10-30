@@ -133,6 +133,55 @@ class LineupTest(unittest.TestCase):
         self.assertEqual(slot["players"], [["p_a", "Inigo Cordoba", 3], ["p_b", "B", 1]])
 
 
+class PassNetworkTest(unittest.TestCase):
+    """Fixture synthétique : deux matchs d'une équipe « t », joueurs fictifs p_a, p_b, p_c."""
+
+    def test_aggregates_positions_and_links_over_matches(self) -> None:
+        nodes = pd.DataFrame([
+            # match 1 : a (gardien, à gauche en mètres depuis le couloir droit = 34), b, c
+            {"match_id": "m1", "team_id": "t", "player_id": "p_a", "player_name": "A", "avg_x": 10.5, "avg_y": 34.0, "passes": 10, "passes_received": 4},
+            {"match_id": "m1", "team_id": "t", "player_id": "p_b", "player_name": "B", "avg_x": 52.5, "avg_y": 0.0, "passes": 20, "passes_received": 15},
+            {"match_id": "m1", "team_id": "t", "player_id": "p_c", "player_name": "C", "avg_x": 84.0, "avg_y": 68.0, "passes": 5, "passes_received": 12},
+            # match 2 : a et b seulement (c absent), graphie différente de B
+            {"match_id": "m2", "team_id": "t", "player_id": "p_a", "player_name": "A", "avg_x": 10.5, "avg_y": 34.0, "passes": 12, "passes_received": 6},
+            {"match_id": "m2", "team_id": "t", "player_id": "p_b", "player_name": "B.", "avg_x": 31.5, "avg_y": 0.0, "passes": 18, "passes_received": 9},
+            # autre équipe, ignorée dans « t »
+            {"match_id": "m1", "team_id": "u", "player_id": "p_z", "player_name": "Z", "avg_x": 50.0, "avg_y": 34.0, "passes": 1, "passes_received": 1},
+            # nœud sans position ni passes (joueur sans passe dans la fenêtre) : ignoré, pas de NaN en sortie
+            {"match_id": "m1", "team_id": "u", "player_id": "p_n", "player_name": "N", "avg_x": None, "avg_y": None, "passes": None, "passes_received": None},
+        ])
+        edges = pd.DataFrame([
+            {"match_id": "m1", "team_id": "t", "from_player_id": "p_a", "to_player_id": "p_b", "passes": 6},
+            {"match_id": "m1", "team_id": "t", "from_player_id": "p_b", "to_player_id": "p_c", "passes": 4},
+            {"match_id": "m2", "team_id": "t", "from_player_id": "p_a", "to_player_id": "p_b", "passes": 8},
+            {"match_id": "m2", "team_id": "t", "from_player_id": "p_b", "to_player_id": "p_x", "passes": 3},   # joueur hors réseau
+            {"match_id": "m1", "team_id": "u", "from_player_id": "p_z", "to_player_id": "p_z", "passes": 1},
+        ])
+        out = prepare_data.build_networks(nodes, edges)
+        self.assertEqual(set(out), {"t", "u"})
+        self.assertEqual(list(out["u"]["players"]), ["p_z"])
+        json.dumps(out, allow_nan=False)
+        t = out["t"]
+        self.assertEqual(t["matches"], 2)
+        # Positions normalisées : x vers le but adverse, y de gauche (1 − 0/68 = 1 → droite) ; moyenne des matchs
+        self.assertEqual(t["players"]["p_a"], ["A", 0.1, 0.5, 2, 22, 10])
+        self.assertEqual(t["players"]["p_b"], ["B", 0.4, 1.0, 2, 38, 24])
+        self.assertEqual(t["players"]["p_c"], ["C", 0.8, 0.0, 1, 5, 12])
+        # Liens cumulés, triés par passes, limités aux joueurs du réseau
+        self.assertEqual(t["edges"], [["p_a", "p_b", 14, 2], ["p_b", "p_c", 4, 1]])
+
+    def test_min_matches_drops_occasional_players(self) -> None:
+        nodes = pd.DataFrame([
+            {"match_id": "m1", "team_id": "t", "player_id": "p_a", "player_name": "A", "avg_x": 10.5, "avg_y": 34.0, "passes": 1, "passes_received": 1},
+            {"match_id": "m2", "team_id": "t", "player_id": "p_a", "player_name": "A", "avg_x": 10.5, "avg_y": 34.0, "passes": 1, "passes_received": 1},
+            {"match_id": "m2", "team_id": "t", "player_id": "p_b", "player_name": "B", "avg_x": 10.5, "avg_y": 34.0, "passes": 1, "passes_received": 1},
+        ])
+        edges = pd.DataFrame([{"match_id": "m2", "team_id": "t", "from_player_id": "p_a", "to_player_id": "p_b", "passes": 2}])
+        out = prepare_data.build_networks(nodes, edges, min_matches=2)
+        self.assertEqual(list(out["t"]["players"]), ["p_a"])
+        self.assertEqual(out["t"]["edges"], [])
+
+
 class MarketTest(unittest.TestCase):
     def test_devig_removes_margin_and_keeps_order(self) -> None:
         p = market.devig(np.array([[1.8, 3.6, 4.5], [3.0, 3.2, 2.5]]))

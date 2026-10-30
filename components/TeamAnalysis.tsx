@@ -31,6 +31,7 @@ import { GroundedAiPanel } from './ai/GroundedAiPanel';
 import { aiOpposition } from '../services/groundedAiService';
 import { buildOppositionFacts } from '../utils/oppositionFacts';
 import TeamLineupTab from './team/TeamLineupTab';
+import TeamNetworkTab from './team/TeamNetworkTab';
 import TeamSquadTab from './team/TeamSquadTab';
 import TeamShotsTab from './team/TeamShotsTab';
 import { TEAM_TABS, TeamTab, teamMemory } from './team/teamMemory';
@@ -71,6 +72,14 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
     : lineupsData.status === 'idle' ? null : undefined;
   const mainFormation = useMemo(() => orderFormations(lineups)[0], [lineups]);
 
+  // Réseau de passes agrégé : chargé seulement quand son onglet est ouvert
+  const networksData = useAsyncData(
+    tab === 'NETWORK' && ctx?.teamId && ctx.season && ctx.competition ? () => dataLoader.loadNetworks(ctx.season, ctx.competition!) : null,
+    [tab === 'NETWORK', ctx?.teamId, ctx?.season, ctx?.competition],
+  );
+  const network = networksData.status === 'success' ? networksData.data?.[ctx!.teamId!] ?? null
+    : networksData.status === 'idle' ? null : undefined;
+
   // Profil de l'effectif : même championnat de référence et même fonction que le Recrutement
   const league = useMemo(() => (team ? resolveTeamLeague(team, playerData) : null), [team, playerData]);
   const profile = useMemo(() => {
@@ -99,7 +108,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
     scroller.addEventListener('scroll', onScroll, { passive: true });
     return () => scroller.removeEventListener('scroll', onScroll);
   }, [tab]);
-  const contentReady = tab === 'SHOTS' || tab === 'STYLE' || lineups !== undefined;
+  const contentReady = tab === 'SHOTS' || tab === 'STYLE' || (tab === 'NETWORK' ? network !== undefined : lineups !== undefined);
   useLayoutEffect(() => {
     const scroller = rootRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
     const target = teamMemory.scroll[tab] ?? 0;
@@ -221,7 +230,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
       <div role="tabpanel" id={`team-panel-${tab}`} aria-labelledby={`team-tab-${tab}`} tabIndex={-1}>
         {!team || !ctx ? (
           <EmptyState icon={Activity} className="py-20" title="Choisissez une équipe">
-            Recherchez un club : style et forces, onze et formations, effectif et profondeur, tirs.
+            Recherchez un club : style et forces, onze et formations, réseau de passes, effectif et profondeur, tirs.
           </EmptyState>
         ) : (
           <>
@@ -244,6 +253,10 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
             )}
             {tab === 'LINEUP' && (
               <TeamLineupTab key={team} teamKey={team} lineups={lineups} lineupsError={lineupsData.error} onRetry={lineupsData.retry}
+                players={players} teamMatches={matches} onSelectPlayer={onSelectPlayer} />
+            )}
+            {tab === 'NETWORK' && (
+              <TeamNetworkTab key={team} teamKey={team} network={network} networkError={networksData.error} onRetry={networksData.retry}
                 players={players} teamMatches={matches} onSelectPlayer={onSelectPlayer} />
             )}
             {tab === 'SQUAD' && (

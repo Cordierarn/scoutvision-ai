@@ -11,6 +11,7 @@ public/data/, chargés à la demande par l'application :
   public/data/shots/<saison>/<COMP>.json    tirs d'une compétition
   public/data/heatmaps/<saison>/<COMP>.json cartes de chaleur des joueurs d'une compétition
   public/data/lineups/<saison>/<COMP>.json  compositions réelles : formations et titulaires par case
+  public/data/networks/<saison>/<COMP>.json réseaux de passes agrégés par équipe (positions moyennes, liens)
   public/data/models/age_curves.json        courbes d'âge (évolution des percentiles par rôle)
   public/data/models/transfer.json          modèle de transfert : niveaux de championnat, contexte, validation
   public/data/market.json                   valeur Transfermarkt et contrat actuels de chaque joueur
@@ -572,6 +573,45 @@ def build_network(nodes: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns={"player_id": "Player ID", "team_id": "Team ID"})
 
 
+def build_networks(nodes: pd.DataFrame, edges: pd.DataFrame, min_matches: int = 1) -> dict:
+    """Réseau de passes agrégé sur la saison, par équipe (tables pass_network_node / _edge).
+
+    Chaque match fournit un réseau sur la fenêtre jusqu'au premier remplacement (onze de
+    départ) : position moyenne de chaque joueur et passes entre joueurs. L'agrégat garde, par
+    équipe, le nombre de matchs avec réseau, puis par joueur sa position moyenne (moyenne des
+    positions de match), ses matchs dans le réseau, ses passes données et reçues, et par lien
+    orienté le total de passes et le nombre de matchs où il apparaît. Les valeurs « par match »
+    se calculent dans l'application.
+
+    Repère : avg_x en mètres depuis le propre but (0-105) ; avg_y en mètres depuis le couloir
+    droit de l'attaquant (0-68, même convention que la table heatmap). Sortie normalisée dans le
+    repère des compositions : x 0-1 vers le but adverse, y 0-1 de gauche à droite.
+    """
+    # Un nœud sans position moyenne (joueur sans passe dans la fenêtre) ne compte pas
+    nodes = nodes[nodes["player_id"].notna() & nodes["avg_x"].notna() & nodes["avg_y"].notna()].copy()
+    nodes[["passes", "passes_received"]] = nodes[["passes", "passes_received"]].fillna(0)
+    edges = edges[edges["from_player_id"].notna() & edges["to_player_id"].notna() & edges["passes"].notna()]
+    names = nodes.groupby("player_id")["player_name"].agg(lambda s: s.dropna().value_counts().index[0] if s.notna().any() else "")
+    teams: dict[str, dict] = {}
+    for team_id, g in nodes.groupby("team_id"):
+        per_player = g.groupby("player_id").agg(matches=("match_id", "nunique"), x=("avg_x", "mean"), y=("avg_y", "mean"),
+                                                passes=("passes", "sum"), received=("passes_received", "sum"))
+        per_player = per_player[per_player["matches"] >= min_matches]
+        players = {
+            pid: [str(names.get(pid, "")), round(float(r.x) / PITCH_LENGTH, 3), round(1 - float(r.y) / PITCH_WIDTH, 3),
+                  int(r.matches), int(r.passes), int(r.received)]
+            for pid, r in per_player.iterrows()
+        }
+        te = edges[(edges["team_id"] == team_id) & edges["from_player_id"].isin(players) & edges["to_player_id"].isin(players)]
+        links = te.groupby(["from_player_id", "to_player_id"]).agg(passes=("passes", "sum"), matches=("match_id", "nunique"))
+        teams[str(team_id)] = {
+            "matches": int(g["match_id"].nunique()),
+            "players": players,
+            "edges": [[a, b, int(r.passes), int(r.matches)] for (a, b), r in links.sort_values("passes", ascending=False).iterrows()],
+        }
+    return teams
+
+
 def attach_rapm(players: pd.DataFrame, rapm: pd.DataFrame) -> pd.DataFrame:
     """RAPM du pipeline (plus-minus régularisé en xG/90, par championnat, fenêtre de deux saisons).
 
@@ -920,7 +960,7 @@ def main(argv: list[str] | None = None) -> int:
         season = app_season(raw_season)
         tables = read_tables(download(tag, name, size),
                              {"player_season", "team_season", "team_match", "shot", "match", "heatmap",
-                              "pass_network_node", "lineup"})
+                              "pass_network_node", "pass_network_edge", "lineup"})
         ps = tables.get("player_season")
         if ps is None or ps.empty:
             print(f"  ! {comp} {raw_season} : pas de player_season, ignoré")
@@ -933,6 +973,9 @@ def main(argv: list[str] | None = None) -> int:
         nodes = tables.get("pass_network_node")
         if nodes is not None and not nodes.empty:
             players = players.merge(build_network(nodes), on=["Player ID", "Team ID"], how="left")
+            edges = tables.get("pass_network_edge")
+            if edges is not None and not edges.empty:
+                write_json(args.out / "networks" / season / f"{comp}.json", build_networks(nodes, edges))
         bucket["players"].append(players.assign(_app_season=season))
 
         ts = tables.get("team_season")

@@ -85,7 +85,8 @@ verdict on a player.
   the season already played (see [methodology](docs/methodology.md#minutes-threshold-during-a-season-in-progress)).
 
 ### Team & recruitment
-- Squad analysis: starting eleven of the most used formation, playing style map, shot map, squad.
+- Squad analysis: starting eleven of the most used formation, playing style map, season pass
+  network (mean positions and most frequent links, filterable), shot map, squad.
 - Team needs by position: each starter projected one season ahead and ranked in his league;
   contract end, expected decline and lack of cover flagged.
 - Squad profile on 9 dimensions, ranked among the league's teams.
@@ -205,7 +206,7 @@ the report endpoint). To rebuild the data with Python, see [data pipeline](docs/
 ## Data format and updates
 
 Prepared datasets are stored as compact JSON and loaded on demand by season and competition:
-players, teams, shots, heatmaps, lineups and models (age curves, transfer model), plus market
+players, teams, shots, heatmaps, lineups, pass networks and models (age curves, transfer model), plus market
 values, forecasts and laboratory results. See [data format](docs/data-format.md).
 
 Data is refreshed twice a week through GitHub Actions and published to a private release

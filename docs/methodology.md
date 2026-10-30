@@ -81,6 +81,19 @@ threshold typed by the user is never overwritten. Thresholds used as signals (fo
   shown as a trend from 5 to 9 and as the observed style from 10. Between two complete seasons, 47 %
   of clubs change style. Style map: PC1 63.9 % and PC2 24.2 % of the variance (88 %, data of 2026-10-30, 2,328 team-seasons), one point per
   team-season.
+- Pass network (`utils/passNetwork.ts`): PitchAPI builds one network per match on the starting
+  eleven, up to the first substitution (players who come on are never in it). The season file
+  keeps, per team, the number of matches with a network, each player's mean position (mean of
+  the match means), matches, passes given and received, and per link the summed passes and the
+  matches where it appears. The app makes links undirected (both directions added) and reports
+  every "per match" value to the team's matches with a network, so two teams read on the same
+  base; a pair that only played together half the season is therefore diluted, on purpose.
+  Default view: players in at least 50 % of the matches and links of at least 2 passes per
+  match; a link is shown only when both players are. Node size = passes given + received per
+  match (square-root scale), stroke width = passes per match, both relative to what is shown.
+  Coordinates: `avg_x` is in metres from the own goal, `avg_y` in metres from the attacker's
+  right touchline (checked against the lineups: correlation −0.83 with `pitch_y`, 2025-26
+  Ligue 1); the pipeline normalises both to the lineup frame (0–1, y from the left).
 - Depth (`slotDepth`): starter, backup and third option of each slot of the formation, with the
   signals Recruitment already uses (no backup, rotation, contract ≤ 12 months, age decline, no
   regular player). No need level: that stays in `slotNeeds`, which now reads `slotDepth` (identical
