@@ -71,6 +71,9 @@ verdict on a player.
 - **Similar players**: explainable similarity score on the pipeline percentiles, with the
   components that drive it ("why similar"), optionally restricted to the same position.
 - **Watchlist** with notes, stored in the browser, CSV export.
+- **Saved filters and share links** on the player database, the Gem Hunter and Similar players:
+  settings saved in the browser under a name, and a link (`#partage=…`, settings only, no data)
+  that reopens the page with them.
 
 ### Tactical profiles
 - 27 tactical roles in 9 categories, from goalkeepers to set-piece specialists.
@@ -78,7 +81,8 @@ verdict on a player.
 - A role index from 0 to 100, identical in the player profile, the Gem Hunter and recruitment,
   with a term-by-term breakdown.
 - **Gem Hunter**: selection funnel (position, constraints, role criteria), adjustable strictness,
-  custom roles.
+  custom roles. During a season in progress the default minutes threshold follows the share of
+  the season already played (see [methodology](docs/methodology.md#minutes-threshold-during-a-season-in-progress)).
 
 ### Team & recruitment
 - Squad analysis: starting eleven of the most used formation, playing style map, shot map, squad.

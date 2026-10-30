@@ -35,6 +35,19 @@ Every index and projection below is a scouting aid. None of them is a verdict on
   ([laboratory](laboratory.md), *Statistical twins*) is rated **partial** (on par with the age
   curves for under-23s, not better overall) and only its aggregate result is stored.
 
+## Minutes threshold during a season in progress
+
+The Gem Hunter (500 min) and Similar players (900 min) use full-season minutes thresholds. While
+the loaded season is in progress, the default threshold is the full-season value multiplied by the
+share of the season already played (`utils/seasonProgress.ts`), rounded to 10 minutes, never
+below 90: a player who started every round played so far is not excluded. The share is measured
+on matches when the competition has a plausible round-robin calendar (8 to 24 teams, matches
+played by the most advanced team over 2 × (teams − 1)); without a competition filter it is the
+median over the measurable leagues; otherwise it is the elapsed time of the season window. The
+adjusted value is labelled in the interface ("ajusté à la saison"), can be changed, and a
+threshold typed by the user is never overwritten. Thresholds used as signals (for example the
+"few minutes" flag of recruitment) are unchanged.
+
 ## Team analysis
 
 - Team ranks: one function for the team page and Recruitment, `teamRank` (`utils/recruitment.ts`),
