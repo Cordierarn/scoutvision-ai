@@ -2,8 +2,8 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { loadAuthConfig, readCookie, sessionCookieName, verifySessionToken } from './server/auth';
-import { createPrivateServer, type ServerMode } from './server/privateServer';
+import { RevocationList, loadAuthConfig, readCookie, sessionCookieName, verifySessionToken } from './server/auth';
+import { createPrivateServer, isLoopbackHost, type ServerMode } from './server/privateServer';
 import { scoutReportMiddleware } from './server/scoutReportPlugin';
 
 // Images PitchAPI servies en même origine : le CDN n'envoie pas d'en-tête CORS.
@@ -20,6 +20,8 @@ const cdnProxy = {
  * privées, endpoints Gemini). Sans variables d'authentification : mode local ouvert, signalé.
  */
 function privateServer(env: Record<string, string>, auth: ReturnType<typeof loadAuthConfig>): Plugin {
+  // Déconnexions partagées entre le garde HTTP et la vérification des WebSocket
+  const revoked = new RevocationList();
   const make = (mode: ServerMode) => {
     if (!auth) console.warn('\n  ScoutVision : authentification non configurée, accès local ouvert, limité à cet ordinateur (127.0.0.1). Voir docs/deployment.md.\n');
     return createPrivateServer({
@@ -31,6 +33,7 @@ function privateServer(env: Record<string, string>, auth: ReturnType<typeof load
       trustProxy: false,
       hsts: false,
       cdn: mode === 'dev' ? 'next' : 'proxy',
+      revoked,
       api: scoutReportMiddleware({ apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined }),
     });
   };
@@ -46,9 +49,10 @@ function privateServer(env: Record<string, string>, auth: ReturnType<typeof load
         const emit = http.emit.bind(http) as (event: string, ...args: unknown[]) => boolean;
         http.emit = ((event: string, ...args: unknown[]) => {
           if (event === 'upgrade') {
-            const req = args[0] as { headers: { cookie?: string } };
+            const req = args[0] as { headers: { cookie?: string; host?: string } };
             const socket = args[1] as { destroy: () => void };
-            if (!verifySessionToken(auth, readCookie(req.headers.cookie, sessionCookieName(false)))) { socket.destroy(); return true; }
+            const valid = isLoopbackHost(req.headers.host) && verifySessionToken(auth, readCookie(req.headers.cookie, sessionCookieName(false)), revoked);
+            if (!valid) { socket.destroy(); return true; }
           }
           return emit(event, ...args);
         }) as typeof http.emit;

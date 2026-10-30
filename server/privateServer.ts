@@ -121,6 +121,16 @@ function redirect(res: ServerResponse, location: string) {
   res.end();
 }
 
+/**
+ * Hôte local (vite dev / vite preview) : localhost, *.localhost, 127.0.0.1, [::1]. Toute autre valeur
+ * de Host est refusée hors production (protection contre le rebond DNS, comme allowedHosts de Vite,
+ * que le garde précède dans la chaîne des middlewares).
+ */
+export function isLoopbackHost(host: string | undefined): boolean {
+  const name = String(host ?? '').toLowerCase().replace(/:\d{1,5}$/, '');
+  return name === 'localhost' || name.endsWith('.localhost') || name === '127.0.0.1' || name === '[::1]';
+}
+
 /** Chemin décodé de l'URL ; null s'il est invalide (encodage, octet nul) */
 export function requestPath(req: IncomingMessage): string | null {
   const raw = (req.url ?? '/').split('?')[0].split('#')[0] || '/';
@@ -363,6 +373,7 @@ export function createPrivateServer(opts: PrivateServerOptions) {
 
   async function handle(req: IncomingMessage, res: ServerResponse, next: Next) {
     setSecurityHeaders(req, res, opts);
+    if (opts.mode !== 'production' && !isLoopbackHost(req.headers.host)) return sendText(res, 403, 'Hôte non autorisé.');
     const p = requestPath(req);
     if (p === null) return sendText(res, 400, 'Requête invalide.');
     if (p === '/healthz') return sendText(res, 200, 'ok');

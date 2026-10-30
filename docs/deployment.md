@@ -54,8 +54,10 @@ Browser ──HTTPS──► Render edge ──► node dist-server/production.j
   development server exposes sources and a module channel by nature, so another device reaches
   ScoutVision through the production server (`npm run build && npm start`), never through Vite.
   Without the three auth variables they run in an explicit **open local mode** (warning in the
-  terminal, no logout button). With them, Vite's hot-reload WebSocket is closed to any connection
-  without a valid session (the login page itself has no hot reload in development), and module
+  terminal, no logout button). Any `Host` header other than a loopback name gets `403` (DNS
+  rebinding: a web page rebound to 127.0.0.1 cannot read the local data or call the API). With the
+  auth variables, Vite's hot-reload WebSocket is closed to any connection without a valid,
+  non-revoked session (the login page itself has no hot reload in development), and module
   requests over that channel are disabled. The production server refuses to start without them. In development, a Vite
   plugin also refuses to load any file of `public/data`, `dist`, `.cache` or `.env*` as a
   module, whatever the URL (`/@id/`, `@/` alias, absolute path, `?import`, `?raw`), and a request

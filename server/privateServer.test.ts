@@ -271,6 +271,27 @@ describe('mode développement', () => {
   });
 });
 
+describe('rebond DNS (dev / preview)', () => {
+  it('hôte non local refusé avant tout routage ; production non concernée', async () => {
+    const { isLoopbackHost } = await import('./privateServer');
+    expect(['localhost:3000', '127.0.0.1:4173', 'app.localhost', '[::1]:3000'].every(isLoopbackHost)).toBe(true);
+    expect(['attacker.example:3000', '127.0.0.1.attacker.example', '192.168.1.10:3000', undefined].some(h => isLoopbackHost(h as string))).toBe(false);
+    server.close();
+    await start({ auth: null, mode: 'preview' });                // mode ouvert : le cas le plus exposé
+    const res = await new Promise<number>((resolve, reject) => {
+      const url = new URL(`${base}/data/players/2026-27.json`);
+      import('node:http').then(({ request }) => {
+        const r = request({ host: url.hostname, port: url.port, path: url.pathname, headers: { Host: `attacker.example:${url.port}` } }, x => { x.resume(); resolve(x.statusCode!); });
+        r.on('error', reject); r.end();
+      });
+    });
+    expect(res).toBe(403);
+    expect((await get('/data/players/2026-27.json')).status).toBe(200);   // hôte local : servi (mode ouvert)
+    server.close();
+    await start();
+  });
+});
+
 describe('appareil connu', () => {
   it('cookie d\'appareil posé à la connexion, conservé à la déconnexion, sans accès par lui-même', async () => {
     const res = await login('arnaud', PASSWORD);
