@@ -13,6 +13,7 @@
     "data:pull": "bash scripts/pull_data.sh",
     "data:prepare": "python3 scripts/prepare_data.py",
     "data:lab": "python3 scripts/prepare_lab.py",
+    "data:lab:market": "python3 scripts/prepare_market_lab.py",
     "test": "vitest run",
     "test:data": "python3 -m unittest discover -s scripts -p \"test_*.py\""
   },

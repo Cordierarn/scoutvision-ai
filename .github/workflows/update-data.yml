@@ -62,6 +62,10 @@ jobs:
         # Expériences sur les tables match par match (archives déjà en cache) : public/data/lab
         run: python scripts/prepare_lab.py
 
+      - name: Labo marché
+        # Battre le marché ? Expériences sur les mêmes tables et les cotes football-data : public/data/lab/market_lab.json
+        run: python scripts/prepare_market_lab.py
+
       - name: Publication dans la release privée
         run: |
           tar -czf "$RUNNER_TEMP/scoutvision-data.tar.gz" -C public/data .

@@ -301,6 +301,7 @@ export enum ViewState {
   WATCHLIST = 'WATCHLIST',
   FORECAST = 'FORECAST',
   LAB = 'LAB',
+  MARKET_LAB = 'MARKET_LAB',
   RECRUITMENT = 'RECRUITMENT'
 }
 

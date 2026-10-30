@@ -108,6 +108,10 @@ verdict on a player.
   referees, transfers, squad age, luck…
 - Each ends with a verdict: validated, partial, debunked or measured. Negative results stay in
   the lab.
+- Market lab (*Labo marché*): can the market be beaten with what ScoutVision already has? An
+  out-of-sample base model refitted every week, and each signal (absent starters, end-of-season
+  stakes, set pieces, referees, cups…) tested on a season the model has not seen; with odds,
+  value bets judged at the closing price. See [laboratory](docs/laboratory.md#market-lab-labo-marché-page).
 
 ### AI scout reports (optional)
 - Optional grounded scouting summaries written from ScoutVision's structured analyses.

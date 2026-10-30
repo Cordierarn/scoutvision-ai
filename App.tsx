@@ -13,6 +13,7 @@ import Prospects from './components/Prospects';
 import Watchlist from './components/Watchlist';
 import Forecast from './components/Forecast';
 import LabPage from './components/lab/LabPage';
+import MarketLabPage from './components/lab/MarketLabPage';
 import { PlayerData, TeamStats, ViewState, getPlayerSeasonId } from './types';
 import { dataLoader, DataIndex, LoadingState } from './services/dataLoader';
 import { queryService } from './services/queryService';
@@ -181,6 +182,7 @@ const App: React.FC = () => {
       {view === ViewState.FORECAST && <Forecast />}
 
       {view === ViewState.LAB && <LabPage playerData={players} />}
+      {view === ViewState.MARKET_LAB && <MarketLabPage />}
 
       {view === ViewState.WATCHLIST && (
         <Watchlist onSelectPlayer={handleSelectPlayer} />

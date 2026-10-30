@@ -189,3 +189,96 @@ export const labData = {
     'referees.json', raw => ({ reliability: raw.reliability, rows: fromColumnar<RefereeRow>(raw.table) })),
   teams: () => load<{ coef: number; ci: Interval; rows: TeamRow[] }>('teams.json', raw => ({ coef: raw.coef, ci: raw.ci, rows: fromColumnar<TeamRow>(raw) })),
 };
+
+// ============================================
+// Labo marché (scripts/prepare_market_lab.py -> /data/lab/market_lab.json)
+// ============================================
+
+/** Test standard d'un signal : gain de log-loss par match sur la saison de test, avec et sans le signal */
+export interface SignalGain {
+  train: number; test: number; llBase?: number; llRecal?: number; llSignal?: number;
+  gain: number; ci: Interval; coef?: [number, number]; signalSd?: number; verdict: Verdict;
+}
+
+export interface BetStats { bets: number; clv?: number; clvSe?: number; roi?: number; roiSe?: number }
+
+export interface MarketLabCalibration {
+  season: string; matches: number; temperature: number; llRaw: number; llTempered: number; gain: number; ci: Interval;
+  ece: number; reliability: { lo: number; hi: number; n: number; predicted: number; observed: number }[];
+  draws: Record<string, { matches: number; predicted: number; observed: number }>; drawBias: number; verdict: Verdict;
+}
+
+export interface CupsRow { matches: number; rpsModel: number; rpsFrequencies: number; llModel?: number; llFrequencies?: number; gain: number; ci: Interval }
+
+export interface MarketLabAbsences {
+  season: string; count: SignalGain; share: SignalGain; known: SignalGain; shareBeyondCount?: { gain: number; ci: Interval };
+  xi: Record<string, { predicted: number; lastEleven: number; missing: number; missingShare: number }>; teamMatches: number; verdict: Verdict;
+}
+
+export interface MarketLabRedCards {
+  season: string; teamMatches: number; redRate: number; auc: number; aucRefereeOnly: number; coef: Record<string, number>;
+  outcome: SignalGain; overUnder?: { matches: number; llPoisson: number; llWithRed: number; gain: number; ci: Interval; coef: number }; verdict: Verdict;
+}
+
+export interface MarketLabStakes {
+  season: string; difference: SignalGain;
+  homeResidual: Record<'homeOnly' | 'awayOnly' | 'both' | 'none', { matches: number; residual: number; ci: Interval } | undefined>;
+  matches: number; verdict: Verdict;
+}
+
+export interface EfficiencyRow {
+  matches: number; weight: number; llOpening: number; llClosing: number; llBase: number; llPool: number; poolGain: number; poolCi: Interval;
+  dispersion: number | null; movement: number; bets: BetStats; verdict: Verdict;
+}
+
+export interface MarketLabMarket {
+  available: boolean; matches?: number; teamsMapped?: number; period?: [string, string];
+  closingTarget?: {
+    train: number; test: number; movementR?: number; movementExplained?: number; llOpening?: number; llClosing?: number; llBase?: number;
+    llPredicted?: number; coefBase?: [number, number]; coefOpening?: [number, number]; betsBase?: BetStats; betsPredicted?: BetStats; verdict: Verdict;
+  };
+  dispersion?: {
+    train: number; test: number;
+    groups?: Record<'low' | 'mid' | 'high', { matches: number; dispersion: number; weight: number; llOpening: number; llClosing: number; llPool: number; bets: BetStats }>;
+    verdict: Verdict;
+  };
+  coherence?: {
+    matches: number; train?: number; test?: number; meanAbsGap?: number; movementR?: number; weightImplied?: number;
+    llOpening?: number | null; llImplied?: number | null; llClosing?: number | null; bets?: BetStats; verdict: Verdict;
+  };
+  luck?: SignalGain & { bets?: BetStats };
+  coach?: {
+    changes: number; vsOpening: SignalGain; vsBase: SignalGain; marketResidual?: { matches: number; mean: number; ci: Interval };
+    fadeBets?: { bets: number; clv: number; clvSe: number }; verdict: Verdict;
+  };
+  efficiency?: { competitions: Record<string, EfficiencyRow>; validated: number; verdict: Verdict };
+  stack?: {
+    train: number; test: number; signals?: string[]; llOpening?: number; llWithBase?: number; llStack?: number; llClosing?: number;
+    gain?: number; ci?: Interval; coef?: Record<string, [number, number]>; bets?: BetStats; verdict: Verdict;
+  };
+}
+
+export interface MarketLab {
+  generatedAt: string;
+  matches: number;
+  covered: number;
+  baseStart: string;
+  current: string;
+  testSeason: string;
+  previousSeason: string;
+  baseLogLoss: number;
+  experiments: {
+    calibration: Record<string, MarketLabCalibration>;
+    cups: { seasons: Record<string, CupsRow>; tiers: Record<string, CupsRow>; verdict: Verdict; matches: number };
+    absences: Record<string, MarketLabAbsences>;
+    setPieces: Record<string, SignalGain & { season: string; meanExpected: number }>;
+    redCards: Record<string, MarketLabRedCards>;
+    goalReaction: { teamSeasons: number; meanReaction: number; r: number; ci: Interval; verdict: Verdict };
+    stakes: Record<string, MarketLabStakes>;
+    market: MarketLabMarket;
+  };
+}
+
+export const marketLabData = {
+  experiments: () => load<MarketLab>('market_lab.json', raw => raw),
+};

@@ -1,5 +1,5 @@
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Users, Settings, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Star, CalendarDays, FlaskConical, UserSearch, ChevronRight, LogOut } from 'lucide-react';
+import { Users, Settings, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Star, CalendarDays, FlaskConical, Scale, UserSearch, ChevronRight, LogOut } from 'lucide-react';
 import { displayName, logout, useAuth } from '../services/authService';
 import { getWatchlist } from '../services/storageService';
 import { getSeasonLabel } from '../types';
@@ -27,6 +27,7 @@ const VIEW_LABELS: Record<string, string> = {
   COMPARISON: 'Comparaison',
   FORECAST: 'Pronostics',
   LAB: 'Laboratoire',
+  MARKET_LAB: 'Labo marché',
   PLAYER_DETAIL: 'Fiche joueur',
 };
 
@@ -56,6 +57,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { view: 'FORECAST', label: 'Pronostics', icon: CalendarDays },
       { view: 'LAB', label: 'Laboratoire', icon: FlaskConical },
+      { view: 'MARKET_LAB', label: 'Labo marché', icon: Scale },
     ],
   },
   {
