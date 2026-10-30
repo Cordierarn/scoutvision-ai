@@ -1,15 +1,14 @@
 /**
  * ScoutVision - endpoint POST /api/scout-report
  *
- * Middleware Node (signature connect : req, res, next) branché sur les serveurs Vite
- * de développement et de prévisualisation, comme le proxy /cdn. Il peut aussi être
- * monté tel quel sur un serveur Node (http, Express, Connect) en production.
+ * Middleware Node (signature connect : req, res, next), toujours monté DERRIÈRE le garde
+ * d'accès de server/privateServer.ts (production, `vite preview` et `vite dev`) : aucune
+ * requête n'atteint Gemini sans session valide et origine vérifiée.
  * GEMINI_API_KEY et GEMINI_MODEL sont lues dans l'environnement du serveur ; la clé n'est jamais
  * envoyée au navigateur, qui ne reçoit que le nom du modèle ayant rédigé le rapport.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Plugin } from 'vite';
 import { MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport, resolveGeminiModel } from './scoutReport';
 import { AI_TASKS, AiTask, handleGroundedAi } from './groundedAi';
 
@@ -134,20 +133,5 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
       ? await handleGroundedAi(aiTask as AiTask, body, { apiKey, model, generate, log })
       : await handleScoutReport(body, { apiKey, model, generate, log });
     sendJson(res, result.status, result.body);
-  };
-}
-
-/**
- * Plugin Vite : l'endpoint sur `vite` (développement) et `vite preview` (build de production)
- */
-export function scoutReportApi(apiKey: string | undefined, model?: string): Plugin {
-  return {
-    name: 'scoutvision-scout-report-api',
-    configureServer(server) {
-      server.middlewares.use(scoutReportMiddleware({ apiKey, model }));
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use(scoutReportMiddleware({ apiKey, model }));
-    },
   };
 }

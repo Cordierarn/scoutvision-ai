@@ -1,22 +1,63 @@
 import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { readFileSync } from 'fs';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { scoutReportApi } from './server/scoutReportPlugin';
+import { loadAuthConfig } from './server/auth';
+import { createPrivateServer, type ServerMode } from './server/privateServer';
+import { scoutReportMiddleware } from './server/scoutReportPlugin';
 
-// Images PitchAPI servies en même origine : le CDN n'envoie pas d'en-tête CORS
-// (photos et logos affichés par l'application sans dépendre d'un autre domaine).
-// Un hébergement de production doit reproduire cette réécriture /cdn/* -> cdn.pitchapi.dev/*.
+// Images PitchAPI servies en même origine : le CDN n'envoie pas d'en-tête CORS.
+// En développement, ce proxy de Vite est placé derrière le garde d'accès ; en preview et en
+// production, le garde sert lui-même /cdn, limité aux photos et logos (server/privateServer.ts).
 const cdnProxy = {
   target: 'https://cdn.pitchapi.dev',
   changeOrigin: true,
   rewrite: (p: string) => p.replace(/^\/cdn/, ''),
 };
 
-export default defineConfig(({ mode }) => {
+/**
+ * Garde d'accès sur `vite` et `vite preview` : mêmes règles qu'en production (session, données
+ * privées, endpoints Gemini). Sans variables d'authentification : mode local ouvert, signalé.
+ */
+function privateServer(env: Record<string, string>): Plugin {
+  const auth = loadAuthConfig(env);    // variables partielles ou invalides : Vite refuse de démarrer
+  const make = (mode: ServerMode) => {
+    if (!auth) console.warn('\n  ScoutVision : authentification non configurée, accès local ouvert (voir docs/deployment.md).\n');
+    return createPrivateServer({
+      mode,
+      auth,
+      distDir: path.resolve(__dirname, 'dist'),
+      dataDir: path.resolve(__dirname, env.SCOUTVISION_DATA_DIR || 'public/data'),
+      secureCookies: false,
+      trustProxy: false,
+      hsts: false,
+      cdn: mode === 'dev' ? 'next' : 'proxy',
+      api: scoutReportMiddleware({ apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined }),
+    });
+  };
+  return {
+    name: 'scoutvision-private-server',
+    configureServer(server) { server.middlewares.use(make('dev')); },
+    configurePreviewServer(server) { server.middlewares.use(make('preview')); },
+  };
+}
+
+/** Seul fichier de public/ publié dans dist/ : le logo. Les données restent hors du build. */
+function publishLogo(): Plugin {
+  return {
+    name: 'scoutvision-publish-logo',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'logo.svg', source: readFileSync(path.resolve(__dirname, 'public/logo.svg')) });
+    },
+  };
+}
+
+export default defineConfig(({ mode, isSsrBuild }) => {
     // Variables lues par le serveur seulement : aucune n'est injectée dans le bundle.
     // Seules les variables préfixées VITE_ atteignent import.meta.env côté client.
     const env = loadEnv(mode, '.', '');
-    const exposed = Object.keys(env).filter(k => k.startsWith('VITE_') && /GEMINI|API_KEY|SECRET|TOKEN/i.test(k));
+    const exposed = Object.keys(env).filter(k => k.startsWith('VITE_') && /GEMINI|API_KEY|SECRET|TOKEN|PASSWORD|HASH|SESSION|AUTH/i.test(k));
     if (exposed.length > 0) {
       throw new Error(`Variables secrètes exposées au navigateur par le préfixe VITE_ : ${exposed.join(', ')}. Renommez-les sans VITE_.`);
     }
@@ -26,12 +67,21 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
         proxy: { '/cdn': cdnProxy },
       },
-      preview: {
-        proxy: { '/cdn': cdnProxy },
-      },
-      // POST /api/scout-report : rapport Gemini, clé et modèle (GEMINI_MODEL) gardés côté serveur (server/)
-      plugins: [react(), scoutReportApi(env.GEMINI_API_KEY || undefined, env.GEMINI_MODEL || undefined)],
+      plugins: [react(), ...(isSsrBuild ? [] : [privateServer(env), publishLogo()])],
       publicDir: 'public',
+      build: isSsrBuild ? { sourcemap: false, copyPublicDir: false } : {
+        // public/ contient les données privées (public/data) : rien n'en est copié dans dist/
+        copyPublicDir: false,
+        // Manifeste : le serveur y lit les fichiers publics de la page de connexion
+        manifest: true,
+        sourcemap: false,
+        rollupOptions: {
+          input: {
+            main: path.resolve(__dirname, 'index.html'),
+            login: path.resolve(__dirname, 'login.html'),
+          },
+        },
+      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
