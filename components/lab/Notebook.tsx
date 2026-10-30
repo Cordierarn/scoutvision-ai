@@ -130,6 +130,28 @@ export function cards(lab: LabExperiments): Card[] {
       figure: `r = ${frNumber(e.setPieces.r, 2)}`, caption: `persistance d'une saison à l'autre ; ${frPercent(e.setPieces.mean)} de l'xG en moyenne vient des phases arrêtées`,
       text: 'Oui : la part de l\'xG obtenue sur corners, coups francs et touches longues se retrouve d\'une saison à l\'autre.',
     },
+    ...(e.setPieceEfficiency ? [{
+      id: 'set-piece-efficiency', theme: 'Équipes', verdict: e.setPieceEfficiency.verdict,
+      question: 'La réussite sur coups de pied arrêtés est-elle un trait d\'équipe ?',
+      figure: `r = ${frNumber(e.setPieceEfficiency.overperformance.r, 2)}`,
+      caption: `persistance d'une saison à l'autre des buts marqués au-delà de l'xG par tir de phase arrêtée (${e.setPieceEfficiency.pairs.toLocaleString('fr-FR')} équipes-saisons appariées, penalties exclus)`,
+      text: (e.setPieceEfficiency.verdict === 'validated'
+        ? 'Oui : marquer plus que l\'xG sur corners, coups francs et touches longues se retrouve d\'une saison à l\'autre.'
+        : `Non pour la finition : ${frNumber(e.setPieceEfficiency.overperformance.mean * 100, 1, true)} but pour 100 tirs au-delà de l'xG en moyenne, sans continuité d'une saison à l'autre.`)
+        + ` Le volume produit (r = ${frNumber(e.setPieceEfficiency.xgForPerMatch.r, 2)}) et concédé (r = ${frNumber(e.setPieceEfficiency.xgAgainstPerMatch.r, 2)}) sur phases arrêtées, par match, ${e.setPieceEfficiency.xgForPerMatch.r >= 0.3 || e.setPieceEfficiency.xgAgainstPerMatch.r >= 0.3 ? 'est plus stable' : 'ne l\'est pas davantage'}.`,
+    }] : []),
+    ...(e.styleFriction && e.styleFriction.mae ? [{
+      id: 'style-friction', theme: 'Joueurs', verdict: e.styleFriction.verdict,
+      question: 'Un transfert vers un effectif au style très différent coûte-t-il plus que prévu ?',
+      figure: `${frNumber(e.styleFriction.mae.model, 2)} → ${frNumber(e.styleFriction.mae.withFriction, 2)}`,
+      caption: `erreur absolue moyenne de l'indice de rôle projeté sur les ${e.styleFriction.movers ?? e.styleFriction.pairs} changements de championnat de ${e.styleFriction.season ?? 'la dernière saison close'}, sans puis avec la friction de style ; gain ${frNumber(e.styleFriction.improvement ?? 0, 2, true)}, IC 95 % ${e.styleFriction.ci ? ci(e.styleFriction.ci) : '—'}`,
+      text: (e.styleFriction.verdict === 'validated'
+        ? 'Oui : l\'écart entre les profils d\'effectif (9 dimensions du Recrutement, rangs dans le championnat) du club quitté et du club rejoint explique une partie de ce que le modèle de transfert manque.'
+        : e.styleFriction.verdict === 'partial'
+          ? 'Un peu : la friction de style est liée à l\'erreur du modèle, mais l\'ajouter n\'améliore pas nettement la projection hors échantillon.'
+          : 'Non : l\'écart entre les profils d\'effectif du club quitté et du club rejoint (9 dimensions du Recrutement) n\'améliore pas la projection hors échantillon ; le modèle de transfert reste tel quel.')
+        + ` Corrélation entre la friction et l'erreur absolue : r = ${frNumber(e.styleFriction.corrAbsResidual ?? 0, 2)}.`,
+    }] : []),
     {
       id: 'game-state', theme: 'Match', verdict: gs.verdict,
       question: '« Savoir gérer un score » ou « finir fort » : des traits d\'équipe ?',

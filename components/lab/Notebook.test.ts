@@ -33,6 +33,9 @@ const fixture: LabExperiments = {
     gameState: { protect: { mean: -0.02, r: 0.05, pairs: 1380 }, chase: { mean: 0.01, r: 0.05, pairs: 1380 }, late: { mean: 0, r: 0.16, pairs: 1380 }, verdict: 'debunked' },
     fatigue: { matches: 2200, effect: -0.035, ci: ci(-0.076, 0.008), perDay: 0.006, byRest: {}, verdict: 'debunked' },
     styleMatchups: { rows: 46000, gain: -0.0003, ci: ci(-0.0005, -0.0001), baseMse: 0.29, verdict: 'debunked' },
+    setPieceEfficiency: { pairs: 1300, teamSeasons: 2000, overperformance: { mean: 0.004, r: 0.11 }, xgForPerMatch: { mean: 0.31, r: 0.45 }, xgAgainstPerMatch: { mean: 0.31, r: 0.38 }, verdict: 'partial' },
+    styleFriction: { season: '2025-26', pairs: 900, trainPairs: 2600, movers: 405, mae: { model: 12.18, withFriction: 12.21, withDimensions: 12.3 }, improvement: -0.03, ci: ci(-0.2, 0.14), coef: 1.1,
+      frictionMean: 0.21, corrAbsResidual: 0.02, corrCi: ci(-0.05, 0.09), dimensions: [], verdict: 'debunked' },
   },
 };
 
@@ -40,8 +43,8 @@ describe('carnet d\'expériences', () => {
   const list = cards(fixture);
 
   it('a une carte par expérience, sans texte cassé', () => {
-    expect(list.length).toBe(17);
-    expect(new Set(list.map(c => c.id)).size).toBe(17);
+    expect(list.length).toBe(19);   // 17 expériences d'origine + friction de style + réussite sur coups de pied arrêtés
+    expect(new Set(list.map(c => c.id)).size).toBe(19);
     list.forEach(c => {
       const text = `${c.question} ${c.figure} ${c.caption} ${c.text}`;
       expect(text).not.toMatch(/NaN|undefined|Infinity|null/);
@@ -56,5 +59,25 @@ describe('carnet d\'expériences', () => {
     expect(byId['style-matchups'].figure).toBe('+0,10 %');            // l'erreur augmente
     expect(byId['red-cards'].figure).toBe('×2,0');
     expect(byId.momentum.figure).toBe('12 % → 15 %');
+  });
+});
+
+describe('expériences 20 et 22', () => {
+  it('un résultat négatif est affiché tel quel, avec ses chiffres', () => {
+    const list = cards(fixture);
+    const friction = list.find(c => c.id === 'style-friction')!;
+    expect(friction.verdict).toBe('debunked');
+    expect(friction.figure).toBe('12,18 → 12,21');
+    expect(friction.caption).toContain('405 changements de championnat de 2025-26');
+    expect(friction.text).toContain('Non :');
+    const sp = list.find(c => c.id === 'set-piece-efficiency')!;
+    expect(sp.verdict).toBe('partial');
+    expect(sp.figure).toBe('r = 0,11');
+    expect(sp.text).toContain('est plus stable');
+  });
+  it('un fichier produit avant leur ajout n\'affiche pas ces cartes', () => {
+    const { setPieceEfficiency: _a, styleFriction: _b, ...older } = fixture.experiments;
+    const list = cards({ ...fixture, experiments: older as LabExperiments['experiments'] });
+    expect(list.some(c => c.id === 'style-friction' || c.id === 'set-piece-efficiency')).toBe(false);
   });
 });

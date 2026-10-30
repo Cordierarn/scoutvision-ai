@@ -225,3 +225,90 @@ class RefereeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StyleFrictionTest(unittest.TestCase):
+    def test_dimensions_match_the_app(self) -> None:
+        """Les 9 dimensions copiées de utils/recruitment.ts (clés et métriques) restent identiques."""
+        import re
+        from pathlib import Path
+        ts = (Path(__file__).resolve().parent.parent / "utils" / "recruitment.ts").read_text(encoding="utf-8")
+        block = ts.split("SQUAD_DIMENSIONS")[1].split("];")[0]
+        found = {}
+        for m in re.finditer(r"key: '([a-z]+)'.*?metrics: \{([^}]*)\}(.*?)\}", block):
+            metrics = {k: int(v) for k, v in re.findall(r"'([^']+)': (-?\d)", m.group(2))}
+            found[m.group(1)] = (metrics, "goalkeepers: true" in m.group(3))
+        self.assertEqual(found, lab.SQUAD_DIMENSIONS)
+
+    def test_profiles_weighted_by_minutes_and_ranked(self) -> None:
+        rows = []
+        for team, (pct, minutes) in {"a": (80, 1000), "b": (40, 1000), "c": (60, 1000)}.items():
+            rows.append({"Competition": "X", "_app_season": "2024-25", "Team ID": team, "Position": "ST", "Minutes played": minutes,
+                         "npxG per 90 pct": pct, "Dispossessed per 90 pct": 100 - pct, "Accurate passes, % pct": pct})
+            rows.append({"Competition": "X", "_app_season": "2024-25", "Team ID": team, "Position": "GK", "Minutes played": 900, "Save rate, % pct": 100 - pct})
+        # un joueur peu utilisé ne pèse presque rien
+        rows.append({"Competition": "X", "_app_season": "2024-25", "Team ID": "b", "Position": "ST", "Minutes played": 10, "npxG per 90 pct": 100})
+        p = lab.squad_profiles(pd.DataFrame(rows))
+        by = p.set_index("Team ID")
+        self.assertGreater(by.at["a", "dim_finishing"], by.at["c", "dim_finishing"])
+        self.assertGreater(by.at["c", "dim_finishing"], by.at["b", "dim_finishing"])
+        self.assertGreater(by.at["a", "dim_security"], by.at["b", "dim_security"])       # poids négatif inversé
+        self.assertGreater(by.at["b", "dim_goalkeeping"], by.at["a", "dim_goalkeeping"])  # gardiens : dimension Gardien seulement
+        self.assertEqual(int(by.at["a", "n_teams"]), 3)
+
+    def simulated(self, effect: float, seed: int = 1, n: int = 1200):
+        rng = np.random.default_rng(seed)
+        dims = [f"dim_{k}" for k in lab.SQUAD_DIMENSIONS]
+        deltas = rng.uniform(-0.6, 0.6, (n, len(dims)))
+        friction = np.abs(deltas).mean(axis=1)
+        true = rng.uniform(30, 80, n)
+        pred = true - effect * friction + rng.normal(0, 8, n)
+        d = pd.DataFrame(deltas, columns=dims).assign(pred=pred, true=true, friction=friction, test=np.arange(n) >= n * 2 // 3)
+        return lab.friction_effect(d, dims, boot=200)
+
+    def test_planted_friction_is_found(self) -> None:
+        out = self.simulated(effect=-25.0)      # un joueur perd 25 points d'indice par unité de friction
+        self.assertEqual(out["verdict"], "validated")
+        self.assertLess(out["mae"]["withFriction"], out["mae"]["model"])
+        self.assertLess(out["coef"], -10)
+
+    def test_no_friction_effect(self) -> None:
+        out = self.simulated(effect=0.0, seed=2)
+        self.assertNotEqual(out["verdict"], "validated")
+        self.assertLessEqual(abs(out["improvement"]), 0.5)
+
+
+class SetPieceEfficiencyTest(unittest.TestCase):
+    def shots(self, persistent: bool, seed: int = 3):
+        rng = np.random.default_rng(seed)
+        rows = []
+        skill = {f"t{t}": rng.normal(0, 0.08) for t in range(16)}
+        for s in range(3):
+            season = f"{2022 + s}-{str(2023 + s)[2:]}"
+            for k in range(30):
+                for t in range(0, 16, 2):
+                    home, away = f"t{t}", f"t{(t + k) % 16 + (1 if (t + k) % 16 == t else 0)}" if False else f"t{(t + 1) % 16}"
+                    mid = f"m{s}_{k}_{t}"
+                    for team, opp in ((home, away), (away, home)):
+                        for _ in range(4):
+                            xg = float(rng.uniform(0.03, 0.2))
+                            bonus = skill[team] if persistent else rng.normal(0, 0.08)
+                            goal = rng.random() < max(0.0, min(1.0, xg + bonus))
+                            rows.append({"comp": "AAA", "app_season": season, "match_id": mid, "team_id": team, "expected_goals": xg,
+                                         "situation": "FromCorner", "event_type": "Goal" if goal else "Miss"})
+                        for _ in range(8):
+                            xg = float(rng.uniform(0.03, 0.2))
+                            rows.append({"comp": "AAA", "app_season": season, "match_id": mid, "team_id": team, "expected_goals": xg,
+                                         "situation": "RegularPlay", "event_type": "Goal" if rng.random() < xg else "Miss"})
+        return pd.DataFrame(rows)
+
+    def test_persistent_set_piece_finishing_is_found(self) -> None:
+        out = lab.set_piece_efficiency(self.shots(True), current="2024-25")
+        self.assertEqual(out["verdict"], "validated")
+        self.assertGreater(out["overperformance"]["r"], 0.3)
+        self.assertGreater(out["pairs"], 10)
+
+    def test_random_set_piece_finishing_is_not_found(self) -> None:
+        out = lab.set_piece_efficiency(self.shots(False, seed=4), current="2024-25")
+        self.assertLess(out["overperformance"]["r"], 0.3)
+        self.assertNotEqual(out["verdict"], "validated")
