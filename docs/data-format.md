@@ -14,6 +14,7 @@ source data is private (see [data-pipeline.md](data-pipeline.md)).
 | `public/data/shots/<season>/<COMP>.json` | shots of one competition (`shot`), loaded when a team or player is opened |
 | `public/data/heatmaps/<season>/<COMP>.json` | per-player season heatmaps (`heatmap`, 16 × 12 grid of actions), loaded when a player is opened |
 | `public/data/lineups/<season>/<COMP>.json` | formations actually used and, per slot, the players who started there most (`lineup`) |
+| `public/data/networks/<season>/<COMP>.json` | per-team season pass network (`pass_network_node`, `pass_network_edge`): per player the mean position (x towards the opponent goal, y from left to right, 0–1), matches in the network, passes given and received; per directed link the summed passes and the matches where it appears; loaded when the "Réseau de passes" tab is opened |
 | `public/data/models/age_curves.json` | per role and metric: regression-to-the-mean coefficient and age effect (percentile points per season) |
 | `public/data/models/transfer.json` | transfer model: league levels, per-metric coefficients (league gap, team context, adaptation cost), out-of-sample validation |
 | `public/data/market.json` | current Transfermarkt value, contract end and estimated value of every player, used by recruitment whatever the season analysed |

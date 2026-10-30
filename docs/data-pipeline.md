@@ -21,7 +21,8 @@ npm run data:pull        # download the data prepared by CI (~60 MB), no Python 
 ```
 
 `scripts/pull_data.sh` downloads `scoutvision-data.tar.gz` from the release and unpacks it into
-`public/data/`. A `GH_TOKEN` that does not look like a GitHub token is ignored; in a Codespace,
+`public/data/`. Both scripts talk to GitHub through the REST API (`gh api`), not through
+`gh release …`, whose GraphQL calls are blocked in some environments. A `GH_TOKEN` that does not look like a GitHub token is ignored; in a Codespace,
 the injected `GITHUB_TOKEN` only sees this repository: use `gh auth login`.
 
 ## Building the data yourself

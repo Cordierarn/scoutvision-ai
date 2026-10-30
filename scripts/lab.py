@@ -1021,3 +1021,189 @@ def twins(players: pd.DataFrame, presets: dict, curves: dict, role_index, develo
     if out["all"]["twins"] < out["all"]["development"]:
         out["verdict"] = "validated"
     return out
+
+
+# ============================================
+# FRICTION DE STYLE ENTRE CLUB VENDEUR ET CLUB ACHETEUR (expérience 20)
+# ============================================
+#
+# Question : un joueur qui change de club perd-il davantage que ce que le modèle de transfert prévoit
+# quand le profil de l'effectif qui l'accueille est très différent de celui qu'il quitte ? Profils
+# d'effectif sur les 9 dimensions du Recrutement (utils/recruitment.ts, SQUAD_DIMENSIONS : rangs 0-100
+# dans le championnat, saison de départ), friction = écart moyen absolu des rangs. Test : les 405
+# changements de championnat de la dernière saison close, hors de l'ajustement ; le coefficient de la
+# friction est appris sur les transferts des saisons précédentes et appliqué tel quel.
+
+# Copie des dimensions de utils/recruitment.ts (test_lab vérifie qu'elles restent identiques)
+SQUAD_DIMENSIONS = {
+    "finishing": ({"npxG per 90": 1, "Touches in box per 90": 1, "Shots on target per 90": 1}, False),
+    "creation": ({"xA per 90": 1, "Key passes per 90": 1, "Shot-creating actions per 90": 1}, False),
+    "progression": ({"Progressive passes per 90": 1, "Progressive runs per 90": 1, "Passes to final third per 90": 1}, False),
+    "dribbling": ({"Dribbles per 90": 1, "Successful dribbles, %": 1}, False),
+    "security": ({"Accurate passes, %": 1, "Dispossessed per 90": -1, "Miscontrols per 90": -1}, False),
+    "duels": ({"Ground duels won, %": 1, "PAdj Tackles": 1, "Dribbled past per 90": -1}, False),
+    "aerial": ({"Aerial duels won, %": 1, "Aerial duels won per 90": 1}, False),
+    "recovery": ({"PAdj Interceptions": 1, "PAdj Recoveries": 1}, False),
+    "goalkeeping": ({"Prevented goals per 90": 1, "Save rate, %": 1}, True),
+}
+
+
+def squad_profiles(players: pd.DataFrame) -> pd.DataFrame:
+    """Profil de l'effectif par équipe-saison : score de chaque dimension (percentiles « plus c'est haut,
+    mieux c'est », poids négatif inversé), moyenne pondérée par les minutes (gardiens pour la seule
+    dimension Gardien), puis rang 0-100 parmi les équipes du championnat la même saison."""
+    key = ["Competition", "_app_season", "Team ID"]
+    d = players.dropna(subset=["Team ID", "Minutes played"])
+    d = d[d["Minutes played"] > 0]
+    out = d[key].drop_duplicates().reset_index(drop=True)
+    for dim, (weights, goalkeepers) in SQUAD_DIMENSIONS.items():
+        rows = d[(d["Position"] == "GK") == goalkeepers]
+        num = np.zeros(len(rows))
+        den = np.zeros(len(rows))
+        for metric, w in weights.items():
+            col = f"{metric} pct"
+            if col not in rows:
+                continue
+            v = rows[col].to_numpy(float)
+            ok = ~np.isnan(v)
+            num += np.where(ok, abs(w) * np.where(w < 0, 100 - v, v), 0)
+            den += np.where(ok, abs(w), 0)
+        score = np.where(den > 0, num / np.where(den > 0, den, 1), np.nan)
+        s = rows.assign(_score=score, _w=rows["Minutes played"].to_numpy(float)).dropna(subset=["_score"])
+        if s.empty:
+            out[f"dim_{dim}"] = np.nan
+            continue
+        s = s.assign(_ws=s["_score"] * s["_w"])
+        agg = s.groupby(key)[["_ws", "_w"]].sum().reset_index()
+        agg[f"value_{dim}"] = agg["_ws"] / agg["_w"]
+        agg[f"dim_{dim}"] = agg.groupby(["Competition", "_app_season"])[f"value_{dim}"].rank(pct=True) * 100
+        out = out.merge(agg[key + [f"dim_{dim}"]], on=key, how="left")
+    out["n_teams"] = out.groupby(["Competition", "_app_season"])["Team ID"].transform("count")
+    return out
+
+
+def friction_effect(d: pd.DataFrame, dims: list[str], ridge: float = 50.0, boot: int = 1000) -> dict:
+    """Le résidu du modèle (observé − prévu) dépend-il de la friction ? Coefficient appris sur les lignes
+    d'apprentissage (`test` faux), erreur absolue moyenne avant / après correction sur les lignes de test.
+    d : colonnes pred, true, friction, test et les écarts signés par dimension (dims)."""
+    d = d.dropna(subset=["pred", "true", "friction"]).copy()
+    d["residual"] = d["true"] - d["pred"]
+    train, test = d[~d["test"]], d[d["test"]]
+    if len(train) < 50 or len(test) < 30:
+        return {"verdict": "measured", "pairs": int(len(test)), "note": "trop peu de transferts"}
+    x = np.column_stack([np.ones(len(train)), train["friction"]])
+    a, b = np.linalg.lstsq(x, train["residual"].to_numpy(), rcond=None)[0]
+    xd = np.column_stack([np.ones(len(train)), np.nan_to_num(train[dims].to_numpy(float))])
+    pen = ridge * np.eye(xd.shape[1])
+    pen[0, 0] = 0
+    wd = np.linalg.solve(xd.T @ xd + pen, xd.T @ train["residual"].to_numpy())
+    err_model = np.abs(test["residual"].to_numpy())
+    adj = test["pred"].to_numpy() + a + b * test["friction"].to_numpy()
+    err_fric = np.abs(test["true"].to_numpy() - adj)
+    adj_d = test["pred"].to_numpy() + np.column_stack([np.ones(len(test)), np.nan_to_num(test[dims].to_numpy(float))]) @ wd
+    err_dims = np.abs(test["true"].to_numpy() - adj_d)
+    rng = np.random.default_rng(RNG_SEED)
+    gain = [float((err_model[i] - err_fric[i]).mean()) for i in (rng.integers(0, len(test), len(test)) for _ in range(boot))]
+    ci = _ci(gain)
+    r = _corr(test["friction"], err_model)
+    r_ci = _boot_corr(test["friction"].to_numpy(), err_model, 500)
+    improvement = float(err_model.mean() - err_fric.mean())
+    verdict = "validated" if ci[0] > 0 and improvement >= 0.25 else ("partial" if improvement > 0 or r_ci[0] > 0 else "debunked")
+    return {
+        "pairs": int(len(test)), "trainPairs": int(len(train)),
+        "mae": {"model": round(float(err_model.mean()), 2), "withFriction": round(float(err_fric.mean()), 2), "withDimensions": round(float(err_dims.mean()), 2)},
+        "improvement": round(improvement, 2), "ci": ci, "coef": round(float(b), 2),
+        "frictionMean": round(float(test["friction"].mean()), 3),
+        "corrAbsResidual": round(r, 3), "corrCi": r_ci,
+        "dimensionCoef": {dim: round(float(w), 3) for dim, w in zip(dims, wd[1:])},
+        "verdict": verdict,
+    }
+
+
+def style_friction(players: pd.DataFrame, presets: dict, cups: set[str], tiers: dict[str, int], models) -> dict:
+    """Expérience 20, sur les vraies données : paires de transfert du modèle (models._transfer_pairs),
+    prévision du modèle complet pour chaque métrique puis indice des rôles du poste (comme la validation
+    du Recrutement), résidu confronté à la friction entre les profils d'effectif des deux clubs."""
+    metrics = [c[:-4] for c in players.columns if c.endswith(" pct")]
+    pairs = models._transfer_pairs(players, metrics, cups)
+    if pairs.empty:
+        return {"verdict": "measured", "note": "aucune paire"}
+    season = pairs["_app_season_next"].max()
+    test = (pairs["_app_season_next"] == season).to_numpy()
+    curves = models.age_curves(players[players["_app_season"] < season], metrics)["curves"]
+    dev_all = models._development_pct(pairs, curves, metrics)
+    fit = models._fit_transfer(pairs[~test].reset_index(drop=True), {m: v[~test] for m, v in dev_all.items()}, metrics, tiers)
+    if not fit:
+        return {"verdict": "measured", "note": "modèle de transfert non ajustable"}
+    _, moved, _ = models._transfer_terms(pairs)
+    forecast, truth = {}, {}
+    for m in metrics:
+        x = pairs[f"{m} pct"].to_numpy(float)
+        base = np.where(np.isnan(dev_all[m]), x, dev_all[m])
+        forecast[m] = models._transfer_predict(fit, pairs, base, m, tiers)
+        truth[m] = pairs[f"{m} pct_next"].to_numpy(float)
+    core = float(presets.get("coreWeight", 1.5))
+    roles = pairs["Position"].to_numpy()
+    rows = []
+    for name, preset in presets["presets"].items():
+        sel = np.isin(roles, preset["positions"]) & moved
+        if not sel.any():
+            continue
+        p, t = models.role_index(forecast, preset, core), models.role_index(truth, preset, core)
+        idx = np.nonzero(sel)[0]
+        rows.append(pd.DataFrame({"pair": idx, "preset": name, "pred": p[idx], "true": t[idx], "test": test[idx]}))
+    long = pd.concat(rows, ignore_index=True)
+    profiles = squad_profiles(players)
+    dims = [f"dim_{k}" for k in SQUAD_DIMENSIONS]
+    seller = profiles.rename(columns={d: f"{d}_from" for d in dims})
+    buyer = profiles.rename(columns={**{d: f"{d}_to" for d in dims}, "Team ID": "Team ID_next", "Competition": "Competition_next"})
+    pk = pairs[["Team ID", "Competition", "_app_season", "Team ID_next", "Competition_next"]].reset_index().rename(columns={"index": "pair"})
+    pk = pk.merge(seller[["Team ID", "Competition", "_app_season", *(f"{d}_from" for d in dims)]], on=["Team ID", "Competition", "_app_season"], how="left")
+    pk = pk.merge(buyer[["Team ID_next", "Competition_next", "_app_season", *(f"{d}_to" for d in dims)]], on=["Team ID_next", "Competition_next", "_app_season"], how="left")
+    for d in dims:
+        pk[d] = (pk[f"{d}_to"] - pk[f"{d}_from"]) / 100
+    pk["friction"] = pk[dims].abs().mean(axis=1, skipna=False)
+    long = long.merge(pk[["pair", "friction", *dims]], on="pair", how="left")
+    out = friction_effect(long, dims)
+    out.update({"season": season, "movers": int(moved[test].sum()), "moversWithProfiles": int(long[long["test"]].dropna(subset=["friction"])["pair"].nunique()),
+                "dimensions": list(SQUAD_DIMENSIONS)})
+    return out
+
+
+# ============================================
+# EFFICACITÉ SUR COUPS DE PIED ARRÊTÉS (expérience 22)
+# ============================================
+
+SET_PIECE_SITUATIONS = ("FromCorner", "SetPiece", "FreeKick", "ThrowInSetPiece")
+
+
+def set_piece_efficiency(shots: pd.DataFrame, current: str) -> dict:
+    """Au-delà de la part d'xG sur phases arrêtées (expérience « Set pieces »), ce qui se répète d'une
+    saison à l'autre : buts marqués au-delà de l'xG sur les tirs de phase arrêtée (finition et
+    organisation, par tir), xG de phase arrêtée produit et concédé par match. Penalties exclus."""
+    s = shots[shots["situation"] != "Penalty"].copy()
+    s["sp"] = s["situation"].isin(SET_PIECE_SITUATIONS)
+    s["goal"] = (s["event_type"] == "Goal") if "event_type" in s else False
+    teams_of = s.groupby("match_id")["team_id"].agg(lambda v: tuple(sorted(set(v))))
+    s["opponent"] = [next((t for t in teams_of.get(m, ()) if t != own), None) for m, own in zip(s["match_id"], s["team_id"])]
+    key = ["comp", "app_season", "team_id"]
+    sp = s[s["sp"]]
+    forr = sp.groupby(key).agg(xg_for=("expected_goals", "sum"), goals_for=("goal", "sum"), shots_for=("sp", "size"), matches=("match_id", "nunique")).reset_index()
+    against = (sp.dropna(subset=["opponent"]).rename(columns={"team_id": "shooter", "opponent": "team_id"})
+               .groupby(key).agg(xg_against=("expected_goals", "sum")).reset_index())
+    t = forr.merge(against, on=key, how="left")
+    t = t[t["shots_for"] >= 10]
+    t["over"] = (t["goals_for"] - t["xg_for"]) / t["shots_for"]
+    t["xg_for_match"] = t["xg_for"] / t["matches"]
+    t["xg_against_match"] = t["xg_against"] / t["matches"]
+    closed = t[t["app_season"] != current]
+    r_over, n = _season_pairs(closed, "over", ["team_id", "comp"])
+    r_for, _ = _season_pairs(closed, "xg_for_match", ["team_id", "comp"])
+    r_against, _ = _season_pairs(closed, "xg_against_match", ["team_id", "comp"])
+    return {
+        "pairs": n, "teamSeasons": int(len(t)),
+        "overperformance": {"mean": round(float(t["over"].mean()), 4), "r": round(r_over, 3)},
+        "xgForPerMatch": {"mean": round(float(t["xg_for_match"].mean()), 3), "r": round(r_for, 3)},
+        "xgAgainstPerMatch": {"mean": round(float(t["xg_against_match"].mean()), 3), "r": round(r_against, 3)},
+        "verdict": "validated" if r_over >= 0.3 else ("partial" if r_for >= 0.3 or r_against >= 0.3 else "debunked"),
+    }

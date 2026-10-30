@@ -9,13 +9,19 @@
  * - observations : notes humaines (vidéo, live, général), jamais préremplies par un modèle.
  * `refs` existe pour une future référence vidéo (match, événement, horodatage, clip) : aucune
  * interface ne l'utilise aujourd'hui.
+ *
+ * Version 2 du schéma : évaluation en aveugle (`evaluation`) et grille d'observation structurée
+ * (`observation.grid`) ; un dossier v1 est lu tel quel et réécrit en v2 sans perte (la lecture
+ * tolérante du store accepte les deux versions, rien d'autre).
  */
 
 import type { ReportFacts } from '../server/reportFacts';
 
 export type { ReportFacts };
 
-export const SCOUT_REPORT_SCHEMA_VERSION = 1;
+export const SCOUT_REPORT_SCHEMA_VERSION = 2;
+/** Versions lues par le store (migrées vers la version courante à la lecture) */
+export const SCOUT_REPORT_SCHEMA_VERSIONS_READ = [1, 2] as const;
 
 export type ReportStatus = 'draft' | 'to_observe' | 'finalized' | 'archived';
 export const REPORT_STATUSES: ReportStatus[] = ['draft', 'to_observe', 'finalized', 'archived'];
@@ -30,6 +36,28 @@ export interface ObservationRef {
   clip?: string;
 }
 
+/** Note de l'observateur sur un critère : 1 (très en dessous du niveau attendu) à 5 (très au-dessus) */
+export type CriterionRating = 1 | 2 | 3 | 4 | 5;
+export const CRITERION_RATINGS: CriterionRating[] = [1, 2, 3, 4, 5];
+
+/** Critère de la grille : une métrique du rôle (comparable à son percentile) ou une dimension non mesurée */
+export type ObservationCriterionKind = 'role_metric' | 'unmeasured';
+
+export interface ObservationCriterion {
+  key: string;                  // clé de métrique (role_metric) ou identifiant de dimension (unmeasured)
+  label: string;
+  kind: ObservationCriterionKind;
+  rating?: CriterionRating;     // laissée vide si non observée
+  note?: string;
+}
+
+/** Grille d'observation structurée, remplie par le scout ; jamais préremplie ni complétée par un modèle */
+export interface ObservationGrid {
+  role: string;                 // rôle visé au moment de l'observation
+  overall?: CriterionRating;    // note globale de l'observateur ; sa saisie révèle les données en mode aveugle
+  criteria: ObservationCriterion[];
+}
+
 export interface ScoutObservation {
   id: string;
   date: string;                 // AAAA-MM-JJ, saisie par l'observateur
@@ -38,8 +66,15 @@ export interface ScoutObservation {
   strengths?: string;
   toReview?: string;
   conclusion?: string;
+  grid?: ObservationGrid;
   refs?: ObservationRef[];
   createdAt: string;
+}
+
+/** Évaluation en aveugle : percentiles, indices et valeurs masqués jusqu'à la première note globale saisie */
+export interface ReportEvaluation {
+  blind: boolean;
+  revealedAt?: string;          // date de la première note globale (les données restent visibles ensuite)
 }
 
 export interface GeneratedSummary {
@@ -101,6 +136,7 @@ export interface ScoutReportRecord {
   status: ReportStatus;
   role?: string;                // rôle analysé
   tags: string[];
+  evaluation?: ReportEvaluation;
   dataSnapshot: ReportDataSnapshot;
   generatedSummaries: GeneratedSummary[];
   observations: ScoutObservation[];

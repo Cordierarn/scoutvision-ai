@@ -36,8 +36,10 @@ its absence.
 | **Luck** | points − xPts between season halves | measured: r = 0.16; first-half xGD predicts second-half points better than points (0.65 vs 0.60) |
 | **Red cards** | xG per 90 before / after the first red card | measured: the opponent's xG doubles (1.29 → 2.59) |
 | **Availability** | share of the team's matchday squads, season to season | partial: r = 0.19 |
+| **Style friction** (exp. 20) | squad profiles on the 9 recruitment dimensions (`utils/recruitment.ts`, league ranks in the departure season) for the club left and the club joined; friction = mean absolute rank gap; coefficient fitted on the training transfers of the transfer model, applied to the league changes of the last closed season (same pairs and same model as the recruitment validation) | partial: friction correlates with the model's absolute error (r = 0.09, 95% CI [0.04; 0.14]) but correcting the projection with it changes nothing: MAE 12.45 → 12.45 (gain 0.00, CI [−0.03; +0.03]) on the 248 of 405 movers whose both clubs have a profile in the departure season; the transfer model stays as it is |
+| **Set-piece efficiency** (exp. 22) | goals above xG per set-piece shot (corners, free kicks, long throws, penalties excluded), set-piece xG produced and conceded per match; season to season | partial: finishing above xG on set pieces does not repeat (r = 0.04, 1,382 pairs), the volumes produced (r = 0.42) and conceded (r = 0.43) do |
 
-The table reflects the run of Oct. 2026; the app always shows the numbers of the latest data
+The table reflects the run of Oct. 2026 (experiments 20 and 22 added on 30 Oct. 2026; the MAE of experiment 20 differs from the 12.18 of the recruitment validation because it is measured on the movers with two squad profiles and on every metric with a percentile); the app always shows the numbers of the latest data
 build (`public/data/lab/experiments.json`).
 
 Substitution and coach rankings are deliberately not shown: see

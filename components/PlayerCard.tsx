@@ -568,7 +568,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
                 <PolarGrid {...polarGridProps} />
                 <PolarAngleAxis dataKey="subject" tick={(tickProps: object) => {
                   const props = tickProps as React.ComponentProps<typeof PolarTick>;
-                  return <PolarTick {...props} format={radarAxisLabel} {...(radarCompact ? { maxChars: 11, maxLines: 3 } : {})} active={!!focusMetric && radarData.find(d => d.fullSubject === focusMetric)?.subject === props.payload?.value} onHover={focusBySubject} />;
+                  return <PolarTick {...props} format={radarAxisLabel} {...(radarCompact ? { maxChars: 11, maxLines: radarData.length >= 9 ? 2 : 3 } : {})} active={!!focusMetric && radarData.find(d => d.fullSubject === focusMetric)?.subject === props.payload?.value} onHover={focusBySubject} />;
                 }} />
                 <PolarRadiusAxis angle={90} domain={[0, 100]} tickCount={5} tick={false} axisLine={false} />
                 <Radar name="Médiane du groupe" dataKey="median" stroke={CONTEXT} strokeDasharray="3 3" strokeWidth={1} fill="none" isAnimationActive={false} />

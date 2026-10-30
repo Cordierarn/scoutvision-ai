@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addObservation, addSummary, createReport, deleteReport, exportFileName, exportReportsJson, findReportForPlayer, getReport, importReportsJson, loadReports,
-  parseRecord, removeObservation, saveReports, SCOUT_REPORTS_KEY, setRole, setStatus, setTags, StorageLike, subscribeReports, updateObservation,
+  parseRecord, removeObservation, reveal, saveReports, SCOUT_REPORTS_KEY, setBlind, setRole, setStatus, setTags, StorageLike, subscribeReports, updateObservation,
 } from './scoutReportStore';
 import { ReportDataSnapshot, ReportPlayerRef, ScoutReportRecord } from '../types/scoutReport';
 
@@ -30,7 +30,7 @@ beforeEach(() => { storage = new MemoryStorage(); });
 describe('stockage : créer, lire, modifier, supprimer', () => {
   it('crée un dossier brouillon sans synthèse ni observation, retrouvé par playerSeasonId', () => {
     const r = createReport({ player: playerRef(), dataSnapshot: snapshot(), role: 'Renard des surfaces', now: '2026-10-29T10:00:00.000Z' }, storage);
-    expect(r.schemaVersion).toBe(1);
+    expect(r.schemaVersion).toBe(2);
     expect(r.status).toBe('draft');
     expect(r.generatedSummaries).toEqual([]);
     expect(r.observations).toEqual([]);
@@ -67,7 +67,7 @@ describe('stockage : robustesse en lecture', () => {
   it('ignore individuellement un enregistrement corrompu et garde les autres', () => {
     const ok = createReport({ player: playerRef(), dataSnapshot: snapshot() }, storage);
     const raw = JSON.parse(storage.getItem(SCOUT_REPORTS_KEY)!);
-    raw.push({ id: 'x', schemaVersion: 1 }, 'texte', null, { ...raw[0], id: 'v2', schemaVersion: 2 }, { ...raw[0] });   // le dernier : identifiant en double
+    raw.push({ id: 'x', schemaVersion: 2 }, 'texte', null, { ...raw[0], id: 'v3', schemaVersion: 3 }, { ...raw[0] });   // v3 inconnue ; le dernier : identifiant en double
     storage.setItem(SCOUT_REPORTS_KEY, JSON.stringify(raw));
     const loaded = loadReports(storage);
     expect(loaded.records.map(r => r.id)).toEqual([ok.id]);
@@ -85,7 +85,8 @@ describe('stockage : robustesse en lecture', () => {
   it('refuse une version de schéma inconnue et un statut hors liste', () => {
     const r = createReport({ player: playerRef(), dataSnapshot: snapshot() }, storage);
     expect(parseRecord({ ...r, schemaVersion: 0 })).toBeNull();
-    expect(parseRecord({ ...r, schemaVersion: '1' })).toBeNull();
+    expect(parseRecord({ ...r, schemaVersion: 3 })).toBeNull();
+    expect(parseRecord({ ...r, schemaVersion: '2' })).toBeNull();
     expect(parseRecord({ ...r, status: 'validé' })).toBeNull();
     expect(parseRecord({ ...r, player: { name: 'sans identifiant' } })).toBeNull();
   });
@@ -161,7 +162,7 @@ describe('export / import JSON', () => {
     const full = addObservation(r.id, { type: 'live', date: '2026-10-29', text: 'Observation' }, storage);
     const text = exportReportsJson([full], '2026-10-29T12:00:00.000Z');
     const parsed = JSON.parse(text);
-    expect(parsed).toMatchObject({ app: 'ScoutVision', kind: 'scoutvision-scout-reports', schemaVersion: 1, exportedAt: '2026-10-29T12:00:00.000Z' });
+    expect(parsed).toMatchObject({ app: 'ScoutVision', kind: 'scoutvision-scout-reports', schemaVersion: 2, exportedAt: '2026-10-29T12:00:00.000Z' });
     expect(Object.keys(parsed)).toEqual(['app', 'kind', 'schemaVersion', 'exportedAt', 'reports']);
     expect(text).not.toMatch(/GEMINI|apiKey|AIza/i);
     expect(exportFileName(new Date('2026-10-29T12:00:00.000Z'))).toBe('ScoutVision_rapports_2026-10-29.json');
@@ -184,5 +185,74 @@ describe('export / import JSON', () => {
     expect(res).toMatchObject({ added: 1, skipped: 2 });
     expect(res.errors).toHaveLength(2);
     expect(loadReports(storage).records.map((r: ScoutReportRecord) => r.id)).toEqual([good.id]);
+  });
+});
+
+// Dossier v1 tel qu'écrit par la V1 (29 octobre 2026) : aucun champ d'évaluation ni de grille
+const V1_RECORD = {
+  id: 'v1-1', schemaVersion: 1, player: playerRef(), createdAt: '2026-10-29T10:00:00.000Z', updatedAt: '2026-10-29T11:00:00.000Z', status: 'to_observe', role: 'Renard des surfaces',
+  tags: ['prêt'], dataSnapshot: snapshot(),
+  generatedSummaries: [{ id: 's1', model: 'm', requestedModel: 'm0', promptVersion: 'scout-report-v2', generatedAt: '2026-10-29T10:30:00.000Z', content: 'Synthèse v1' }],
+  observations: [{ id: 'o1', date: '2026-10-28', type: 'live', text: 'Vu au stade', strengths: 'Appels', toReview: 'Repli', conclusion: 'À suivre', refs: [{ matchId: 'm1', timestamp: '12:34' }], createdAt: '2026-10-28T22:00:00.000Z' }],
+};
+
+describe('migration du schéma v1 → v2', () => {
+  it('lit un dossier v1 sans perte et le réécrit en v2 ; la version 3 est refusée', () => {
+    const parsed = parseRecord(V1_RECORD);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.schemaVersion).toBe(2);
+    const { schemaVersion: _v, ...v1 } = V1_RECORD;
+    const { schemaVersion: _v2, ...v2 } = parsed!;
+    expect(v2).toEqual(v1);                       // tous les champs v1 conservés, rien d'ajouté
+    expect(parsed!.evaluation).toBeUndefined();
+    expect(parsed!.observations[0].grid).toBeUndefined();
+    storage.setItem(SCOUT_REPORTS_KEY, JSON.stringify([V1_RECORD]));
+    const loaded = loadReports(storage);
+    expect(loaded).toEqual({ records: [parsed], ignored: 0 });
+    setStatus('v1-1', 'finalized', storage);
+    expect(JSON.parse(storage.getItem(SCOUT_REPORTS_KEY)!)[0].schemaVersion).toBe(2);
+    expect(parseRecord({ ...V1_RECORD, schemaVersion: 3 })).toBeNull();
+  });
+
+  it('importe un export v1 (enveloppe schemaVersion 1) dans un stockage v2', () => {
+    const text = JSON.stringify({ app: 'ScoutVision', kind: 'scoutvision-scout-reports', schemaVersion: 1, exportedAt: '2026-10-29T12:00:00.000Z', reports: [V1_RECORD] });
+    expect(importReportsJson(text, storage)).toEqual({ added: 1, updated: 0, skipped: 0, errors: [] });
+    expect(getReport('v1-1', storage)?.observations[0].conclusion).toBe('À suivre');
+  });
+});
+
+describe('évaluation en aveugle et grille d\'observation', () => {
+  const grid = (overall?: 1 | 2 | 3 | 4 | 5) => ({
+    role: 'Renard des surfaces', ...(overall ? { overall } : {}),
+    criteria: [{ key: 'npxG per 90', label: 'npxG par 90', kind: 'role_metric' as const, rating: 4 as const }, { key: 'communication', label: 'Communication', kind: 'unmeasured' as const, note: 'parle peu' }],
+  });
+
+  it('la première note globale révèle un dossier en aveugle ; une grille sans note ne révèle pas', () => {
+    const r = createReport({ player: playerRef(), dataSnapshot: snapshot() }, storage);
+    const blind = setBlind(r.id, true, storage);
+    expect(blind.evaluation).toEqual({ blind: true });
+    const a = addObservation(r.id, { type: 'video', date: '2026-10-29', text: 'Sans note globale', grid: grid() }, storage, '2026-10-29T10:00:00.000Z');
+    expect(a.evaluation).toEqual({ blind: true });
+    expect(a.observations[0].grid).toEqual(grid());
+    const b = addObservation(r.id, { type: 'live', date: '2026-10-30', text: 'Avec note globale', grid: grid(3) }, storage, '2026-10-30T10:00:00.000Z');
+    expect(b.evaluation).toEqual({ blind: true, revealedAt: '2026-10-30T10:00:00.000Z' });
+    // Désactiver l'aveugle garde la date de révélation ; la révélation manuelle marche sans note
+    expect(setBlind(r.id, false, storage).evaluation).toEqual({ blind: false, revealedAt: '2026-10-30T10:00:00.000Z' });
+    const r2 = createReport({ player: playerRef({ playerSeasonId: 'p2_t1_FRA-L1_2026-27' }), dataSnapshot: snapshot() }, storage);
+    setBlind(r2.id, true, storage);
+    expect(reveal(r2.id, storage).evaluation?.revealedAt).toBeDefined();
+  });
+
+  it('valide la grille : notes entières 1 à 5, critères inconnus écartés, grille illisible refusée', () => {
+    const r = createReport({ player: playerRef(), dataSnapshot: snapshot() }, storage);
+    const o = addObservation(r.id, { type: 'video', date: '2026-10-29', text: 'ok', grid: { role: 'R', criteria: [
+      { key: 'a', label: 'A', kind: 'role_metric', rating: 6 as never }, { key: 'b', label: 'B', kind: 'autre' as never, rating: 2 }, { key: 'c', label: 'C', kind: 'unmeasured', rating: 2.5 as never, note: '  ' },
+    ] } }, storage);
+    expect(o.observations[0].grid).toEqual({ role: 'R', criteria: [{ key: 'a', label: 'A', kind: 'role_metric' }, { key: 'c', label: 'C', kind: 'unmeasured' }] });
+    expect(() => addObservation(r.id, { type: 'video', date: '2026-10-29', text: 'ok', grid: { criteria: [] } as never }, storage)).toThrow(/Grille/);
+    // La modification peut retirer la grille
+    const u = updateObservation(r.id, o.observations[0].id, { type: 'video', date: '2026-10-29', text: 'sans grille' }, storage);
+    expect(u.observations[0].grid).toBeUndefined();
+    expect(u.observations[0].createdAt).toBe(o.observations[0].createdAt);
   });
 });

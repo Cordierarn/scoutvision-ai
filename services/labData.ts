@@ -62,6 +62,19 @@ export interface LabExperiments {
     };
     fatigue: { matches: number; effect: number; ci: Interval; perDay: number; byRest: Record<string, number>; verdict: Verdict };
     styleMatchups: { rows: number; gain: number; ci: Interval; baseMse: number; verdict: Verdict };
+    // Expériences 20 et 22 (absentes d'un fichier produit avant leur ajout)
+    styleFriction?: {
+      season?: string; pairs: number; trainPairs?: number; movers?: number; moversWithProfiles?: number;
+      mae?: { model: number; withFriction: number; withDimensions: number };
+      improvement?: number; ci?: Interval; coef?: number; frictionMean?: number;
+      corrAbsResidual?: number; corrCi?: Interval; dimensionCoef?: Record<string, number>; dimensions?: string[];
+      note?: string; verdict: Verdict;
+    };
+    setPieceEfficiency?: {
+      pairs: number; teamSeasons: number;
+      overperformance: { mean: number; r: number }; xgForPerMatch: { mean: number; r: number }; xgAgainstPerMatch: { mean: number; r: number };
+      verdict: Verdict;
+    };
   };
 }
 

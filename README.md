@@ -71,6 +71,9 @@ verdict on a player.
 - **Similar players**: explainable similarity score on the pipeline percentiles, with the
   components that drive it ("why similar"), optionally restricted to the same position.
 - **Watchlist** with notes, stored in the browser, CSV export.
+- **Saved filters and share links** on the player database, the Gem Hunter and Similar players:
+  settings saved in the browser under a name, and a link (`#partage=…`, settings only, no data)
+  that reopens the page with them.
 
 ### Tactical profiles
 - 27 tactical roles in 9 categories, from goalkeepers to set-piece specialists.
@@ -78,10 +81,12 @@ verdict on a player.
 - A role index from 0 to 100, identical in the player profile, the Gem Hunter and recruitment,
   with a term-by-term breakdown.
 - **Gem Hunter**: selection funnel (position, constraints, role criteria), adjustable strictness,
-  custom roles.
+  custom roles. During a season in progress the default minutes threshold follows the share of
+  the season already played (see [methodology](docs/methodology.md#minutes-threshold-during-a-season-in-progress)).
 
 ### Team & recruitment
-- Squad analysis: starting eleven of the most used formation, playing style map, shot map, squad.
+- Squad analysis: starting eleven of the most used formation, playing style map, season pass
+  network (mean positions and most frequent links, filterable), shot map, squad.
 - Team needs by position: each starter projected one season ahead and ranked in his league;
   contract end, expected decline and lack of cover flagged.
 - Squad profile on 9 dimensions, ranked among the league's teams.
@@ -107,6 +112,9 @@ verdict on a player.
 ### AI scout reports (optional)
 - Optional grounded scouting summaries written from ScoutVision's structured analyses.
 - Gemini writes the text only; it does not compute any ScoutVision model.
+- Same guard for the comparative synthesis (Comparison, Recruitment), the opposition briefing
+  (Team analysis) and the natural-language assistant of the Gem Hunter, which only proposes
+  filters validated against the catalogue.
 
 ## Key numbers
 
@@ -198,7 +206,7 @@ the report endpoint). To rebuild the data with Python, see [data pipeline](docs/
 ## Data format and updates
 
 Prepared datasets are stored as compact JSON and loaded on demand by season and competition:
-players, teams, shots, heatmaps, lineups and models (age curves, transfer model), plus market
+players, teams, shots, heatmaps, lineups, pass networks and models (age curves, transfer model), plus market
 values, forecasts and laboratory results. See [data format](docs/data-format.md).
 
 Data is refreshed twice a week through GitHub Actions and published to a private release

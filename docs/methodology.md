@@ -13,7 +13,11 @@ Every index and projection below is a scouting aid. None of them is a verdict on
   minutes are low).
 - Each metric `X` has a percentile `X pct` (0-100) among players of the same role (GK, CB, FB,
   WB, DM, CM, AM, W, ST) and the same competition level. Role scores, the Gem Hunter thresholds
-  and the radars all use these percentiles.
+  and the radars all use these percentiles. Since the P4 work the radar of each position family
+  also carries one possession-value axis already computed by the pipeline (`utils/positionMetrics.ts`):
+  xT per 90 for full-backs, attacking midfielders and wingers, VAEP per 90 for midfielders and
+  strikers, VAEP defensive per 90 for centre-backs, none for goalkeepers. The comparison's default
+  axes and the profile's strengths and limits follow the same lists; no model was added or changed.
 - A percentile ranks the value, not its quality: for metrics where less is better (losses of
   possession, fouls…) the role indices count 100 − percentile.
 - Only players with at least 40% of their team's minutes are included (PitchAPI `player_season`
@@ -34,6 +38,19 @@ Every index and projection below is a scouting aid. None of them is a verdict on
 - Historical "statistical twins" are not part of the page: the laboratory experiment
   ([laboratory](laboratory.md), *Statistical twins*) is rated **partial** (on par with the age
   curves for under-23s, not better overall) and only its aggregate result is stored.
+
+## Minutes threshold during a season in progress
+
+The Gem Hunter (500 min) and Similar players (900 min) use full-season minutes thresholds. While
+the loaded season is in progress, the default threshold is the full-season value multiplied by the
+share of the season already played (`utils/seasonProgress.ts`), rounded to 10 minutes, never
+below 90: a player who started every round played so far is not excluded. The share is measured
+on matches when the competition has a plausible round-robin calendar (8 to 24 teams, matches
+played by the most advanced team over 2 × (teams − 1)); without a competition filter it is the
+median over the measurable leagues; otherwise it is the elapsed time of the season window. The
+adjusted value is labelled in the interface ("ajusté à la saison"), can be changed, and a
+threshold typed by the user is never overwritten. Thresholds used as signals (for example the
+"few minutes" flag of recruitment) are unchanged.
 
 ## Team analysis
 
@@ -62,8 +79,21 @@ Every index and projection below is a scouting aid. None of them is a verdict on
   final style in 30 % of cases after 1 match, 48 % after 3, 55 % after 5, 64 % after 8, 66 % after 10,
   74 % after 15, 80 % after 20 (most frequent style: 23.5 %). The style is not named below 5 matches,
   shown as a trend from 5 to 9 and as the observed style from 10. Between two complete seasons, 47 %
-  of clubs change style. Style map: PC1 63.2 % and PC2 24.0 % of the variance (87 %), one point per
+  of clubs change style. Style map: PC1 63.9 % and PC2 24.2 % of the variance (88 %, data of 2026-10-30, 2,328 team-seasons), one point per
   team-season.
+- Pass network (`utils/passNetwork.ts`): PitchAPI builds one network per match on the starting
+  eleven, up to the first substitution (players who come on are never in it). The season file
+  keeps, per team, the number of matches with a network, each player's mean position (mean of
+  the match means), matches, passes given and received, and per link the summed passes and the
+  matches where it appears. The app makes links undirected (both directions added) and reports
+  every "per match" value to the team's matches with a network, so two teams read on the same
+  base; a pair that only played together half the season is therefore diluted, on purpose.
+  Default view: players in at least 50 % of the matches and links of at least 2 passes per
+  match; a link is shown only when both players are. Node size = passes given + received per
+  match (square-root scale), stroke width = passes per match, both relative to what is shown.
+  Coordinates: `avg_x` is in metres from the own goal, `avg_y` in metres from the attacker's
+  right touchline (checked against the lineups: correlation −0.83 with `pitch_y`, 2025-26
+  Ligue 1); the pipeline normalises both to the lineup frame (0–1, y from the left).
 - Depth (`slotDepth`): starter, backup and third option of each slot of the formation, with the
   signals Recruitment already uses (no backup, rotation, contract ≤ 12 months, age decline, no
   regular player). No need level: that stays in `slotNeeds`, which now reads `slotDepth` (identical

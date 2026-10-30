@@ -480,7 +480,7 @@ export function drawIndicator(c: PdfCanvas, x: number, w: number, ind: { title: 
 }
 
 /** Observation du scout : carte à bord navy, type et date, texte, forces / à revoir / conclusion */
-export function drawObservation(c: PdfCanvas, obs: { type: string; date: string; text: string; strengths?: string; toReview?: string; conclusion?: string }): number {
+export function drawObservation(c: PdfCanvas, obs: { type: string; date: string; text: string; strengths?: string; toReview?: string; conclusion?: string; grid?: string[] }): number {
   const w = CONTENT_W, inner = w - 8;
   c.font(FONT.body);
   const body = c.wrap(obs.text, inner);
@@ -489,6 +489,7 @@ export function drawObservation(c: PdfCanvas, obs: { type: string; date: string;
   push('Forces', obs.strengths, THEME.ink2);
   push('À revoir', obs.toReview, THEME.ink2);
   push('Conclusion', obs.conclusion, THEME.ink, 'bold');
+  if (obs.grid && obs.grid.length) { c.font(FONT.small, THEME.ink2); extras.push({ label: 'Grille', lines: obs.grid.flatMap(l => c.wrap(l, inner - 26)), color: THEME.ink2, style: 'normal' }); }
   const lh = lineHeight(FONT.body), lhs = lineHeight(FONT.small);
   const h = 8 + body.length * lh + extras.reduce((s, e) => s + e.lines.length * lhs + 1, 0) + 3;
   // Carte entière si elle tient dans une page, sinon le texte se pagine ligne à ligne
@@ -536,5 +537,29 @@ export function drawMethodologyNote(c: PdfCanvas, title: string, lines: string[]
     c.text(line, MARGIN + 4, c.y + lh * 0.75); c.y += lh;
   });
   c.y += 4;
+  return c.y;
+}
+
+/** Grille d'observation vierge : une ligne par critère avec cinq cases 1 à 5 à cocher, et une ligne de remarque */
+export function drawBlankGrid(c: PdfCanvas, title: string, criteria: { label: string; hint?: string }[]): number {
+  if (!criteria.length) return c.y;
+  const lh = 9;
+  c.ensureSpace(6 + lh * 2);
+  c.font(FONT.note, THEME.ink3, 'bold'); c.text(title.toUpperCase(), MARGIN, c.y + 3);
+  c.text('1   2   3   4   5', MARGIN + CONTENT_W - 2, c.y + 3, { align: 'right' });
+  c.y += 5;
+  criteria.forEach(cr => {
+    c.ensureSpace(lh);
+    const y = c.y;
+    c.font(FONT.body, THEME.ink); c.text(c.fit(cr.label, CONTENT_W - 60), MARGIN, y + 3.6);
+    if (cr.hint) { c.font(FONT.note, THEME.ink3); c.text(c.fit(cr.hint, CONTENT_W - 60), MARGIN, y + 7); }
+    for (let k = 0; k < 5; k++) {
+      const x = MARGIN + CONTENT_W - 27 + k * 5.6;
+      c.rect(x, y + 0.8, 4, 4, THEME.white, THEME.rule, 0.6);
+    }
+    c.rule(y + lh - 0.6, MARGIN, CONTENT_W, THEME.fill, 0.2);
+    c.y = y + lh;
+  });
+  c.y += 2;
   return c.y;
 }

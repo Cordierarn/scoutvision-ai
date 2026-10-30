@@ -24,6 +24,8 @@ import { BRAND, INK } from '../../theme/charts';
 import { ObservationForm } from './ObservationForm';
 import { Note, STATUS_META, SectionBlock, StatusChip, TYPE_LABELS, fmtDate, fmtDateTime } from './shared';
 import { PdfMode } from '../../utils/scoutReportPdf';
+import { RATING_LABELS, gridGaps, isBlindHidden } from '../../utils/observationGrid';
+import { EyeOff } from 'lucide-react';
 
 const INT = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 const D1 = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -92,6 +94,8 @@ export interface ReportDossierProps {
   onAddObservation: (obs: ObservationInput) => void;
   onUpdateObservation: (id: string, obs: ObservationInput) => void;
   onRemoveObservation: (id: string) => void;
+  onBlind: (blind: boolean) => void;       // évaluation en aveugle : données chiffrées masquées jusqu'à la note du scout
+  onReveal: () => void;                    // révélation manuelle, sans note
   onGenerate?: () => void;
   generating: boolean;
   generateError: string | null;
@@ -115,7 +119,7 @@ function useRefocus(busy: boolean, ref: React.RefObject<HTMLButtonElement | null
 }
 
 export const ReportDossier: React.FC<ReportDossierProps> = ({
-  record: r, livePlayer, curves, dataIndex, onStatus, onTags, onRole, onAddObservation, onUpdateObservation, onRemoveObservation,
+  record: r, livePlayer, curves, dataIndex, onStatus, onTags, onRole, onAddObservation, onUpdateObservation, onRemoveObservation, onBlind, onReveal,
   onGenerate, generating, generateError, onExportPdf, exporting, exportError, onDelete, onOpenPlayer, onBack, headingRef,
 }) => {
   const uid = useId();
@@ -149,6 +153,13 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
   useRefocus(exporting, () => (lastExport.current === 'complet' ? exportFullRef.current : exportRef.current));
   const exportPdf = (mode: PdfMode) => { lastExport.current = mode; onExportPdf(mode); };
   const closeForm = () => { setAdding(false); requestAnimationFrame(() => addRef.current?.focus()); };
+
+  const hidden = isBlindHidden(r.evaluation);
+  const blind = !!r.evaluation?.blind;
+  const Masked: React.FC<{ what: string }> = ({ what }) => (
+    <p className="flex items-center gap-1.5 text-xs text-ink-3 rounded-md border border-dashed border-line px-3 py-2"><EyeOff className="w-3.5 h-3.5 shrink-0" aria-hidden />{what} masqué{what.endsWith('s') ? 's' : ''} : évaluation en aveugle. Saisissez une observation avec une note globale, ou révélez les données.</p>
+  );
+  const gapsByObservation = useMemo(() => r.observations.filter(o => o.grid).map(o => ({ o, gaps: gridGaps(o.grid!, facts) })), [r.observations, facts]);
 
   const radarMetrics = useMemo(() => roleMetrics(facts, role, 8), [facts, role]);
   const { strengths, limits } = useMemo(() => strengthsAndLimits(facts), [facts]);
@@ -200,6 +211,11 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
               </select>
             </label>
           )}
+          <label className="sv-label inline-flex items-center gap-1.5 normal-case tracking-normal font-normal text-xs text-ink-2 self-center">
+            <input type="checkbox" checked={blind} onChange={e => onBlind(e.target.checked)} />
+            Évaluation en aveugle
+            <InfoTip text="Percentiles, indices de rôle, valeurs, synthèse et priorités sont masqués jusqu'à la première note globale saisie dans une observation (ou une révélation manuelle). Les données restent figées dans le dossier et réapparaissent ensuite avec l'écart data / observation." />
+          </label>
           <div className="flex flex-wrap gap-1.5 ml-auto">
             {onOpenPlayer && <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={onOpenPlayer}><ExternalLink className="w-3.5 h-3.5" aria-hidden /> Fiche</button>}
             <button ref={exportRef} type="button" className="sv-btn sv-btn-secondary sv-btn-sm" onClick={() => exportPdf('synthese')} disabled={exporting} title="Rapport synthèse : quatre pages, dernière synthèse"><Download className="w-3.5 h-3.5" aria-hidden /> {exporting ? 'Export…' : 'PDF'}</button>
@@ -216,6 +232,15 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
           </div>
         </div>
         {exportError && <div className="mt-2"><LoadError message={exportError} onRetry={() => exportPdf('synthese')} /></div>}
+        {hidden && (
+          <Note tone="info" className="mt-2.5">
+            <span className="inline-flex flex-wrap items-center gap-2">
+              Dossier en aveugle : observez d'abord, les chiffres viendront ensuite. L'export PDF produit une fiche d'observation sans données.
+              <button type="button" className="sv-btn sv-btn-ghost sv-btn-sm" onClick={onReveal}>Révéler sans noter</button>
+            </span>
+          </Note>
+        )}
+        {blind && r.evaluation?.revealedAt && <p className="text-2xs text-ink-3 mt-2">Données révélées le {fmtDateTime(r.evaluation.revealedAt)} (évaluation en aveugle).</p>}
         <div className="mt-2.5"><TagsEditor tags={r.tags} onChange={onTags} /></div>
       </SectionBlock>
 
@@ -229,22 +254,23 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
         {!livePlayer && <Note className="mb-2.5">Ligne joueur-saison absente de la saison chargée : lecture du snapshot du dossier seulement.</Note>}
         {snap.seasonInProgress && <p className="text-2xs text-ink-3 mb-2">Saison en cours au moment du snapshot : échantillon partiel.</p>}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <Stat label="Rôle principal" value={role ?? '—'} sub={roleIndex !== undefined ? `indice ${roleIndex}` : snap.bestRoles.length ? undefined : 'aucun rôle évaluable'} wrapSub />
+          <Stat label="Rôle principal" value={role ?? '—'} sub={hidden ? 'indice masqué' : roleIndex !== undefined ? `indice ${roleIndex}` : snap.bestRoles.length ? undefined : 'aucun rôle évaluable'} wrapSub />
           <Stat label="Échantillon" value={facts.sample.minutes !== undefined ? `${INT.format(Number(facts.sample.minutes))} min` : '—'}
             sub={facts.sample.matches !== undefined ? `${facts.sample.matches} matchs${facts.sample.shareOfTeamMinutesPct !== undefined ? ` · ${facts.sample.shareOfTeamMinutesPct} % des minutes` : ''}` : undefined} wrapSub />
-          <Stat label="Valeur de marché Transfermarkt" value={facts.values.marketValueTransfermarkt ?? 'N/D'} wrapSub />
-          <Stat label="Estimation statistique ScoutVision" value={facts.values.estimatedValueScoutVision ?? 'N/D'} sub={facts.values.estimatedValueTypicalError ? `erreur typique ${facts.values.estimatedValueTypicalError} · pas un prix` : undefined} wrapSub />
+          <Stat label="Valeur de marché Transfermarkt" value={hidden ? '•••' : facts.values.marketValueTransfermarkt ?? 'N/D'} sub={hidden ? 'masquée' : undefined} wrapSub />
+          <Stat label="Estimation statistique ScoutVision" value={hidden ? '•••' : facts.values.estimatedValueScoutVision ?? 'N/D'} sub={hidden ? 'masquée' : facts.values.estimatedValueTypicalError ? `erreur typique ${facts.values.estimatedValueTypicalError} · pas un prix` : undefined} wrapSub />
           <Stat label="Contrat" value={facts.contractUntil ? fmtDate(facts.contractUntil) : 'N/D'} wrapSub />
           <Stat label="Contexte équipe" value={facts.teamContext.style ? String(facts.teamContext.style) : '—'}
             sub={[facts.teamContext.possessionPct !== undefined && `possession ${facts.teamContext.possessionPct} %`, facts.teamContext.ppda !== undefined && `PPDA ${facts.teamContext.ppda}`, facts.teamContext.fieldTiltPct !== undefined && `domination ${facts.teamContext.fieldTiltPct} %`].filter(Boolean).join(' · ') || undefined} wrapSub />
         </div>
-        {snap.bestRoles.length > 1 && (
+        {snap.bestRoles.length > 1 && !hidden && (
           <p className="text-2xs text-ink-3 mt-2">Autres rôles : {snap.bestRoles.filter(b => b.role !== role).map(b => `${b.role} ${b.index}`).join(' · ')}</p>
         )}
       </SectionBlock>
 
       {/* C. Snapshot statistique */}
       <SectionBlock letter="C" title="Snapshot statistique" help={<InfoTip text="Percentiles du pipeline (même groupe de poste, même niveau de compétition, même saison), tels qu'ils étaient au snapshot. « inv. » : moins c'est mieux, lu dans l'autre sens." />}>
+        {hidden ? <Masked what="Percentiles" /> : <>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
           <div>
             <p className="sv-label mb-1">Radar du rôle{role ? ` · ${role}` : ''}</p>
@@ -269,11 +295,12 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
               : <p className="text-xs text-ink-4">Aucune métrique au 25e percentile ou moins.</p>}
           </div>
         </div>
+        </>}
       </SectionBlock>
 
       {/* D. Impact & valeur */}
       <SectionBlock letter="D" title="Impact et valeur" help={<InfoTip text="Modèles du pipeline : plus-minus régularisé (deux saisons), finition au-delà de l'xG resserrée vers la moyenne, part des passes du réseau d'équipe, valeur estimée par la performance (une estimation statistique, pas un prix)." />}>
-        {ind.rapm || ind.finishing || ind.passShare || ind.valuation ? (
+        {hidden ? <Masked what="Indicateurs" /> : ind.rapm || ind.finishing || ind.passShare || ind.valuation ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Stat label="Impact (RAPM)" value={ind.rapm ? `${signed(ind.rapm.net, D3)} xG/90` : 'N/D'}
               sub={ind.rapm ? <span className="inline-flex items-center gap-1 flex-wrap">{ind.rapm.pct !== undefined && <PercentileValue value={ind.rapm.pct} className="text-2xs" />}{ind.rapm.reliability ? `fiabilité nette ${D2.format(ind.rapm.reliability.net)}` : ''}</span> : undefined} wrapSub />
@@ -287,7 +314,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
 
       {/* E. Projection */}
       <SectionBlock letter="E" title="Projection" help={<InfoTip text="Percentile actuel → percentile attendu la saison prochaine, courbes d'âge du rôle (effet de l'âge et retour vers la moyenne). Une tendance statistique, pas un verdict." />}>
-        {snap.projection && snap.projection.length ? (
+        {hidden ? <Masked what="Projection" /> : snap.projection && snap.projection.length ? (
           <ul className="space-y-1">
             {snap.projection.map(p => (
               <li key={p.metric} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 text-xs">
@@ -321,7 +348,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
         </>}>
         {generateError && <div className="mb-2"><LoadError message={generateError} onRetry={onGenerate} /></div>}
         {generating && <p role="status" className="text-xs text-ink-3 mb-2">Rédaction en cours (10 à 60 s)…</p>}
-        {summary ? (
+        {hidden ? <Masked what={summary ? 'Synthèse' : 'Synthèse (aucune pour l\'instant)'} /> : summary ? (
           <>
             <p className="text-2xs text-ink-3 mb-2 num">
               Version {summaries.indexOf(summary) + 1} / {summaries.length} · {fmtDateTime(summary.generatedAt)} · {summary.model}
@@ -344,7 +371,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
 
       {/* G. Priorités d'observation */}
       <SectionBlock letter="G" title="Priorités d'observation" help={<InfoTip text="Points à vérifier en vidéo ou en live, issus de la section 5 de la synthèse ScoutVision : chacun est lié à une donnée, aucun n'est une conclusion." />}>
-        {priorities.length ? (
+        {hidden ? <Masked what="Priorités" /> : priorities.length ? (
           <ul className="space-y-1 pl-4 list-disc marker:text-ink-4 text-xs text-ink-2">{priorities.map((p, i) => <li key={i}>{p}</li>)}</ul>
         ) : <p className="text-xs text-ink-4">{summary ? 'La synthèse ne contient pas de section de priorités.' : 'Sans synthèse : partez des forces et limites statistiques (bloc C).'}</p>}
       </SectionBlock>
@@ -352,7 +379,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
       {/* H. Observations humaines */}
       <SectionBlock letter="H" title="Observations humaines" help={<InfoTip text="Notes de l'observateur (vidéo, live, général). Jamais générées ni complétées par un modèle ; elles ne modifient aucun chiffre et ne produisent aucun score." />}
         right={<button ref={addRef} type="button" className="sv-btn sv-btn-primary sv-btn-sm" onClick={() => { setAdding(true); setEditing(null); }} disabled={adding} aria-expanded={adding}><Plus className="w-3.5 h-3.5" aria-hidden /> Observation</button>}>
-        {adding && <div className="mb-3"><ObservationForm onSubmit={obs => { onAddObservation(obs); closeForm(); }} onCancel={closeForm} /></div>}
+        {adding && <div className="mb-3"><ObservationForm role={role} onSubmit={obs => { onAddObservation(obs); closeForm(); }} onCancel={closeForm} /></div>}
         {r.observations.length === 0 && !adding ? (
           <EmptyState title="Aucune observation.">Ajoutez ce que vous avez vu en vidéo ou en live : ces notes restent séparées des chiffres.</EmptyState>
         ) : (
@@ -360,7 +387,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
             {[...r.observations].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).map((o: ScoutObservation) => (
               <li key={o.id} className="rounded-md border border-line p-3">
                 {editing === o.id ? (
-                  <ObservationForm initial={o} submitLabel="Enregistrer les modifications" onSubmit={obs => { onUpdateObservation(o.id, obs); setEditing(null); requestAnimationFrame(() => addRef.current?.focus()); }} onCancel={() => { setEditing(null); requestAnimationFrame(() => addRef.current?.focus()); }} />
+                  <ObservationForm initial={o} role={role} submitLabel="Enregistrer les modifications" onSubmit={obs => { onUpdateObservation(o.id, obs); setEditing(null); requestAnimationFrame(() => addRef.current?.focus()); }} onCancel={() => { setEditing(null); requestAnimationFrame(() => addRef.current?.focus()); }} />
                 ) : (
                   <>
                     <div className="flex items-center justify-between gap-2">
@@ -370,6 +397,12 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
                         <button type="button" className="sv-icon-btn" aria-label="Supprimer l'observation" onClick={() => { onRemoveObservation(o.id); requestAnimationFrame(() => addRef.current?.focus()); }}><Trash2 className="w-3.5 h-3.5" aria-hidden /></button>
                       </span>
                     </div>
+                    {o.grid && (
+                      <p className="text-2xs text-ink-3 mt-0.5 num">
+                        Grille · {o.grid.role}{o.grid.overall !== undefined ? ` · note globale ${o.grid.overall}/5 (${RATING_LABELS[o.grid.overall].toLowerCase()})` : ' · sans note globale'}
+                        {' · '}{o.grid.criteria.filter(c => c.rating !== undefined).length} critère{o.grid.criteria.filter(c => c.rating !== undefined).length > 1 ? 's' : ''} noté{o.grid.criteria.filter(c => c.rating !== undefined).length > 1 ? 's' : ''}
+                      </p>
+                    )}
                     <p className="text-[13px] text-ink-2 whitespace-pre-wrap leading-relaxed mt-1">{o.text}</p>
                     {(o.strengths || o.toReview || o.conclusion) && (
                       <dl className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-xs">
@@ -385,6 +418,44 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
           </ul>
         )}
       </SectionBlock>
+
+      {/* I. Écart data / observation */}
+      {gapsByObservation.length > 0 && (
+        <SectionBlock letter="I" title="Écart data / observation" help={<InfoTip text="Juxtaposition de la note du scout (1 à 5) et de la bande de percentile du snapshot (1 = P0-19 … 5 = P80-100) sur les critères du rôle. Une lecture, pas un score : l'écart ne corrige ni la donnée ni l'observation." />}>
+          {hidden ? <Masked what="Écarts" /> : (
+            <div className="space-y-3">
+              {gapsByObservation.map(({ o, gaps }) => (
+                <div key={o.id}>
+                  <p className="text-2xs font-semibold text-accent">{TYPE_LABELS[o.type]} · {fmtDate(o.date)} · {o.grid!.role}{o.grid!.overall !== undefined ? ` · note globale ${o.grid!.overall}/5` : ''}</p>
+                  {gaps.items.length ? (
+                    <>
+                      <p className="text-2xs text-ink-3 mt-0.5 num">{gaps.above} observé{gaps.above > 1 ? 's' : ''} au-dessus de la donnée · {gaps.below} en dessous · {gaps.aligned} dans la même bande{gaps.unmatched ? ` · ${gaps.unmatched} sans percentile` : ''}</p>
+                      <table className="w-full mt-1.5 text-xs">
+                        <thead><tr className="text-2xs text-ink-3 text-left"><th className="font-medium pb-1">Critère</th><th className="font-medium pb-1 text-right">Scout</th><th className="font-medium pb-1 text-right">Donnée</th><th className="font-medium pb-1 text-right">Écart</th></tr></thead>
+                        <tbody>
+                          {gaps.items.map(i => (
+                            <tr key={i.key} className="border-t border-line">
+                              <td className="py-1 text-ink-2 pr-2">{i.label}</td>
+                              <td className="py-1 text-right num text-ink" title={RATING_LABELS[i.rating]}>{i.rating}/5</td>
+                              <td className="py-1 text-right num text-ink-2">{i.percentile !== undefined ? <>{i.dataRating}/5 <span className="text-ink-4">(P{i.percentile})</span></> : <span className="text-ink-4">—</span>}</td>
+                              <td className={`py-1 text-right num font-semibold ${i.gap === undefined ? 'text-ink-4' : i.gap > 0 ? 'text-accent' : i.gap < 0 ? 'text-warn' : 'text-ink-3'}`}>{i.gap === undefined ? '—' : i.gap > 0 ? `+${i.gap}` : i.gap === 0 ? '=' : `−${Math.abs(i.gap)}`}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  ) : <p className="text-2xs text-ink-4 mt-0.5">Aucun critère du rôle noté dans cette grille.</p>}
+                  {o.grid!.criteria.some(c => c.kind === 'unmeasured' && (c.rating !== undefined || c.note)) && (
+                    <p className="text-2xs text-ink-3 mt-1.5">
+                      Non mesuré par les données : {o.grid!.criteria.filter(c => c.kind === 'unmeasured' && (c.rating !== undefined || c.note)).map(c => `${c.label}${c.rating !== undefined ? ` ${c.rating}/5` : ''}${c.note ? ` (${c.note})` : ''}`).join(' · ')}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionBlock>
+      )}
     </article>
   );
 };

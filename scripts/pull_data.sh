@@ -27,8 +27,15 @@ gh_() {
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# API REST (`gh api`) plutôt que `gh release download` : ce dernier passe par GraphQL,
+# indisponible dans certains environnements.
 echo "Téléchargement de $DATA_RELEASE/$ASSET..."
-gh_ release download "$DATA_RELEASE" -R "$DATA_REPO" -p "$ASSET" -D "$tmp"
+asset_id="$(gh_ api "repos/$DATA_REPO/releases/tags/$DATA_RELEASE" -q ".assets[] | select(.name == \"$ASSET\") | .id")"
+if [ -z "$asset_id" ]; then
+  echo "Erreur : $ASSET introuvable dans la release $DATA_RELEASE de $DATA_REPO." >&2
+  exit 1
+fi
+gh_ api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$asset_id" > "$tmp/$ASSET"
 
 mkdir -p "$ROOT/public/data"
 rm -rf "$ROOT/public/data/players" "$ROOT/public/data/teams" "$ROOT/public/data/shots" "$ROOT/public/data/index.json"

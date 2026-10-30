@@ -160,7 +160,7 @@ The "Rapports de scouting" page keeps one dossier per player-season row, identif
 league: homonyms, league and cup rows, and a player's successive clubs are separate dossiers.
 The client cache of generated reports uses the same identity.
 
-A dossier (`ScoutReportRecord`, `types/scoutReport.ts`, `schemaVersion: 1`) holds:
+A dossier (`ScoutReportRecord`, `types/scoutReport.ts`, `schemaVersion: 2`) holds:
 
 - `player`: the row reference (identifiers, name, club, competition, season, position);
 - `dataSnapshot`: the `ReportFacts` the model received, the official role indices, structured
@@ -168,9 +168,10 @@ A dossier (`ScoutReportRecord`, `types/scoutReport.ts`, `schemaVersion: 1`) hold
   the data; never the whole player row;
 - `generatedSummaries`: every Gemini version with its real model, requested model,
   `promptVersion`, date and text; a new generation is appended, never replaces an older one;
-- `observations`: human notes (video, live, general) with date, text and optional strengths,
-  points to review and conclusion; they are never prefilled by the model and never mixed with
-  percentiles or role indices;
+- `observations`: human notes (video, live, general) with date, text, optional strengths,
+  points to review and conclusion, and an optional observation grid; they are never prefilled by
+  the model and never mixed with percentiles or role indices;
+- `evaluation`: blind-evaluation state (see below);
 - `status` (`draft`, `to_observe`, `finalized`, `archived`), `role`, free text `tags`.
 
 Storage is the browser `localStorage`, single key `scoutvision_scout_reports_v1`. Reading is
@@ -179,6 +180,28 @@ rapports" writes a JSON envelope (`kind: scoutvision-scout-reports`) containing 
 dossiers, no key, secret or API cache; "Importer des rapports" validates every record and keeps
 the newer version of a dossier already present. Stored dossiers are real local data: they live
 in the user's browser and in the files they export, never in the repository.
+
+### Blind evaluation and observation grid (schema v2)
+
+A dossier can be switched to **blind evaluation**: percentiles, role indices, values, the
+generated summary and the observation priorities stay hidden (on screen and in the PDF, which
+then prints an observation sheet with an empty grid) until the scout saves an observation with
+an overall rating, or reveals the data manually. The reveal date is kept.
+
+Each observation can carry an **observation grid** for the dossier's role: the preset's metrics
+(labels of the app, inverted metrics flagged) and four dimensions the data does not measure
+(behaviour after losing the ball, communication, orientation before receiving, defensive
+recovery), each rated 1 (far below the expected level) to 5 (far above) with an optional note,
+plus an overall rating. The grid is never prefilled by the data or by the model.
+
+The **data / observation gap** (dossier section I, PDF observation card) juxtaposes the scout's
+rating with the percentile band of the snapshot (1 = P0-19 … 5 = P80-100) for each rated role
+metric, and counts the criteria observed above, below or within the data's band. It is a
+reading aid, never a merged score: neither the data nor the observation is corrected.
+
+Storage schema version 2 adds `evaluation { blind, revealedAt? }` on the record and
+`observation.grid` ; the store reads versions 1 and 2, rewrites records in version 2 without
+losing any field, and refuses any other version (tested).
 
 When a dossier is opened, its snapshot is compared with the current data of the same row
 (sample, percentiles, values, contract, data date); if they differ, a neutral note says that
@@ -212,6 +235,25 @@ style without subsetting, which is why it was not adopted).
 
 Without `GEMINI_API_KEY`, generation answers 503 and the dossier still works: snapshot,
 observations, status, tags, JSON export/import and PDF.
+
+## Grounded AI functions (`/api/ai/*`)
+
+Three more functions share the report's server guard (`server/groundedAi.ts`, routed by the same
+middleware with the same body limit, rate limiter and 503 without `GEMINI_API_KEY`). The browser
+sends only facts ScoutVision already computed; the server builds the prompt (never an open proxy),
+calls Gemini with retry, audits the text (any number absent from the facts, any unmeasured topic,
+any verdict, missing headings), runs one correction pass and removes the sentences still at
+fault. Each answer carries the real model, the exact facts sent and an explicit prompt version
+(`ai-compare-v1`, `ai-opposition-v1`, `ai-hunter-v1`). Results are not stored.
+
+| Function | Where | Facts sent | Output |
+|---|---|---|---|
+| `compare` | Comparison page (players compared), Recruitment candidate dossier (candidate vs starter) | `ReportFacts` of each player, built server-side from the rows | four sections: profiles, main differences, complementarity and context, points to verify |
+| `opposition` | Team analysis, Style tab | `utils/oppositionFacts.ts`: season stats with league rank, main formation and starters, squad profile, most-used players with their role; never a raw row | four sections: identity and results, style and trends, statistical strengths and vulnerabilities, points to prepare |
+| `hunter` | Gem Hunter, "Décrire le profil recherché" | the scout's sentence (500 characters max) and the catalogue (positions, roles, metric keys, competitions, season capabilities) | a strict JSON configuration validated against the catalogue (unknown role, metric or competition dropped and listed as "non traduit"), shown before being applied; extra criteria become a custom role; the model computes no score |
+
+Validation without a key: unit tests with injected generators (`server/groundedAi.test.ts`) and
+browser runs with mocked responses explicitly labelled "MAQUETTE D'AUDIT".
 
 ## Limitations
 

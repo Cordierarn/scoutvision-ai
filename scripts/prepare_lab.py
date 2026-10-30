@@ -47,16 +47,35 @@ COLUMNS = {
               "credited_side", "is_cancelled", "is_penalty"},
     "lineup": {"match_id", "team_id", "coach_name", "player_id", "role", "pitch_y"},
     "momentum": {"match_id", "minute", "value"},
-    "shot": {"match_id", "team_id", "minute", "period", "expected_goals", "situation"},
+    "shot": {"match_id", "team_id", "minute", "period", "expected_goals", "situation", "event_type"},
     "player_match": {"match_id", "team_id", "player_id", "player_name", "position_role"},
     "pass_network_edge": {"match_id", "team_id", "from_player_id", "to_player_id", "passes"},
 }
 
 
+def cached_table_assets() -> dict[tuple[str, str], tuple[str, str, int | None]]:
+    """Archives déjà présentes dans le cache (sans GitHub) : une saison close prime sur data-v2-current."""
+    from prepare_data import CACHE_DIR, TABLES_ASSET
+    assets: dict[tuple[str, str], tuple[str, str, int | None]] = {}
+    tags = sorted((d.name for d in CACHE_DIR.iterdir() if d.is_dir() and d.name.startswith("data-v2-")), key=lambda t: t == "data-v2-current")
+    for tag in tags:
+        for path in sorted((CACHE_DIR / tag).glob("tables-*.tar")):
+            m = TABLES_ASSET.match(path.name)
+            if not m or m.group("comp") == "ALL":
+                continue
+            assets.setdefault((m.group("comp"), m.group("season")), (tag, path.name, None))
+    return assets
+
+
 def read_all() -> dict[str, pd.DataFrame]:
-    """Tables de toutes les archives compétition x saison, colonnes utiles seulement."""
+    """Tables de toutes les archives compétition x saison, colonnes utiles seulement.
+    Sans accès GitHub, les archives déjà en cache sont lues telles quelles."""
     frames: dict[str, list[pd.DataFrame]] = {t: [] for t in COLUMNS}
-    assets = list_table_assets()
+    try:
+        assets = list_table_assets()
+    except Exception as error:   # noqa: BLE001 - gh absent, hors ligne ou jeton invalide
+        assets = cached_table_assets()
+        print(f"  GitHub inaccessible ({type(error).__name__}) : {len(assets)} archives lues depuis le cache", flush=True)
     for (comp, raw_season), (tag, name, size) in sorted(assets.items()):
         with tarfile.open(download(tag, name, size)) as tar:
             for member in tar.getmembers():
@@ -185,6 +204,9 @@ def main() -> int:
     })
     experiments["twins"] = lab.twins(players, presets, curves, models.role_index, models._development_pct,
                                      ev["validation"]["base"])
+    print("Friction de style (transferts)...", flush=True)
+    tiers = {c["key"]: int(c.get("tier", 2)) for c in index["competitions"]}
+    experiments["styleFriction"] = lab.style_friction(read_players(), presets, cups, tiers, models)
 
     experiments["duos"] = {k: v for k, v in duos.items() if k != "duos"}
     d = duos["duos"]
@@ -204,6 +226,7 @@ def main() -> int:
     league_shots = T["shot"][~T["shot"]["comp"].isin(cups)]
     sp = lab.set_pieces(league_shots, current)
     experiments["setPieces"] = {k: v for k, v in sp.items() if k != "teams"}
+    experiments["setPieceEfficiency"] = lab.set_piece_efficiency(league_shots, current)
     key = ["Competition", "_app_season", "Team ID"]
     teams = clock["teams"].merge(sp["teams"].rename(columns={"comp": "Competition", "app_season": "_app_season",
                                                              "team_id": "Team ID", "share": "set_pieces"}), on=key, how="outer")

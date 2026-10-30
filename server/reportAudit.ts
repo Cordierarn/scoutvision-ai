@@ -19,7 +19,7 @@ export interface ReportIssue {
   excerpt: string;       // passage fautif
 }
 
-interface TopicRule {
+export interface TopicRule {
   rule: string;
   pattern: RegExp;
   // La donnée correspondante, si ScoutVision l'envoie, autorise le sujet
@@ -27,7 +27,7 @@ interface TopicRule {
 }
 
 // Sujets que ScoutVision ne mesure pas, ou formulations interdites quelle que soit la donnée
-const TOPIC_RULES: TopicRule[] = [
+export const TOPIC_RULES: TopicRule[] = [
   { rule: 'play under pressure / pressure applied is not measured', pattern: /sous (?:la )?pression|pressing adverse|pression (?:exercée|appliquée|mise)|under pressure/i, unlessMetric: /pression|pressure|pressing/i },
   { rule: 'off-the-ball runs are not measured', pattern: /courses? sans (?:le )?ballon|appels? (?:de balle|en profondeur)|off[- ]the[- ]ball/i, unlessMetric: /sans ballon|off[- ]ball/i },
   { rule: 'top speed and acceleration are not measured', pattern: /vitesse (?:maximale|de pointe)|pointe de vitesse|accélération|explosivit|\bsprints?\b|top speed/i, unlessMetric: /sprint|vitesse max|accél/i },
@@ -53,7 +53,7 @@ const SEASON_CAVEAT = /saison[^.\n]{0,25}?(?:en cours|non terminée|inachevée|i
 // NOMBRES
 // ============================================
 
-const NUMBER = /[+\-−]?\d{1,3}(?:[  ]\d{3})+(?:[.,]\d+)?|[+\-−]?\d+(?:[.,]\d+)?/g;
+export const NUMBER = /[+\-−]?\d{1,3}(?:[  ]\d{3})+(?:[.,]\d+)?|[+\-−]?\d+(?:[.,]\d+)?/g;
 
 function parseNumber(raw: string): { value: number; decimals: number } {
   const s = raw.replace(/[  ]/g, '').replace('−', '-').replace(',', '.');
@@ -62,7 +62,7 @@ function parseNumber(raw: string): { value: number; decimals: number } {
 }
 
 /** Tous les nombres présents dans les faits (valeurs numériques et nombres écrits dans les textes) */
-export function factNumbers(facts: ReportFacts): number[] {
+export function factNumbers(facts: unknown): number[] {
   const out: number[] = [90, 100];      // « par 90 », « pour 100 tirs »
   const walk = (v: unknown) => {
     if (typeof v === 'number') out.push(Math.abs(v));
@@ -75,14 +75,14 @@ export function factNumbers(facts: ReportFacts): number[] {
 }
 
 /** Le nombre écrit est-il une valeur des faits, éventuellement arrondie à moins de décimales ? */
-function supported(raw: string, allowed: number[]): boolean {
+export function supported(raw: string, allowed: number[]): boolean {
   const { value, decimals } = parseNumber(raw);
   const tolerance = 0.5 * 10 ** -decimals + 1e-9;
   return allowed.some(a => Math.abs(a - value) <= tolerance);
 }
 
 // Numéros de section et de liste (« ### 1. », « 2) »)
-const stripNumbering = (line: string) => line.replace(/^\s*#{1,6}\s*\d+[.)]\s*/, '').replace(/^\s*\d+[.)]\s+/, '');
+export const stripNumbering = (line: string) => line.replace(/^\s*#{1,6}\s*\d+[.)]\s*/, '').replace(/^\s*\d+[.)]\s+/, '');
 
 // Décomptes de la saison : le nombre doit être celui du champ correspondant (pas un autre nombre des données)
 type Count = { label: string; pattern: RegExp; values: (f: ReportFacts) => unknown[] };

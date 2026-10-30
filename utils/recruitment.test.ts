@@ -702,7 +702,12 @@ describe('qualité des données de poste (signal, jamais une correction)', () =>
       const file = JSON.parse(readFileSync(`${lineupsDir('2026-27')}/${comp}.json`, 'utf8')) as Record<string, TeamLineups>;
       return checkPositionData(orderFormations(file[t['Team ID']!]), rows.filter(p => p.Competition === comp && p['Team ID'] === t['Team ID']));
     };
-    expect(check('SRB', 'FK Crvena Zvezda')).toMatchObject({ contradictions: 15, checked: 17, suspect: true });
+    // Données du 30/10/2026 : 6 contradictions sur 15 titulaires vérifiés (15 sur 17 avant la mise à jour de
+    // PitchAPI, qui a corrigé une partie des postes) ; le signal reste, les comptes exacts dépendent de la livraison
+    const zvezda = check('SRB', 'FK Crvena Zvezda');
+    expect(zvezda.suspect).toBe(true);
+    expect(zvezda.contradictions).toBeGreaterThanOrEqual(POSITION_CONTRADICTIONS_MIN);
+    expect(zvezda.checked).toBeGreaterThanOrEqual(zvezda.contradictions);
     expect(check('FRA', 'Paris Saint-Germain').contradictions).toBe(0);
     expect(check('ITA', 'Lazio').contradictions).toBe(0);
   }, 60_000);
@@ -797,9 +802,10 @@ describe('données réelles : formation et poste recherché', () => {
     const needs = slotNeeds(placeEleven(formation.slots), teamRows, rows.filter(p => p.Competition === 'SRB'), { curves: null, transfer: null },
       null, new Date('2026-10-20'), formationPositions(formation));
     expect(needs).toHaveLength(11);
-    // défaut des données SRB : les 11 joueurs de l'équipe sont enregistrés gardiens (percentiles parmi les gardiens)
-    expect(teamRows.every(p => p.Position === 'GK')).toBe(true);
+    // Défaut des données SRB (postes enregistrés incohérents, en partie corrigé par PitchAPI le 30/10/2026) :
+    // le signal « hors poste » suit exactement l'écart entre le poste enregistré et la place dans la formation
     expect(needs.find(n => n.position === 'GK')!.forecast).toBeDefined();
-    needs.filter(n => n.starter && n.position !== 'GK').forEach(n => expect(n.flags).toContain('outOfPosition'));
+    needs.filter(n => n.starter).forEach(n => expect(n.flags.includes('outOfPosition')).toBe(isOutOfPosition(n.starter!.Position, n.position)));
+    expect(needs.some(n => n.flags.includes('outOfPosition'))).toBe(true);
   }, 60_000);
 });

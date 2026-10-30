@@ -19,9 +19,10 @@ import { METRIC_CATEGORIES } from './metricCategories';
 import { metricLabel } from './labels';
 import { getFlagUrl } from './flags';
 import { formatEuro } from './format';
+import { RATING_LABELS, UNMEASURED_DIMENSIONS, gridGaps, gridTemplate, isBlindHidden } from './observationGrid';
 import {
   CONTENT_W, FONT, MARGIN, PdfAudit, PdfCanvas, PdfImage, SP, THEME, colX, drawCallout, drawIdentityBlock, drawIndicator,
-  drawKpiRow, drawMethodologyNote, drawMetricRow, drawObservation, drawPageFooter, drawPageHeader, drawRadar, drawRoleBadge, drawSectionTitle, roleBadgeWidth,
+  drawBlankGrid, drawKpiRow, drawMethodologyNote, drawMetricRow, drawObservation, drawPageFooter, drawPageHeader, drawRadar, drawRoleBadge, drawSectionTitle, roleBadgeWidth,
   drawTextBlock, fmtDate, fr, lineHeight, pdfText, signed, span,
 } from './scoutReportPdfKit';
 
@@ -423,7 +424,54 @@ function drawSummary(c: PdfCanvas, content: string, skipPriorities: boolean) {
   });
 }
 
+/** Lignes de la grille d'une observation : note globale, critères du rôle avec l'écart (données révélées), dimensions non mesurées */
+function gridLines(grid: NonNullable<ScoutReportRecord['observations'][number]['grid']>, record: ScoutReportRecord, blindHidden: boolean): string[] {
+  const lines: string[] = [];
+  lines.push(`Rôle ${grid.role}${grid.overall !== undefined ? ` · note globale du scout ${grid.overall}/5 (${RATING_LABELS[grid.overall].toLowerCase()})` : ' · sans note globale'}`);
+  if (blindHidden) {
+    grid.criteria.filter(c => c.rating !== undefined || c.note).forEach(c => lines.push(`${c.label} : ${c.rating !== undefined ? `${c.rating}/5` : 'non notée'}${c.note ? ` (${c.note})` : ''}`));
+    return lines;
+  }
+  const gaps = gridGaps(grid, record.dataSnapshot.facts);
+  if (gaps.items.length) {
+    lines.push(`Écart data / observation : ${gaps.above} au-dessus de la donnée, ${gaps.below} en dessous, ${gaps.aligned} dans la même bande${gaps.unmatched ? `, ${gaps.unmatched} sans percentile` : ''}.`);
+    gaps.items.forEach(i => lines.push(`${i.label} : scout ${i.rating}/5${i.percentile !== undefined ? ` · donnée ${i.dataRating}/5 (P${i.percentile}) · écart ${i.gap! > 0 ? '+' : ''}${i.gap}` : ' · pas de percentile'}`));
+  }
+  grid.criteria.filter(c => c.kind === 'unmeasured' && (c.rating !== undefined || c.note)).forEach(c => lines.push(`${c.label} (non mesuré) : ${c.rating !== undefined ? `${c.rating}/5` : 'non notée'}${c.note ? ` (${c.note})` : ''}`));
+  return lines;
+}
+
+/** Fiche d'observation en aveugle : identité sans donnée chiffrée, grille vierge du rôle, observations déjà saisies */
+function blindSheet({ c, record, typeLabel }: Ctx) {
+  const p = record.player;
+  const role = record.role ?? record.dataSnapshot.bestRoles[0]?.role;
+  c.openSection('Identité');
+  const chips: string[] = [];
+  if (p.position) chips.push(String(record.dataSnapshot.facts.player.position ?? p.position));
+  if (p.age !== undefined) chips.push(`${p.age} ans`);
+  if (record.dataSnapshot.facts.player.preferredFoot) chips.push(`pied ${String(record.dataSnapshot.facts.player.preferredFoot).toLowerCase()}`);
+  if (record.dataSnapshot.facts.player.heightCm !== undefined) chips.push(`${record.dataSnapshot.facts.player.heightCm} cm`);
+  drawIdentityBlock(c, { name: p.name, team: p.team, competition: p.competitionName ?? p.competition, season: p.seasonLabel ?? p.season, chips, nationality: record.dataSnapshot.facts.player.nationalityCode ? String(record.dataSnapshot.facts.player.nationalityCode) : undefined });
+  c.closeSection();
+  c.space(SP.xs);
+  drawSectionTitle(c, 'Fiche d\'observation en aveugle', { tag: 'percentiles, indices et valeurs masqués' });
+  drawTextBlock(c, `Ce dossier est en évaluation en aveugle : les percentiles, les indices de rôle, les valeurs, la synthèse générée et les priorités restent masqués jusqu'à la première note globale saisie dans une observation. Notez de 1 (très en dessous du niveau attendu) à 5 (très au-dessus)${role ? ` les critères du rôle ${role}` : ''} et les dimensions que les données ne mesurent pas ; l'écart data / observation sera calculé après la saisie.`, { size: FONT.body, color: THEME.ink2 });
+  c.space(SP.sm);
+  const template = gridTemplate(role ?? '');
+  drawBlankGrid(c, `Note globale du scout`, [{ label: 'Niveau général observé pour le rôle visé' }]);
+  drawBlankGrid(c, role ? `Critères du rôle · ${role}` : 'Critères du rôle', template.criteria.filter(x => x.kind === 'role_metric').map(x => ({ label: x.label })));
+  drawBlankGrid(c, 'Dimensions non mesurées par les données', UNMEASURED_DIMENSIONS.map(d => ({ label: d.label, hint: d.hint })));
+  c.space(SP.sm);
+  c.openSection('Observations du scout');
+  drawSectionTitle(c, 'Observations déjà saisies', { level: 2, tag: 'saisie humaine · ni générée ni complétée par un modèle' });
+  const observations = [...record.observations].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  if (observations.length === 0) drawTextBlock(c, 'Aucune observation saisie pour ce dossier.', { size: FONT.body, color: THEME.ink2 });
+  observations.forEach(o => drawObservation(c, { type: typeLabel(o.type), date: fmtDate(o.date), text: o.text, strengths: o.strengths, toReview: o.toReview, conclusion: o.conclusion, grid: o.grid ? gridLines(o.grid, record, true) : undefined }));
+  c.closeSection();
+}
+
 function page4Scouting({ c, record, summary, typeLabel }: Ctx) {
+  const blindHidden = isBlindHidden(record.evaluation);
   c.addPage();
   drawSectionTitle(c, 'Scouting', { tag: 'trois couches : synthèse générée · priorités · observations du scout' });
 
@@ -463,10 +511,11 @@ function page4Scouting({ c, record, summary, typeLabel }: Ctx) {
   // C. Observations du scout
   c.openSection('Observations du scout');
   c.space(SP.xs);
+  c.ensureSpace(34);   // le titre reste avec la première carte d'observation
   drawSectionTitle(c, 'C · Observations du scout', { level: 2, tag: 'saisie humaine · ni générée ni complétée par un modèle' });
   const observations = [...record.observations].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   if (observations.length === 0) drawTextBlock(c, 'Aucune observation saisie pour ce dossier.', { size: FONT.body, color: THEME.ink2 });
-  observations.forEach(o => drawObservation(c, { type: typeLabel(o.type), date: fmtDate(o.date), text: o.text, strengths: o.strengths, toReview: o.toReview, conclusion: o.conclusion }));
+  observations.forEach(o => drawObservation(c, { type: typeLabel(o.type), date: fmtDate(o.date), text: o.text, strengths: o.strengths, toReview: o.toReview, conclusion: o.conclusion, grid: o.grid ? gridLines(o.grid, record, blindHidden) : undefined }));
   c.closeSection();
 
   // D. Conclusion du scout : uniquement les champs saisis par l'observateur, jamais générée
@@ -518,6 +567,9 @@ function methodology({ c, record, facts, summary, options, statusLabel }: Ctx) {
     'Observations du scout : saisies par l\'observateur (vidéo, live, général) ; elles ne sont ni générées ni complétées par un modèle et ne modifient aucun chiffre.',
     'Polices standard du PDF : caractères hors Latin-1 translittérés (ł → l, Đ → D).',
   ];
+  if (record.evaluation?.blind) lines.push(isBlindHidden(record.evaluation)
+    ? 'Évaluation en aveugle : ce document ne contient aucun percentile, indice, valeur ni synthèse ; ils seront visibles après la première note globale du scout.'
+    : `Évaluation en aveugle : données révélées le ${fmtDate(record.evaluation.revealedAt)} ; l'écart data / observation juxtapose la note du scout (1 à 5) et la bande de percentile du snapshot (1 = P0-19 … 5 = P80-100), sans les fusionner.`);
   if (record.tags.length) lines.push(`Tags : ${record.tags.join(', ')}.`);
   c.space(SP.md);
   drawMethodologyNote(c, 'Méthodologie et sources', lines);
@@ -545,11 +597,16 @@ export function buildReportPdf(record: ScoutReportRecord, options: PdfOptions = 
   const c = new PdfCanvas((canvas, page) => drawPageHeader(canvas, page, headerInfo));
   const ctx: Ctx = { c, record, facts: record.dataSnapshot.facts, summary, options: { ...options, now }, mode, statusLabel, typeLabel };
 
-  page1Synthesis(ctx);
-  page2Impact(ctx);
-  page3Metrics(ctx);
-  page4Scouting(ctx);
-  if (mode === 'complet') annexes(ctx);
+  if (isBlindHidden(record.evaluation)) {
+    // Dossier en aveugle non révélé : fiche d'observation sans aucune donnée chiffrée, quel que soit le mode
+    blindSheet(ctx);
+  } else {
+    page1Synthesis(ctx);
+    page2Impact(ctx);
+    page3Metrics(ctx);
+    page4Scouting(ctx);
+    if (mode === 'complet') annexes(ctx);
+  }
   methodology(ctx);
 
   const total = c.page;

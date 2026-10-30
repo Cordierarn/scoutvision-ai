@@ -6,6 +6,7 @@ import PlayerCard from './components/PlayerCard';
 import SimilarityFinder from './components/SimilarityFinder';
 import PlayerComparison from './components/PlayerComparison';
 import ScoutReport from './components/ScoutReport';
+import { takeSharedFilters } from './utils/savedFilters';
 import TeamAnalysis from './components/TeamAnalysis';
 import RecruitmentPage from './components/RecruitmentPage';
 import Prospects from './components/Prospects';
@@ -31,7 +32,11 @@ const App: React.FC = () => {
   const [teamStats, setTeamStats] = useState<TeamStats[]>([]);
 
   // App state
-  const [view, setView] = useState<string>(ViewState.TEAM_ANALYSIS);
+  // Lien de partage (#partage=…) : la page concernée s'ouvre et applique les réglages une fois
+  const [sharedAtStart] = useState(takeSharedFilters);
+  const [view, setView] = useState<string>(
+    sharedAtStart?.page === 'hunter' ? ViewState.PROSPECTS : sharedAtStart?.page === 'similar' ? ViewState.SIMILARITY : sharedAtStart?.page === 'players' ? ViewState.DASHBOARD : ViewState.TEAM_ANALYSIS,
+  );
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerData | null>(null);
   const [returnView, setReturnView] = useState<string>(ViewState.DASHBOARD);
   const [globalSeason, setGlobalSeason] = useState<string>('');
@@ -167,6 +172,7 @@ const App: React.FC = () => {
       {view === ViewState.PROSPECTS && (
         <Prospects
           data={players}
+          teamStats={teamStats}
           onSelectPlayer={handleSelectPlayer}
           selectedId={selectedPlayer ? getPlayerSeasonId(selectedPlayer) : undefined}
         />
@@ -191,6 +197,7 @@ const App: React.FC = () => {
       {view === ViewState.SIMILARITY && (
         <SimilarityFinder
           data={players}
+          teamStats={teamStats}
           onSelectPlayer={handleSelectPlayer}
           onNavigate={handleNavigate}
           selectedId={selectedPlayer ? getPlayerSeasonId(selectedPlayer) : undefined}

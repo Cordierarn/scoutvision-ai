@@ -11,6 +11,7 @@ public/data/, chargés à la demande par l'application :
   public/data/shots/<saison>/<COMP>.json    tirs d'une compétition
   public/data/heatmaps/<saison>/<COMP>.json cartes de chaleur des joueurs d'une compétition
   public/data/lineups/<saison>/<COMP>.json  compositions réelles : formations et titulaires par case
+  public/data/networks/<saison>/<COMP>.json réseaux de passes agrégés par équipe (positions moyennes, liens)
   public/data/models/age_curves.json        courbes d'âge (évolution des percentiles par rôle)
   public/data/models/transfer.json          modèle de transfert : niveaux de championnat, contexte, validation
   public/data/market.json                   valeur Transfermarkt et contrat actuels de chaque joueur
@@ -290,23 +291,43 @@ def gh_json(*args: str):
     return json.loads(out)
 
 
+# Releases et leurs archives, lues une fois par exécution via l'API REST (`gh api`) :
+# `gh release list/view/download` passent par GraphQL, indisponible dans certains environnements.
+_releases: dict[str, dict[str, dict]] | None = None
+
+
+def release_assets(tag: str) -> dict[str, dict] | None:
+    """Archives d'une release : nom -> {"id", "size"} ; None si la release n'existe pas."""
+    global _releases
+    if _releases is None:
+        _releases = {}
+        page = 1
+        while True:
+            releases = gh_json("api", f"repos/{DATA_REPO}/releases?per_page=100&page={page}")
+            for r in releases:
+                _releases[r["tag_name"]] = {a["name"]: {"id": a["id"], "size": a["size"]} for a in r["assets"]}
+            if len(releases) < 100:
+                break
+            page += 1
+    return _releases.get(tag)
+
+
 def list_table_assets() -> dict[tuple[str, str], tuple[str, str, int]]:
     """(compétition, saison) -> (release, asset, taille). Une saison close prime sur data-v2-current."""
-    releases = gh_json("release", "list", "-R", DATA_REPO, "--limit", "100", "--json", "tagName")
-    tags = [r["tagName"] for r in releases if r["tagName"].startswith("data-v2-")]
+    release_assets("data-v2-current")
+    tags = [t for t in (_releases or {}) if t.startswith("data-v2-")]
     # data-v2-current en dernier : une saison close publiée ailleurs n'est pas écrasée
     tags.sort(key=lambda t: t == "data-v2-current")
 
     assets: dict[tuple[str, str], tuple[str, str, int]] = {}
     for tag in tags:
-        info = gh_json("release", "view", tag, "-R", DATA_REPO, "--json", "assets")
-        for a in info["assets"]:
-            m = TABLES_ASSET.match(a["name"])
+        for name, a in (_releases or {})[tag].items():
+            m = TABLES_ASSET.match(name)
             if not m or m.group("comp") == "ALL":
                 continue
             key = (m.group("comp"), m.group("season"))
             if key not in assets:
-                assets[key] = (tag, a["name"], a["size"])
+                assets[key] = (tag, name, a["size"])
     return assets
 
 
@@ -315,10 +336,19 @@ def download(tag: str, name: str, size: int | None = None) -> Path:
     dest = CACHE_DIR / tag / name
     if dest.exists() and (size is None or dest.stat().st_size == size):
         return dest
+    asset = (release_assets(tag) or {}).get(name)
+    if asset is None:
+        raise FileNotFoundError(f"{tag}/{name} introuvable dans les releases de {DATA_REPO}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"  ↓ {tag}/{name}", flush=True)
-    subprocess.run(["gh", "release", "download", tag, "-R", DATA_REPO, "-p", name,
-                    "-D", str(dest.parent), "--clobber"], check=True, env=gh_env())
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    with open(tmp, "wb") as fh:
+        subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream",
+                        f"repos/{DATA_REPO}/releases/assets/{asset['id']}"], check=True, stdout=fh, env=gh_env())
+    if tmp.stat().st_size != asset["size"]:
+        tmp.unlink()
+        raise OSError(f"{tag}/{name} : téléchargement incomplet ({tmp.stat().st_size if tmp.exists() else 0} / {asset['size']} octets)")
+    tmp.replace(dest)
     return dest
 
 
@@ -335,8 +365,7 @@ def read_tables(tar_path: Path, tables: set[str]) -> dict[str, pd.DataFrame]:
 
 def read_global_refs() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Référentiels de global.tar : joueurs et équipes (nationalité, photos, logos), compétitions."""
-    info = gh_json("release", "view", "data-v2-current", "-R", DATA_REPO, "--json", "assets")
-    size = next(a["size"] for a in info["assets"] if a["name"] == "global.tar")
+    size = (release_assets("data-v2-current") or {})["global.tar"]["size"]
     path = download("data-v2-current", "global.tar", size)
     refs = read_tables(path, {"player", "team"})
     with tarfile.open(path) as tar:
@@ -544,6 +573,45 @@ def build_network(nodes: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns={"player_id": "Player ID", "team_id": "Team ID"})
 
 
+def build_networks(nodes: pd.DataFrame, edges: pd.DataFrame, min_matches: int = 1) -> dict:
+    """Réseau de passes agrégé sur la saison, par équipe (tables pass_network_node / _edge).
+
+    Chaque match fournit un réseau sur la fenêtre jusqu'au premier remplacement (onze de
+    départ) : position moyenne de chaque joueur et passes entre joueurs. L'agrégat garde, par
+    équipe, le nombre de matchs avec réseau, puis par joueur sa position moyenne (moyenne des
+    positions de match), ses matchs dans le réseau, ses passes données et reçues, et par lien
+    orienté le total de passes et le nombre de matchs où il apparaît. Les valeurs « par match »
+    se calculent dans l'application.
+
+    Repère : avg_x en mètres depuis le propre but (0-105) ; avg_y en mètres depuis le couloir
+    droit de l'attaquant (0-68, même convention que la table heatmap). Sortie normalisée dans le
+    repère des compositions : x 0-1 vers le but adverse, y 0-1 de gauche à droite.
+    """
+    # Un nœud sans position moyenne (joueur sans passe dans la fenêtre) ne compte pas
+    nodes = nodes[nodes["player_id"].notna() & nodes["avg_x"].notna() & nodes["avg_y"].notna()].copy()
+    nodes[["passes", "passes_received"]] = nodes[["passes", "passes_received"]].fillna(0)
+    edges = edges[edges["from_player_id"].notna() & edges["to_player_id"].notna() & edges["passes"].notna()]
+    names = nodes.groupby("player_id")["player_name"].agg(lambda s: s.dropna().value_counts().index[0] if s.notna().any() else "")
+    teams: dict[str, dict] = {}
+    for team_id, g in nodes.groupby("team_id"):
+        per_player = g.groupby("player_id").agg(matches=("match_id", "nunique"), x=("avg_x", "mean"), y=("avg_y", "mean"),
+                                                passes=("passes", "sum"), received=("passes_received", "sum"))
+        per_player = per_player[per_player["matches"] >= min_matches]
+        players = {
+            pid: [str(names.get(pid, "")), round(float(r.x) / PITCH_LENGTH, 3), round(1 - float(r.y) / PITCH_WIDTH, 3),
+                  int(r.matches), int(r.passes), int(r.received)]
+            for pid, r in per_player.iterrows()
+        }
+        te = edges[(edges["team_id"] == team_id) & edges["from_player_id"].isin(players) & edges["to_player_id"].isin(players)]
+        links = te.groupby(["from_player_id", "to_player_id"]).agg(passes=("passes", "sum"), matches=("match_id", "nunique"))
+        teams[str(team_id)] = {
+            "matches": int(g["match_id"].nunique()),
+            "players": players,
+            "edges": [[a, b, int(r.passes), int(r.matches)] for (a, b), r in links.sort_values("passes", ascending=False).iterrows()],
+        }
+    return teams
+
+
 def attach_rapm(players: pd.DataFrame, rapm: pd.DataFrame) -> pd.DataFrame:
     """RAPM du pipeline (plus-minus régularisé en xG/90, par championnat, fenêtre de deux saisons).
 
@@ -633,8 +701,7 @@ def build_results(match: pd.DataFrame | None, team_match: pd.DataFrame | None, c
 def read_fixtures(comp: str, raw_season: str) -> list[dict]:
     """Calendrier d'une compétition (raw/<saison>/<COMP>/fixtures.json.gz de data-v2-current)."""
     name = f"raw-{comp}-{raw_season}.tar"
-    info = gh_json("release", "view", "data-v2-current", "-R", DATA_REPO, "--json", "assets")
-    asset = next((a for a in info["assets"] if a["name"] == name), None)
+    asset = (release_assets("data-v2-current") or {}).get(name)
     if asset is None:
         return []
     with tarfile.open(download("data-v2-current", name, asset["size"])) as tar:
@@ -806,16 +873,15 @@ def age_at_season_start(birth: pd.Series, raw_season: str) -> pd.Series:
 
 def fetch_market() -> Path | None:
     """market_value.parquet de la release privée scoutvision-data ; None si absent."""
-    try:
-        info = gh_json("release", "view", MARKET_RELEASE, "-R", DATA_REPO, "--json", "assets")
-    except subprocess.CalledProcessError:
+    assets = release_assets(MARKET_RELEASE)
+    if assets is None:
         print(f"Release {MARKET_RELEASE} introuvable : pas de valeurs Transfermarkt.")
         return None
-    asset = next((a for a in info["assets"] if a["name"] == "market_value.parquet"), None)
+    asset = assets.get("market_value.parquet")
     if asset is None:
         print(f"Pas de market_value.parquet dans {MARKET_RELEASE} : pas de valeurs Transfermarkt.")
         return None
-    return download(MARKET_RELEASE, asset["name"], asset["size"])
+    return download(MARKET_RELEASE, "market_value.parquet", asset["size"])
 
 
 def read_market(path: Path | None) -> pd.DataFrame | None:
@@ -894,7 +960,7 @@ def main(argv: list[str] | None = None) -> int:
         season = app_season(raw_season)
         tables = read_tables(download(tag, name, size),
                              {"player_season", "team_season", "team_match", "shot", "match", "heatmap",
-                              "pass_network_node", "lineup"})
+                              "pass_network_node", "pass_network_edge", "lineup"})
         ps = tables.get("player_season")
         if ps is None or ps.empty:
             print(f"  ! {comp} {raw_season} : pas de player_season, ignoré")
@@ -907,6 +973,9 @@ def main(argv: list[str] | None = None) -> int:
         nodes = tables.get("pass_network_node")
         if nodes is not None and not nodes.empty:
             players = players.merge(build_network(nodes), on=["Player ID", "Team ID"], how="left")
+            edges = tables.get("pass_network_edge")
+            if edges is not None and not edges.empty:
+                write_json(args.out / "networks" / season / f"{comp}.json", build_networks(nodes, edges))
         bucket["players"].append(players.assign(_app_season=season))
 
         ts = tables.get("team_season")
