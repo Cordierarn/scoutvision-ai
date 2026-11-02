@@ -60,7 +60,7 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(c.get("sports"), [{"sportId": 10}])
         self.assertEqual(len(http.calls), 2)
         self.assertTrue(any(abs(s - 1.104) < 1e-6 for s in sleeps))
-        self.assertEqual(c.quota.used, 1)  # la tentative 429 n'est pas facturée
+        self.assertEqual(c.quota.used, 2)  # la tentative 429 est facturée par le serveur (mesuré en phase 1)
 
     def test_three_5xx_failures_raise_and_write_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -71,14 +71,15 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(len(http.calls), 3)
             self.assertEqual(sleeps[:2], [2.0, 4.0])  # backoff exponentiel entre tentatives
             self.assertEqual(list(Path(tmp).rglob("*.json")), [])
-            self.assertEqual(c.quota.used, 0)
+            self.assertEqual(c.quota.used, 3)  # trois appels émis, trois comptés
 
     def test_quota_blocks_the_call_that_would_exceed_it(self):
         c, http, _ = make_client([(200, [])], budget=10, used=10)
         with self.assertRaises(cl.QuotaExceeded):
             c.get("sports")
         self.assertEqual(http.calls, [])
-        c2, http2, _ = make_client([(200, []), (200, [])], budget=10, used=9)
+        # il faut la place de trois tentatives : à 7/10 l'appel passe, à 8/10 il est refusé
+        c2, http2, _ = make_client([(200, []), (200, [])], budget=10, used=7)
         c2.get("sports")
         with self.assertRaises(cl.QuotaExceeded):
             c2.get("sports", use_cache=False)
@@ -102,13 +103,14 @@ class ClientTests(unittest.TestCase):
 
     def test_404_is_none_and_cache_avoids_a_second_call(self):
         with tempfile.TemporaryDirectory() as tmp:
-            c, http, _ = make_client([(404, {"error": {"code": "NOT_FOUND"}}), (200, {"fixtureId": "f2", "bookmakers": {}})], cache_dir=Path(tmp))
+            c, http, _ = make_client([(404, {"error": {"code": "NOT_FOUND"}}), (200, {"fixtureId": "f2", "bookmakers": {}}), (200, [{"marketId": 101}])], cache_dir=Path(tmp))
             self.assertIsNone(c.historical_odds("f1", ["winamax.fr"]))
             self.assertEqual(c.historical_odds("f2", ["winamax.fr"])["fixtureId"], "f2")
-            self.assertEqual(c.historical_odds("f2", ["winamax.fr"])["fixtureId"], "f2")  # relu du cache
-            self.assertEqual(len(http.calls), 2)
+            self.assertEqual(c.markets(), c.markets())  # catalogue relu du cache
+            self.assertEqual(len(http.calls), 3)
             self.assertEqual(c.cache_hits, 1)
-            self.assertEqual(c.quota.used, 2)
+            self.assertEqual(c.quota.used, 3)
+            self.assertEqual(c.quota.used, len(http.calls))
             cached = Path(tmp).rglob("*.json")
             self.assertTrue(all(KEY not in p.read_text() for p in cached))
 
@@ -116,7 +118,7 @@ class ClientTests(unittest.TestCase):
         c, http, sleeps = make_client([(200, {"fixtureId": "a", "bookmakers": {}}), (200, {"fixtureId": "b", "bookmakers": {}})])
         c.historical_odds("a", ["w"])
         c.historical_odds("b", ["w"])
-        self.assertTrue(any(abs(s - 5.0) < 1e-6 for s in sleeps))
+        self.assertTrue(any(abs(s - 3.0) < 1e-6 for s in sleeps))
 
     def test_account_strips_key_and_email(self):
         c, _, _ = make_client([(200, {"api_key": KEY, "email": "x@y.z", "subscriptions": [{"plan": "free", "request_limit": 250}]})])
@@ -134,6 +136,8 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(again.used, 1)
             next_month = cl.Quota.load(p, now=dt.datetime(2026, 12, 1, tzinfo=dt.timezone.utc))
             self.assertEqual(next_month.used, 0)
+            q.budget = 5000; q.save()
+            self.assertEqual(cl.Quota.load(p).budget, 5000)  # budget relu du fichier (plan payant)
 
 
 if __name__ == "__main__":

@@ -31,9 +31,9 @@ FIXTURE_WINDOW_DAYS = 10
 MAX_BOOKMAKERS_PER_CALL = 3
 DEFAULT_BUDGET = 250
 # Délai minimal entre deux appels d'un même endpoint (429 constaté à 0,9 s sur /fixtures ; 5 s annoncés sur /historical-odds)
-MIN_INTERVAL = {"fixtures": 1.0, "historical-odds": 5.0, "odds-by-tournaments": 2.0, "odds": 1.0}
+MIN_INTERVAL = {"fixtures": 1.5, "historical-odds": 3.0, "odds-by-tournaments": 2.0, "odds": 1.0}
 DEFAULT_INTERVAL = 1.0
-CACHE_TTL = {"sports": 30 * 86400, "bookmakers": 30 * 86400, "markets": 30 * 86400, "historical-odds": 365 * 86400,
+CACHE_TTL = {"sports": 30 * 86400, "bookmakers": 30 * 86400, "markets": 30 * 86400, "historical-odds": 0,
              "fixtures": 6 * 3600, "odds-by-tournaments": 0, "odds": 0, "account": 0}
 
 HttpResponse = tuple[int, dict, bytes]
@@ -75,6 +75,8 @@ class Quota:
         q = cls(path=path, budget=budget, month=month)
         if path and path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("budget"):
+                q.budget = int(data["budget"])
             if data.get("month") == month:
                 q.used, q.log = int(data.get("used", 0)), list(data.get("log", []))
         return q
@@ -145,7 +147,7 @@ class OddsPapiClient:
             if (self._now() - fetched).total_seconds() <= ttl:
                 self.cache_hits += 1
                 return meta["body"]
-        if self.quota.remaining <= 0:
+        if self.quota.remaining < self.max_attempts:  # chaque tentative compte : garder la place des reprises
             raise QuotaExceeded(f"Quota OddsPapi atteint ({self.quota.used}/{self.quota.budget} pour {self.quota.month}) : appel {endpoint} refusé.")
         url = f"{self.base_url}/{endpoint}"
         query = {"apiKey": self._key, **params}
@@ -158,12 +160,12 @@ class OddsPapiClient:
             except Exception as exc:  # réseau : traité comme un 5xx
                 status, headers, body = 599, {}, self.redact(str(exc)).encode()
             at = self._now().isoformat(timespec="seconds")
+            self.quota.charge(endpoint, status, at)  # le serveur compte chaque appel, 429 et 5xx compris (mesuré)
             if status == 200:
                 try:
                     data = json.loads(body.decode("utf-8"))
                 except ValueError as exc:
                     raise OddsPapiError(f"Réponse {endpoint} illisible : {self.redact(str(exc))}") from exc
-                self.quota.charge(endpoint, status, at)
                 if cache and ttl > 0:
                     cache.parent.mkdir(parents=True, exist_ok=True)
                     cache.write_text(json.dumps({"endpoint": endpoint, "params": params, "fetchedAt": at, "body": data}, ensure_ascii=False), encoding="utf-8")
@@ -176,7 +178,6 @@ class OddsPapiClient:
                 delay = float(2 ** attempt)
                 last_error = f"{status} : {text}"
             elif status == 404:
-                self.quota.charge(endpoint, status, at)
                 return None
             else:
                 raise OddsPapiError(f"OddsPapi {endpoint} → {status} : {text}")
