@@ -8,12 +8,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { dataLoader, ForecastMatch, ForecastFile, MarketEvaluation, MarketSummary } from '../services/dataLoader';
-import { MarketBenchmark, replayData } from '../services/replayData';
+import { MarketBenchmark, SuggestionProfile, SuggestionsIndex, replayData } from '../services/replayData';
 import { TeamLogo, CompetitionBadge } from './Media';
 import { EmptyState, InfoTip, LegendItem, LoadError, PageHeader, Panel, Skeleton, Stat, StatStrip } from './ui';
 import { SERIES } from '../theme/charts';
 import SeasonSimulator from './forecast/SeasonSimulator';
 import MethodPanel from './forecast/MethodPanel';
+import { SuggestionsBlock, SuggestionsControls } from './forecast/Suggestions';
+import { BANKROLL_KEY, DEFAULT_PROFILE, PROFILE_KEY, PROFILE_ORDER, parseBankroll } from './forecast/suggestionsLogic';
 import { MARKET_RESULT, formatGoals, freshness, pctFr, poolLabel, roundToHundred } from './forecast/forecastLogic';
 
 // Séries ScoutVision (theme/charts) : domicile, extérieur ; nul en gris neutre
@@ -211,6 +213,18 @@ const Forecast: React.FC = () => {
   const setTab = (t: typeof tab) => { lastTab = t; setTabState(t); };
   const [competition, setCompetition] = useState<string>('');
   const [horizon, setHorizon] = useState<number>(14);
+  // Suggestions de paris (Labo paris) : artefact optionnel, profil et bankroll mémorisés dans ce navigateur
+  const [suggestions, setSuggestions] = useState<SuggestionsIndex | null | undefined>(undefined);
+  const [profile, setProfileState] = useState<SuggestionProfile>(() => {
+    try { const v = localStorage.getItem(PROFILE_KEY) as SuggestionProfile | null; return v && PROFILE_ORDER.includes(v) ? v : DEFAULT_PROFILE; } catch { return DEFAULT_PROFILE; }
+  });
+  const [bankrollInput, setBankrollInput] = useState<string>(() => { try { return localStorage.getItem(BANKROLL_KEY) ?? '300'; } catch { return '300'; } });
+  const bankroll = parseBankroll(bankrollInput);
+  const setProfile = (p: SuggestionProfile) => { setProfileState(p); try { localStorage.setItem(PROFILE_KEY, p); } catch { /* stockage indisponible */ } };
+  const setBankroll = (raw: string) => { setBankrollInput(raw); try { localStorage.setItem(BANKROLL_KEY, raw); } catch { /* stockage indisponible */ } };
+  useEffect(() => { replayData.suggestions().then(setSuggestions).catch(() => setSuggestions(null)); }, [attempt]);
+  const suggestionByMatch = useMemo(() => new Map((suggestions?.matches ?? []).map(m => [m.matchId, m])), [suggestions]);
+  const now = useMemo(() => new Date(), [suggestions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +250,7 @@ const Forecast: React.FC = () => {
   }, [upcoming, competition]);
 
   const dates = freshness(dataLoader.getCachedIndex()?.generatedAt ?? null, null, null);
+  const firstMatchId = byDate[0]?.[1][0]?.match_id;
 
   return (
     <div className="max-w-7xl mx-auto p-5 space-y-4 animate-fade-in">
@@ -281,6 +296,11 @@ const Forecast: React.FC = () => {
                 ))}
               </div>
 
+              {suggestions && (
+                <div className="mb-4">
+                  <SuggestionsControls index={suggestions} profile={profile} onProfile={setProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={setBankroll} />
+                </div>
+              )}
               <div className="flex items-center gap-4 mb-3 flex-wrap">
                 <LegendItem color={HOME} shape="bar">Victoire à domicile</LegendItem>
                 <LegendItem color={DRAW} shape="bar">Nul</LegendItem>
@@ -291,7 +311,15 @@ const Forecast: React.FC = () => {
                 {byDate.map(([date, list]) => (
                   <div key={date} className="sv-panel overflow-hidden">
                     <div className="px-4 h-8 flex items-center border-b border-line sv-label !text-ink-2 first-letter:uppercase">{formatDate(date)}</div>
-                    {list.map(m => <MatchRow key={m.match_id} match={m} showCompetition={!competition} />)}
+                    {list.map((m, i) => (
+                      <React.Fragment key={m.match_id}>
+                        <MatchRow match={m} showCompetition={!competition} />
+                        {suggestions && (
+                          <SuggestionsBlock match={suggestionByMatch.get(m.match_id)} profile={profile} bankroll={bankroll}
+                            bilan={suggestions.bilan?.profiles?.[profile]} open={firstMatchId === m.match_id} now={now} />
+                        )}
+                      </React.Fragment>
+                    ))}
                   </div>
                 ))}
               </div>

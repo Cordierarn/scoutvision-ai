@@ -9,7 +9,8 @@ Ligne de commande du Labo paris, phase 1 (tout sous .research/betting/, ignoré 
                                                            historique Winamax complet des matchs terminés non archivés,
                                                            du plus récent au plus ancien (1 requête par match) ;
                                                            --refresh-players redemande les matchs archivés sans marché joueur
-  python3 -m betting.fetch snapshot                        relevé courant des rencontres à venir (1 requête par tournoi)
+  python3 -m betting.fetch snapshot                        relevé courant des rencontres à venir (1 requête décomptée par tournoi)
+  python3 -m betting.fetch upcoming [--days 7]             tous les relevés des rencontres à venir via /historical-odds (non décompté)
   python3 -m betting.fetch views                           vues dérivées premier / H−24 / H−1 / dernier avant coup d'envoi
   python3 -m betting.fetch match                           appariement avec les matchs PitchAPI (alias appris)
 
@@ -147,6 +148,27 @@ def cmd_history(args) -> int:
     return 0
 
 
+def cmd_upcoming(args) -> int:
+    """Relevés des rencontres à venir via /historical-odds (non décompté) : tous les relevés depuis l'ouverture."""
+    client = OddsPapiClient()
+    player_props_enabled(client)
+    fx = load_fixtures()
+    now = pd.Timestamp.now(tz="UTC")
+    todo = fx[(fx["status_id"] == 0) & (fx["start_time"] >= now) & (fx["start_time"] <= now + pd.Timedelta(days=args.days))].sort_values("start_time")
+    added, fetched = 0, 0
+    for f in todo.head(args.max_requests).itertuples(index=False):
+        try:
+            payload = client.historical_odds(f.fixture_id, [BOOKMAKER])
+        except QuotaExceeded as exc:
+            print(str(exc)); break
+        fetched += 1
+        if payload is None:
+            continue
+        added += archive.write_snapshots(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+    print(f"{len(todo)} rencontres à venir sous {args.days} jours, {fetched} demandées, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
+    return 0
+
+
 def cmd_snapshot(args) -> int:
     client = OddsPapiClient()
     player_props_enabled(client)
@@ -222,11 +244,12 @@ def main(argv=None) -> int:
     p = sub.add_parser("fixtures"); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True); p.set_defaults(fn=cmd_fixtures)
     p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.add_argument("--refresh-players", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("snapshot"); p.set_defaults(fn=cmd_snapshot)
+    p = sub.add_parser("upcoming"); p.add_argument("--days", type=int, default=7); p.add_argument("--max-requests", type=int, default=200); p.set_defaults(fn=cmd_upcoming)
     p = sub.add_parser("views"); p.set_defaults(fn=cmd_views)
     p = sub.add_parser("match"); p.set_defaults(fn=cmd_match)
     args = parser.parse_args(argv)
     RESEARCH.mkdir(parents=True, exist_ok=True)
-    if args.cmd in ("fixtures", "history", "snapshot", "views", "match"):
+    if args.cmd in ("fixtures", "history", "snapshot", "upcoming", "views", "match"):
         with archive_lock():
             return args.fn(args)
     return args.fn(args)
