@@ -200,6 +200,29 @@ Gains réels mais faibles : l'essentiel de l'information est déjà dans la base
 - Export `public/data/forecast/suggestions/index.json` (artefact privé) : rencontres à venir, profils,
   bilan du rejeu, résumé du journal.
 
+### Bilan du rejeu 2026-27 (651 matchs avec cotes, 2 novembre 2026)
+
+| Profil | Paris simples | Réussite | Rendement à mise fixe | 300 € rejoués (mises du moteur) | Pire creux |
+|---|---|---|---|---|---|
+| Sûr | 3 249 | 62 % | −12 % | 0,09 € | 100 % |
+| Équilibré | 3 249 | 61 % | −12 % | 0,09 € | 100 % |
+| Grosse cote | 3 246 | 17 % | −26 % | 0,17 € | 100 % |
+
+Avec les règles demandées (3 à 5 paris par match, mise fixe de 2 % même à espérance négative, quart de
+Kelly sinon), la bankroll est ruinée sur la saison dans les trois profils : 4,5 paris par match à
+rendement négatif, misés sur 10 à 15 % de la bankroll par match. Les sous-ensembles « espérance positive
+seulement » (−13 à −36 %) et « meilleur pari du match à espérance positive » (−9 à −31 %, bankroll finale
+119 à 166 €) perdent aussi. Par famille, seuls « gagne sans encaisser » (Sûr, +1 %, 81 paris) et « nombre
+de buts équipe » (Équilibré, +12 %, 52 paris) sont positifs, sur trop peu de paris pour signifier quelque
+chose ; toutes les compétitions sont négatives (−7 % en Premier League à −17 % en Championship en
+Équilibré). Les combinés (cote = produit des cotes Winamax, probabilité jointe simulée) affichent des
+rendements positifs (+1 %, +8 %, +55 %), mais leur espérance est gonflée par la corrélation entre
+sélections d'un même match que le produit des cotes ignore, et Winamax ne propose pas de combiné du même
+match à ces cotes : à lire comme une curiosité, pas comme un résultat.
+
+Conclusion du bilan : cohérent avec la phase 2, le moteur de suggestions ne gagne pas d'argent sur
+2026-27 ; l'onglet affiche ce bilan à côté de chaque suggestion, tel quel.
+
 ### Interface (`components/forecast/Suggestions.tsx`)
 
 Panneau de contrôle (profils en `sv-seg`, bankroll, bilan du profil), bloc repliable sous chaque match
