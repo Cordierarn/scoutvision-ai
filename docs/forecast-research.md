@@ -25,13 +25,16 @@ timestamp and season aggregates include the future.
 
 ## Point-in-time rule and cutoff
 
-`feature_cutoff = kickoff_utc − 3 h` (dataset convention: a decision taken before line-ups are
-known). Every feature of a match is computed from matches whose **kick-off is strictly before the
-cutoff**. Two matches with the same kick-off never influence each other. `kickoff_utc` comes from
+`feature_cutoff = kickoff_utc`. A historical observation is usable for a match only if
+`historical_kickoff_utc < current_kickoff_utc` (strict), so two matches with the same kick-off never
+influence each other. No H−3 scenario exists yet. `kickoff_utc` comes from
 `time_utc` (100 % coverage); if it were missing, the date at 00:00 UTC is used and `kickoff_missing`
 is set.
 
-Standings are rebuilt incrementally from the results before the cutoff, regular-season matches
+Awarded matches are kept: they count for the standings (`usable_for_standings = true`) but never for
+goal / xG windows, model training or scoring (`usable_for_model = false`).
+
+Standings are rebuilt incrementally from the results before the kick-off, regular-season matches
 only (`stage == regular_season`), with the V1 convention 3/1/0 and tie-breaks points, goal
 difference, goals scored, then team id for determinism. Official rules (head-to-head, play-offs,
 splits) are **not** encoded: `ranking_rules_approximate` is always true, and cup / play-off rows have
@@ -48,9 +51,11 @@ no standings (`standings_available = false`).
   points, goals for/against and xG for/against over the last 5 matches, xG over the last 10
   (same competition, all seasons; null + flag below min_periods), matches actually available in the
   window, rest days and matches in the last 8 days (all competitions in the data), rank, points,
-  played, goal difference, points per match (standings), promoted (null when the previous season of
-  the competition is not in the data), `advanced_analytics_available` (coverage only: no advanced
-  value is imported).
+  played, goal difference, points per match (standings), promoted (league regular-season rows only:
+  absent from the previous regular season of the same league; null elsewhere, never "new entrant" of a
+  cup), `advanced_analytics_available` (coverage only: no advanced value is imported). Form windows
+  stay inside one competition and cross seasons; `home/away_season_boundary` says when the window
+  crosses a season and `home/away_days_since_previous_match` gives the gap inside the competition.
 - **Odds** (Dataset B): `odds_snapshot_1x2_{home,draw,away}`, `odds_closing_1x2_*`,
   `odds_snapshot_ou25_{over,under}`, `odds_closing_ou25_*`, the provider of each block, `odds_has_*`
   flags and `odds_semantics`.
@@ -122,3 +127,29 @@ No odds timestamps (no "opening", no H−24 / H−6); no line-up timestamps; adv
 cups are absent from the data, so rest days are overestimated; ESP2, FRA2, ITA2 and POL have two
 seasons only; the current ScoutVision forecasts exist for eight months only (Feb.–Oct. 2026) and are
 not part of this dataset. No model result is documented here because none was trained.
+
+## Step 2A: sports baselines, walk-forward engine, predictive scoring
+
+`scripts/forecast_models/` (interface `Model.fit(train_rows, context)` / `predict(fixtures)`; every
+model returns `p_home`, `p_draw`, `p_away` summing to one, expected goals when it has them, and a
+reason when it cannot predict; `uses_odds` is always false) and `scripts/backtest/walk_forward.py`
+(weekly refit, training on kick-offs strictly before the week, expanding window; targets never
+reach `predict`), `predictions.py` (immutable parquet per season under
+`.research/forecast/predictions/`, logical hash without the creation timestamp), `registry.py`
+(`forecast_registry.json`, statuses baseline / challenger / incomplete / rejected, no champion),
+`scoring.py` (log-loss, RPS, multiclass Brier, raw ECE on 10 bins, accuracy as an annex; over/under
+2.5 for goal models; decompositions by season, competition, season third, max-probability bucket and
+favourite side; paired block bootstrap date × competition, 2 000 draws, 90 % intervals). Run:
+`cd scripts && python3 -m backtest.run_models --phase all`.
+
+Models: league frequencies (hierarchical fallback competition → tier → global), constant home
+advantage (global frequencies), ridge multinomial on form features and on standings only
+(`lab_market.multinomial_fit` reused), dynamic Elo (pre-registered grid: K 15/25, home advantage
+50/80, season regression 0/0.25, margin on/off; logistic link refitted weekly), independent Poisson,
+Dixon-Coles (rho by maximum likelihood on the training window), Dixon-Coles with time decay
+(half-life grid 90/180/365 days), rolling xG attack/defence (window grid 5/10/20), ScoutVision
+reproduced (`models.fit_joint`, 730-day window as in production) and ScoutVision stored
+(`reports/forecast_backtest.csv`, read as published). Grid parameters are selected on the 2024-25
+validation only; 2025-26 is the "évaluation rétrospective hors ajustement du modèle"; 2026-27
+predictions are frozen and not evaluated. Results: `.research/forecast/backtests.json` (no ROI, no
+edge, no bet). No post-hoc calibration in this step.

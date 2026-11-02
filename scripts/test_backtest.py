@@ -60,7 +60,10 @@ def fixture(seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame]:
             h, a = ("fixture_b0", "fixture_b1") if rnd % 2 else ("fixture_b1", "fixture_b0")
             bnames = {"fixture_b0": "Fixture FC A", "fixture_b1": "Fixture United"}
             add("BBB", season, day, h, a, bnames[h], bnames[a], "regular_season", rnd + 1)
-    return pd.DataFrame(rows), pd.DataFrame(tm)
+    match = pd.DataFrame(rows)
+    last_aaa = match[(match["competition"] == "AAA") & (match["season"] == "2023-24")].index[-1]
+    match.loc[last_aaa, ["match_status", "score_home", "score_away"]] = ["awarded", 3, 0]
+    return match, pd.DataFrame(tm)
 
 
 def features_of(df: pd.DataFrame) -> pd.DataFrame:
@@ -183,7 +186,7 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(any("rapm" in e for e in errors))
 
     def test_cutoff_and_targets(self) -> None:
-        self.assertTrue((self.ds["feature_cutoff"] < self.ds["kickoff_utc"]).all())
+        self.assertTrue((self.ds["feature_cutoff"] == self.ds["kickoff_utc"]).all())
         self.assertEqual(set(self.ds["result_1x2"]) <= {"H", "D", "A"}, True)
         self.assertTrue(((self.ds["home_goals"] + self.ds["away_goals"] > 2.5) == self.ds["over_2_5"].astype(bool)).all())
         for c in replay.TARGETS:
@@ -201,6 +204,33 @@ class QualityTests(unittest.TestCase):
         cup = self.ds[self.ds["competition"] == "CCC"].iloc[0]
         self.assertFalse(cup["standings_available"])
         self.assertIn("no_standings", cup["data_quality_flags"])
+
+    def test_awarded_counts_for_standings_but_not_for_models(self) -> None:
+        aw = self.ds[self.ds["match_status"] == "awarded"]
+        self.assertEqual(len(aw), 1)
+        self.assertTrue(bool(aw["usable_for_standings"].iloc[0]) and not bool(aw["usable_for_model"].iloc[0]))
+        self.assertIn("awarded", aw["data_quality_flags"].iloc[0])
+        home = aw["home_team_id"].iloc[0]
+        later = self.ds[(self.ds["competition"] == "AAA") & (self.ds["season"] == "2024-25") & (self.ds["home_team_id"] == home)].iloc[0]
+        # le 3-0 attribué compte au classement (saison suivante : classement vierge) et dans les points, pas dans les buts
+        m2, t2 = self.match.copy(), self.tm.copy()
+        m2.loc[m2["match_id"] == aw["match_id"].iloc[0], ["score_home", "score_away"]] = [0, 3]
+        alt = replay.build_from_frames(m2, t2).set_index("match_id")
+        self.assertEqual(float(alt.at[later["match_id"], "f_home_goals_for_last5"]), float(later["f_home_goals_for_last5"]))
+        self.assertNotEqual(float(alt.at[later["match_id"], "f_home_points_last5"]), float(later["f_home_points_last5"]))
+        # feature de buts du match suivant : fenêtre de 5 sans le match attribué -> matchs disponibles < 5 ou valeur inchangée
+        rows = replay.base_rows(self.match, self.tm)
+        g = rows[(rows["competition"] == "AAA") & (rows["season"] == "2023-24")]
+        inc = standings.incremental(g[["match_id", "kickoff_utc", "feature_cutoff", "home_team_id", "away_team_id", "home_goals", "away_goals", "stage"]])
+        self.assertTrue((inc["played"] >= 0).all())
+
+    def test_promoted_is_null_outside_leagues(self) -> None:
+        cup = self.ds[self.ds["competition"] == "CCC"]
+        self.assertTrue(cup["f_home_promoted"].isna().all() and cup["f_away_promoted"].isna().all())
+        self.assertIn("home_season_boundary", self.ds.columns)
+        second = self.ds[(self.ds["competition"] == "AAA") & (self.ds["season"] == "2024-25")].iloc[0]
+        self.assertEqual(second["home_season_boundary"], True)
+        self.assertGreater(second["home_days_since_previous_match"], 100)
 
     def test_rest_days_and_congestion(self) -> None:
         rows = self.ds[(self.ds["competition"] == "AAA")].sort_values("kickoff_utc")

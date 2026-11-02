@@ -34,7 +34,7 @@ def incremental(matches: pd.DataFrame) -> pd.DataFrame:
     teams = sorted(set(m["home_team_id"]) | set(m["away_team_id"]))
     table = {t: [0, 0, 0, 0] for t in teams}           # played, points, gf, ga
     kick = m["kickoff_utc"].to_numpy()
-    cut = m["feature_cutoff"].to_numpy()
+    cut = m["feature_cutoff"].to_numpy()          # = coup d'envoi : seuls les matchs strictement antérieurs comptent
     rows = []
     applied = 0
     ranks: list[str] = _rank_table(table)

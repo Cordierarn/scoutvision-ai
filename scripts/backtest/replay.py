@@ -8,10 +8,12 @@ Blocs de colonnes, jamais mélangés :
 - ODDS     : préfixe odds_ (scripts/backtest/odds.py), snapshot et clôture séparés ;
 - QUALITY  : feature_cutoff, flags.
 
-Cutoff : feature_cutoff = kickoff_utc − FEATURE_CUTOFF_HOURS (convention de dataset). Un match qui débute
-à la même heure qu'un autre n'entre jamais dans ses features. Sources V1 : tables PitchAPI match et
-team_match seulement (buts, xG, coup d'envoi, stage) ; aucune composition, aucun agrégat de saison,
-aucun indicateur courant (RAPM, valeurs).
+Cutoff : feature_cutoff = kickoff_utc ; une observation historique n'est utilisable que si son coup
+d'envoi est strictement antérieur (historical_kickoff_utc < current_kickoff_utc), donc deux matchs
+simultanés ne s'influencent jamais. Matchs attribués (awarded) : conservés, comptés au classement
+(usable_for_standings), exclus des fenêtres de buts et d'xG et des modèles (usable_for_model = false).
+Sources V1 : tables PitchAPI match et team_match seulement (buts, xG, coup d'envoi, stage) ; aucune
+composition, aucun agrégat de saison, aucun indicateur courant (RAPM, valeurs).
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ import pandas as pd
 from . import SCHEMA_VERSION
 from . import standings as st
 
-FEATURE_CUTOFF_HOURS = 3           # décision supposée 3 h avant le coup d'envoi (avant les compositions)
+FEATURE_CUTOFF_HOURS = 0           # feature_cutoff = kickoff_utc ; passé = coups d'envoi strictement antérieurs
 CONGESTION_DAYS = 8
 MATCH_COLUMNS = {"match_id", "match_status", "date", "time_utc", "round_name", "stage", "home_team_id", "home_team_name",
                  "away_team_id", "away_team_name", "score_home", "score_away"}
@@ -38,8 +40,9 @@ TABLES_ASSET = re.compile(r"^tables-(?P<comp>[A-Z0-9]+)-(?P<season>\d{4}(?:-\d{2
 IDENTITY = ["match_id", "competition", "season", "match_date", "kickoff_utc", "home_team_id", "away_team_id",
             "home_team_name", "away_team_name", "stage", "round_name"]
 TARGETS = ["home_goals", "away_goals", "result_1x2", "over_2_5", "home_xg", "away_xg"]
-QUALITY = ["feature_cutoff", "kickoff_missing", "ranking_rules_approximate", "standings_available",
-           "missing_flags", "data_quality_flags"]
+QUALITY = ["feature_cutoff", "kickoff_missing", "match_status", "usable_for_standings", "usable_for_model",
+           "ranking_rules_approximate", "standings_available", "home_season_boundary", "away_season_boundary",
+           "home_days_since_previous_match", "away_days_since_previous_match", "missing_flags", "data_quality_flags"]
 FORBIDDEN_SOURCES = ("team_season", "player_season", "rapm", "finishing", "market_value", "transfermarkt", "lineup")
 
 
@@ -57,8 +60,8 @@ class FeatureSpec:
 
 
 FEATURES: list[FeatureSpec] = [
-    FeatureSpec("points_last5", "points sur les 5 derniers matchs de la compétition", 5, 3, "match"),
-    FeatureSpec("xg_for_last5", "xG pour sur les 5 derniers matchs", 5, 3, "team_match.xg_for"),
+    FeatureSpec("points_last5", "points sur les 5 derniers matchs de la compétition (matchs attribués compris)", 5, 3, "match"),
+    FeatureSpec("xg_for_last5", "xG pour sur les 5 derniers matchs (matchs attribués exclus)", 5, 3, "team_match.xg_for"),
     FeatureSpec("xg_against_last5", "xG contre sur les 5 derniers matchs", 5, 3, "team_match.xg_against"),
     FeatureSpec("xg_for_last10", "xG pour sur les 10 derniers matchs", 10, 5, "team_match.xg_for"),
     FeatureSpec("xg_against_last10", "xG contre sur les 10 derniers matchs", 10, 5, "team_match.xg_against"),
@@ -75,8 +78,8 @@ FEATURES: list[FeatureSpec] = [
     FeatureSpec("played", "matchs joués avant match", None, None, "standings", scope="competition-season"),
     FeatureSpec("goal_difference", "différence de buts avant match", None, None, "standings", scope="competition-season"),
     FeatureSpec("points_per_match", "points par match avant match", None, 1, "standings", scope="competition-season"),
-    FeatureSpec("promoted", "équipe absente de la saison précédente de la compétition", None, None, "match",
-                missing_value="null si la saison précédente n'est pas dans les données", scope="competition"),
+    FeatureSpec("promoted", "équipe absente de la saison précédente du championnat (saison régulière seulement)", None, None, "match",
+                missing_value="null hors championnat, ou si la saison précédente n'est pas dans les données", scope="competition"),
     FeatureSpec("advanced_analytics_available", "indicateurs avancés PitchAPI disponibles pour l'équipe au match précédent "
                 "(couverture seulement, aucune valeur importée)", None, None, "team_match.analytics_available", missing_value="null"),
     FeatureSpec("rank_gap", "classement domicile − classement extérieur", None, None, "standings", per_side=False,
@@ -150,6 +153,8 @@ def base_rows(match: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFrame:
     m["kickoff_missing"] = t.isna()
     m["kickoff_utc"] = t.fillna(m["match_date"])
     m["feature_cutoff"] = m["kickoff_utc"] - pd.Timedelta(hours=FEATURE_CUTOFF_HOURS)
+    m["usable_for_standings"] = True
+    m["usable_for_model"] = m["match_status"] == "finished"
     for c in ("stage", "round_name"):
         if c not in m:
             m[c] = None
@@ -158,7 +163,7 @@ def base_rows(match: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFrame:
     hg, ag = m["home_goals"], m["away_goals"]
     m["result_1x2"] = np.where(hg.isna() | ag.isna(), None, np.where(hg > ag, "H", np.where(hg == ag, "D", "A")))
     m["over_2_5"] = np.where(hg.isna() | ag.isna(), None, (hg + ag) > 2.5)
-    return m[IDENTITY + TARGETS + ["kickoff_missing", "feature_cutoff", "match_status"]].sort_values(["kickoff_utc", "match_id"], kind="stable").reset_index(drop=True)
+    return m[IDENTITY + TARGETS + ["kickoff_missing", "feature_cutoff", "match_status", "usable_for_standings", "usable_for_model"]].sort_values(["kickoff_utc", "match_id"], kind="stable").reset_index(drop=True)
 
 
 # ============================================
@@ -169,12 +174,14 @@ def _team_long(rows: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFrame:
     """Une ligne par équipe et par match : résultat du point de vue de l'équipe, xG, cutoff, coup d'envoi."""
     cols = ["match_id", "competition", "season", "kickoff_utc", "feature_cutoff", "stage"]
     gf = rows["home_goals"]; ga = rows["away_goals"]
+    model_ok = rows["usable_for_model"].to_numpy()
+    mask = lambda v: np.where(model_ok, v, np.nan)
     pts_h = np.where(gf > ga, 3, np.where(gf == ga, 1, 0)).astype(float)
     pts_a = np.where(ga > gf, 3, np.where(gf == ga, 1, 0)).astype(float)
-    home = rows[cols].assign(team_id=rows["home_team_id"], is_home=True, pts=pts_h, gf=gf.astype(float), ga=ga.astype(float),
-                             xg_for=rows["home_xg"], xg_against=rows["away_xg"])
-    away = rows[cols].assign(team_id=rows["away_team_id"], is_home=False, pts=pts_a, gf=ga.astype(float), ga=gf.astype(float),
-                             xg_for=rows["away_xg"], xg_against=rows["home_xg"])
+    home = rows[cols].assign(team_id=rows["home_team_id"], is_home=True, pts=pts_h, gf=mask(gf.astype(float)), ga=mask(ga.astype(float)),
+                             xg_for=mask(rows["home_xg"]), xg_against=mask(rows["away_xg"]))
+    away = rows[cols].assign(team_id=rows["away_team_id"], is_home=False, pts=pts_a, gf=mask(ga.astype(float)), ga=mask(gf.astype(float)),
+                             xg_for=mask(rows["away_xg"]), xg_against=mask(rows["home_xg"]))
     long = pd.concat([home, away], ignore_index=True)
     av = team_match[["match_id", "team_id", "analytics_available"]].drop_duplicates(["match_id", "team_id"])
     long = long.merge(av, on=["match_id", "team_id"], how="left")
@@ -198,7 +205,8 @@ def rolling_features(rows: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFra
     long = _team_long(rows, team_match)
     out = {c: np.full(len(long), np.nan) for c in ("points_last5", "xg_for_last5", "xg_against_last5", "xg_for_last10",
                                                      "xg_against_last10", "goals_for_last5", "goals_against_last5",
-                                                     "matches_in_window", "advanced_analytics_available")}
+                                                     "matches_in_window", "advanced_analytics_available",
+                                                     "season_boundary", "days_since_previous_match")}
     for _, idx in long.groupby(["team_id", "competition"], sort=False).indices.items():
         g = long.iloc[idx]
         kick = g["kickoff_utc"].to_numpy()
@@ -215,6 +223,10 @@ def rolling_features(rows: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFra
         av = g["analytics_available"].map({True: 1.0, False: 0.0}).to_numpy(float)
         prev = eligible - 1
         out["advanced_analytics_available"][idx] = np.where(prev >= 0, av[np.maximum(prev, 0)], np.nan)
+        seasons = g["season"].to_numpy()
+        first_in_window = np.maximum(eligible - 5, 0)
+        out["season_boundary"][idx] = np.where(prev >= 0, (seasons[first_in_window] != seasons).astype(float), np.nan)
+        out["days_since_previous_match"][idx] = np.where(prev >= 0, (kick - kick[np.maximum(prev, 0)]) / np.timedelta64(1, "D"), np.nan)
     feats = pd.DataFrame(out)
     # repos et congestion : toutes compétitions
     rest = np.full(len(long), np.nan); cong = np.zeros(len(long))
@@ -225,7 +237,7 @@ def rolling_features(rows: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFra
         cut = long["feature_cutoff"].to_numpy()[ids]
         eligible = np.searchsorted(kick, cut, side="left")
         prev = eligible - 1
-        rest[ids] = np.where(prev >= 0, (cut - kick[np.maximum(prev, 0)]) / np.timedelta64(1, "D") + FEATURE_CUTOFF_HOURS / 24, np.nan)
+        rest[ids] = np.where(prev >= 0, (kick - kick[np.maximum(prev, 0)]) / np.timedelta64(1, "D"), np.nan)
         start = np.searchsorted(kick, cut - np.timedelta64(CONGESTION_DAYS, "D"), side="left")
         cong[ids] = eligible - start
     feats["rest_days"] = rest
@@ -248,10 +260,13 @@ def standings_features(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
-def promoted_flags(rows: pd.DataFrame) -> pd.DataFrame:
-    """Équipe absente de la saison précédente de la même compétition ; null si cette saison n'est pas dans les données."""
-    seasons = rows.groupby("competition")["season"].apply(lambda s: sorted(set(s))).to_dict()
-    members = rows.groupby(["competition", "season"]).apply(lambda g: set(g["home_team_id"]) | set(g["away_team_id"]), include_groups=False).to_dict()
+def promoted_flags(rows: pd.DataFrame) -> dict:
+    """Promu : équipe absente de la saison régulière précédente du même championnat ; null si cette saison n'est pas
+    dans les données. Défini pour les championnats seulement (lignes de saison régulière) : jamais « nouvel
+    entrant » d'une coupe."""
+    league = rows[rows["stage"] == st.STANDINGS_STAGE]
+    seasons = league.groupby("competition")["season"].apply(lambda s: sorted(set(s))).to_dict()
+    members = league.groupby(["competition", "season"]).apply(lambda g: set(g["home_team_id"]) | set(g["away_team_id"]), include_groups=False).to_dict()
     out = {}
     for (comp, season), teams in members.items():
         prev = [s for s in seasons[comp] if s < season]
@@ -278,7 +293,10 @@ def assemble(rows: pd.DataFrame, team_match: pd.DataFrame) -> pd.DataFrame:
             df[f"f_{side}_{name}"] = s[name].reindex(key).to_numpy()
         played = df[f"f_{side}_played"]
         df[f"f_{side}_points_per_match"] = np.where(played > 0, df[f"f_{side}_points"] / played.replace(0, np.nan), np.nan)
-        df[f"f_{side}_promoted"] = [promoted.get((c, s_, t)) for c, s_, t in zip(df["competition"], df["season"], df[f"{side}_team_id"])]
+        df[f"f_{side}_promoted"] = [promoted.get((c, s_, t)) if stage == st.STANDINGS_STAGE else None
+                                    for c, s_, t, stage in zip(df["competition"], df["season"], df[f"{side}_team_id"], df["stage"])]
+        df[f"{side}_season_boundary"] = df["match_id"].map(f["season_boundary"]).map({1.0: True, 0.0: False})
+        df[f"{side}_days_since_previous_match"] = df["match_id"].map(f["days_since_previous_match"])
     df["f_rank_gap"] = df["f_home_rank"] - df["f_away_rank"]
     df["standings_available"] = df["f_home_rank"].notna()
     df["ranking_rules_approximate"] = True
@@ -303,7 +321,7 @@ def _quality_flags(df: pd.DataFrame) -> pd.Series:
         if r.kickoff_missing:
             f.append("kickoff_missing")
         if r.match_status == "awarded":
-            f.append("awarded")
+            f.append("awarded;not_usable_for_model")
         if r.result_1x2 is None:
             f.append("no_result")
         if pd.isna(r.home_xg) or pd.isna(r.away_xg):

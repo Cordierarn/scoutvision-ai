@@ -91,8 +91,10 @@ def validate(df: pd.DataFrame) -> list[str]:
         errors.append(f"équipes identiques : {int(same.sum())}")
     if df["kickoff_utc"].isna().any():
         errors.append("kickoff_utc absent")
-    if (df["feature_cutoff"] >= df["kickoff_utc"]).any():
-        errors.append("feature_cutoff non strictement antérieur au coup d'envoi")
+    if (df["feature_cutoff"] > df["kickoff_utc"]).any():
+        errors.append("feature_cutoff postérieur au coup d'envoi")
+    if (df["usable_for_model"] & (df["match_status"] != "finished")).any():
+        errors.append("match non terminé marqué utilisable pour un modèle")
     hg, ag = df["home_goals"], df["away_goals"]
     expected = np.where(hg > ag, "H", np.where(hg == ag, "D", "A"))
     ok = hg.notna() & ag.notna()
