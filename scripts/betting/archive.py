@@ -13,6 +13,7 @@ sans relevé dans la fenêtre, la vue vaut null (jamais une cote inventée).
 from __future__ import annotations
 
 import datetime as dt
+import os
 from pathlib import Path
 
 import numpy as np
@@ -92,21 +93,28 @@ def merge_unique(existing: pd.DataFrame | None, new: pd.DataFrame, key: list[str
     return df
 
 
+def atomic_to_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Écriture atomique (fichier temporaire puis renommage) : un lecteur ne voit jamais un fichier partiel."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    df.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
+
+
 def write_snapshots(new: pd.DataFrame, path: Path) -> int:
     """Fusionne `new` dans le parquet `path` sans doublon ; renvoie le nombre de relevés ajoutés."""
     existing = pd.read_parquet(path) if path.exists() else None
     before = 0 if existing is None else len(existing)
     merged = merge_unique(existing, new, SNAPSHOT_KEY)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_parquet(path, index=False)
+    merged["player_id"] = merged["player_id"].astype(object).where(merged["player_id"].notna(), None)
+    atomic_to_parquet(merged, path)
     return len(merged) - before
 
 
 def write_fixtures(new: pd.DataFrame, path: Path = RESEARCH / "fixtures.parquet") -> pd.DataFrame:
     existing = pd.read_parquet(path) if path.exists() else None
     merged = merge_unique(existing, new, ["fixture_id"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_parquet(path, index=False)
+    atomic_to_parquet(merged, path)
     return merged
 
 

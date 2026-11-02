@@ -20,7 +20,9 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +36,22 @@ ODDS = RESEARCH / "odds"
 VIEWS = RESEARCH / "views"
 MATCHES = RESEARCH / "matches.parquet"
 STATUS_FINISHED = 2
+
+
+@contextmanager
+def archive_lock(path: Path = RESEARCH / ".lock"):
+    """Un seul processus écrit l'archive à la fois : une commande concurrente s'arrête avec un message clair."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise SystemExit(f"Archive verrouillée par une autre commande ({path}). Attendre sa fin, ou supprimer le verrou si elle a été interrompue.")
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        yield
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def _odds_path(competition: str, season: str) -> Path:
@@ -184,6 +202,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("match"); p.set_defaults(fn=cmd_match)
     args = parser.parse_args(argv)
     RESEARCH.mkdir(parents=True, exist_ok=True)
+    if args.cmd in ("fixtures", "history", "snapshot", "views", "match"):
+        with archive_lock():
+            return args.fn(args)
     return args.fn(args)
 
 

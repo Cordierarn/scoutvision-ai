@@ -44,8 +44,11 @@ Constats sur de vraies réponses (échantillons sous `.research/oddspapi/`, igno
   toutes compétitions, 100 % sur Premier League, Serie A, Championship ; les échecs sont des variantes
   de nom absorbées par une table d'alias apprise.
 
-Décisions prises : Big 5 seulement, plan gratuit, un relevé par jour par tournoi puis historique complet
-de chaque match après coup.
+Décisions prises : Big 5 seulement, un relevé par jour par tournoi puis historique complet de chaque match
+après coup. Plan OddsPapi payant « normal » (5 000 requêtes par mois), pré-match seulement : ni live ni
+marchés joueurs. Les familles buteur et passeur sortent donc du périmètre ; les 80 marchés par match
+restants (résultat, buts, handicap asiatique, scores exacts, mi-temps/fin, première et dernière équipe à
+marquer, marge) sont ceux du Labo.
 
 ## Phase 1 : client et archive (`scripts/betting/`)
 
@@ -58,9 +61,10 @@ de chaque match après coup.
 
 Coût en requêtes : 1 par fenêtre de 10 jours de fixtures, 1 par match pour l'historique complet (qui
 contient tous les relevés pré-match, donc les vues H−24 et H−1), 1 par tournoi pour un relevé courant.
-Sur le plan gratuit, l'historique des matchs joués du Big 5 (environ 48 par semaine, 205 par mois) et
-un relevé quotidien des cinq tournois (150 par mois) ne tiennent pas ensemble dans 250 ; le partage est
-réglé par `--max-requests` et par la fréquence du relevé courant, à valider avant tout workflow.
+Le serveur compte chaque appel HTTP, réponses 429 et 5xx comprises (mesuré : 27 comptés pour 14 réponses
+utiles au premier lot) ; le compteur local fait de même et `status --account --sync` le réaligne.
+Besoin mensuel Big 5 : environ 205 historiques, 150 relevés quotidiens, 14 fenêtres de fixtures, soit
+moins de 400 sur 5 000. Rattrapage initial de la saison 2026-27 : 447 matchs terminés au 2 novembre.
 
 Tests sans réseau (`npm run test:data`) : `scripts/test_betting_client.py`, `test_betting_archive.py`,
 `test_betting_matching.py`, sur des réponses synthétiques calquées sur la forme réelle (« Club A »,
