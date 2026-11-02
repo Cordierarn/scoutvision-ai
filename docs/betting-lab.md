@@ -135,6 +135,24 @@ par bootstrap des matchs. Aucun seuil n'est optimisé.
 C. Synthèse famille × compétition (`.research/betting/phase2/synthesis.csv`), classée par calibration
 puis borne basse de l'intervalle du rendement H−1.
 
+### Résultats de la phase 2 (8 compétitions, 2 novembre 2026)
+
+- **Calibration sans cotes** (2024-25 et 2025-26, 5 803 matchs, issues canoniques) : les 13 familles passent
+  le seuil (écart moyen |prédit − observé| de 0,14 point pour le score exact à 1,12 point pour BTTS, gagne
+  sans encaisser et premier / dernier but) ; 17 cases famille × compétition sur 104 le dépassent (entre 2,0
+  et 3,0 points, surtout LaLiga, Liga Portugal et Serie A) et sont exclues des suggestions.
+- **Comparaison à Winamax** (2026-27, 704 matchs appariés avec cotes) : Winamax a un meilleur log-loss que
+  la simulation sur les 13 familles, à H−1 comme au dernier relevé (écart de +0,0004 sur « gagne sans
+  encaisser » à +0,025 sur la marge de victoire). Part d'issues à espérance positive : 1 à 14 % selon la
+  famille ; sur ces issues, rendement réel à mise fixe de −17 % (handicap asiatique, dernier relevé) à
+  −71 % (score exact), intervalles à 90 % sous zéro sur toutes les familles. Sur les 104 cases famille ×
+  compétition, aucune n'a d'intervalle entièrement positif, 51 ont un intervalle entièrement négatif ; les
+  quelques rendements positifs (résultat en Bundesliga, handicap et plus/moins en Premier League à H−1)
+  tiennent dans la variance.
+- **Lecture** : la simulation est bien calibrée dans l'absolu, mais Winamax l'est mieux ; « notre probabilité
+  × cote > 1 » sélectionne surtout les cas où le modèle se trompe. La comparaison reste un indicateur, pas
+  un filtre, selon la décision du propriétaire.
+
 ## Produit : suggestions de paris dans Pronostics › Matchs à venir
 
 Décision du propriétaire : l'objectif devient un produit ; le gel de Pronostics est levé pour le seul
