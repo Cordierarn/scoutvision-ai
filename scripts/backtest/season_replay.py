@@ -358,6 +358,12 @@ def run_replay(dataset: pd.DataFrame, competition: str, season: str, date: pd.Ti
     t0 = time.time()
     sim = simulate(state, rem, probs, teams, rules, conditional, n_sims, seed, policy)
     summary = summarise(sim, teams, names, rules)
+    # situation réelle à la date de replay (classement des matchs terminés)
+    cur_ranks, _ = rank_tables(state["pts"][None], state["gd"][None], state["gf"][None],
+                               state["h2h_pts"][None] if cr.HEAD_TO_HEAD_POINTS in rules.tiebreaks else None,
+                               state["h2h_gf"][None] if cr.HEAD_TO_HEAD_POINTS in rules.tiebreaks else None, rules)
+    for i, t in enumerate(teams):
+        summary[t]["current"] = {"points": float(state["pts"][i]), "rank": int(cur_ranks[0, i]), "goalDifference": float(state["gd"][i])}
     actual = actual_final(matches, teams, rules)
     fitted = pd.to_datetime(pr["fitted_at"], errors="coerce") if "fitted_at" in pr else pd.Series(dtype="datetime64[ns]")
     return {**base, "status": "ok", "mode": mode, "nSims": n_sims, "seed": seed, "goalPolicy": policy,

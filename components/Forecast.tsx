@@ -6,10 +6,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { dataLoader, ForecastMatch, ForecastFile, ProjectedRow, MarketEvaluation, MarketSummary } from '../services/dataLoader';
+import { dataLoader, ForecastMatch, ForecastFile, MarketEvaluation, MarketSummary } from '../services/dataLoader';
 import { TeamLogo, CompetitionBadge } from './Media';
 import { EmptyState, LegendItem, PageHeader, Panel, Stat } from './ui';
 import { SERIES } from '../theme/charts';
+import SeasonSimulator from './forecast/SeasonSimulator';
+import MethodPanel from './forecast/MethodPanel';
 
 // Séries ScoutVision (theme/charts) : domicile, extérieur ; nul en gris neutre
 const HOME = SERIES[0];
@@ -117,48 +119,6 @@ const prob = (p?: number) => (p === undefined ? '' : p >= 0.995 ? '>99%' : p < 0
  * Classement projeté d'une compétition : points actuels + points attendus d'ici la fin,
  * et probabilités de fin de saison (20 000 simulations des matchs restants)
  */
-const ProjectedTable: React.FC<{ rows: ProjectedRow[] }> = ({ rows }) => {
-  const max = Math.max(...rows.map(r => r.projectedPoints), 1);
-  return (
-    <div className="sv-panel overflow-hidden">
-      <div className="grid grid-cols-12 px-4 h-8 items-center sv-label border-b border-line">
-        <div className="col-span-1">#</div>
-        <div className="col-span-3">Équipe</div>
-        <div className="col-span-1 text-right">J</div>
-        <div className="col-span-1 text-right">Pts</div>
-        <div className="col-span-1 text-right">Diff</div>
-        <div className="col-span-1 text-right" title="Probabilité de finir premier">Titre</div>
-        <div className="col-span-1 text-right" title="Probabilité de finir dans les 4 premiers">Top 4</div>
-        <div className="col-span-1 text-right" title="Probabilité de finir dans les 3 derniers">3 derniers</div>
-        <div className="col-span-2 text-right">Pts projetés</div>
-      </div>
-      {rows.map(r => (
-        <div key={r.team} className="grid grid-cols-12 items-center px-4 h-9 border-b border-line/60 text-[13px] hover:bg-raised/40 num">
-          <div className="col-span-1 text-ink-3 num">{r.rank}</div>
-          <div className="col-span-3 flex items-center gap-2 min-w-0 text-ink">
-            <TeamLogo src={r.logo} name={r.team} size="xs" />
-            <span className="truncate">{r.team}</span>
-          </div>
-          <div className="col-span-1 text-right text-ink-3 num">{r.played}</div>
-          <div className="col-span-1 text-right text-ink num">{r.points}</div>
-          <div className="col-span-1 text-right text-ink-3 num">{r.goalDiff > 0 ? `+${r.goalDiff}` : r.goalDiff}</div>
-          <div className="col-span-1 text-right text-ink num">{prob(r.pTitle)}</div>
-          <div className="col-span-1 text-right text-ink num">{prob(r.pTop4)}</div>
-          <div className="col-span-1 text-right text-ink num">{prob(r.pBottom3)}</div>
-          <div className="col-span-2 flex items-center gap-2 justify-end">
-            {/* Barre : points acquis (plein) puis points attendus (clair) */}
-            <div className="flex-1 max-w-[110px] h-1.5 rounded-sm bg-raised overflow-hidden flex" title={`${r.points} pts acquis + ${r.expectedPoints} attendus sur ${r.remaining} matchs`}>
-              <div style={{ width: `${(r.points / max) * 100}%`, background: HOME }} />
-              <div style={{ width: `${(r.expectedPoints / max) * 100}%`, background: HOME, opacity: 0.4 }} />
-            </div>
-            <span className="text-ink num font-bold w-8 text-right">{Math.round(r.projectedPoints)}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
 const signedPct = (v?: number, digits = 1) => (v === undefined ? '–' : `${v > 0 ? '+' : ''}${(v * 100).toFixed(digits)} %`);
 
 // Sous ce poids, la part du modèle dans le mélange avec le marché est du bruit (~200 matchs)
@@ -301,13 +261,16 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
   );
 };
 
+// Onglet retrouvé au retour sur la page
+let lastTab: 'matches' | 'simulator' | 'market' | 'method' = 'matches';
+
 const Forecast: React.FC = () => {
   const [file, setFile] = useState<ForecastFile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'matches' | 'tables' | 'market'>('matches');
+  const [tab, setTabState] = useState<'matches' | 'simulator' | 'market' | 'method'>(lastTab);
+  const setTab = (t: typeof tab) => { lastTab = t; setTabState(t); };
   const [competition, setCompetition] = useState<string>('');
   const [horizon, setHorizon] = useState<number>(14);
-  const [tableComp, setTableComp] = useState<string>('');
 
   useEffect(() => {
     dataLoader.loadForecast().then(setFile).catch(e => setError(e instanceof Error ? e.message : 'Erreur inconnue'));
@@ -329,8 +292,6 @@ const Forecast: React.FC = () => {
     return Array.from(groups.entries());
   }, [upcoming, competition]);
 
-  const tableKeys = useMemo(() => byLevel(Object.keys(file?.tables ?? {})), [file]);
-  const activeTable = tableComp || tableKeys[0] || '';
 
   return (
     <div className="max-w-7xl mx-auto p-5 space-y-4 animate-fade-in">
@@ -342,11 +303,12 @@ const Forecast: React.FC = () => {
 
       <div className="sv-tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'matches'} onClick={() => setTab('matches')} className={`sv-tab ${tab === 'matches' ? 'sv-tab-on' : ''}`}>Matchs à venir</button>
-        <button role="tab" aria-selected={tab === 'tables'} onClick={() => setTab('tables')} className={`sv-tab ${tab === 'tables' ? 'sv-tab-on' : ''}`} disabled={tableKeys.length === 0}>Classements projetés</button>
+        <button role="tab" aria-selected={tab === 'simulator'} onClick={() => setTab('simulator')} className={`sv-tab ${tab === 'simulator' ? 'sv-tab-on' : ''}`}>Simulateur de saison</button>
         <button role="tab" aria-selected={tab === 'market'} onClick={() => setTab('market')} className={`sv-tab ${tab === 'market' ? 'sv-tab-on' : ''}`}>Modèle vs marché</button>
+        <button role="tab" aria-selected={tab === 'method'} onClick={() => setTab('method')} className={`sv-tab ${tab === 'method' ? 'sv-tab-on' : ''}`}>Méthode &amp; fiabilité</button>
       </div>
 
-      {error && <p className="text-neg text-sm">Pronostics indisponibles : {error}</p>}
+      {error && tab === 'matches' && <p className="text-neg text-sm">Pronostics indisponibles : {error}</p>}
 
       {tab === 'matches' && (
         <>
@@ -399,21 +361,9 @@ const Forecast: React.FC = () => {
 
       {tab === 'market' && <MarketPanel evaluation={file?.market} />}
 
-      {tab === 'tables' && activeTable && (
-        <>
-          <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-            {tableKeys.map(c => (
-              <button key={c} onClick={() => setTableComp(c)} className={chip(activeTable === c)}>
-                <CompetitionBadge competition={c} />
-              </button>
-            ))}
-          </div>
-          <ProjectedTable rows={file!.tables[activeTable]} />
-          <p className="text-2xs text-ink-4 mt-2">
-            Points projetés = points acquis + somme des points attendus (3 × P(victoire) + P(nul)) sur les matchs restants. Barre pleine : points acquis ; claire : points attendus.
-          </p>
-        </>
-      )}
+      {tab === 'simulator' && <SeasonSimulator />}
+
+      {tab === 'method' && <MethodPanel />}
     </div>
   );
 };

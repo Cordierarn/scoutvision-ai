@@ -220,3 +220,24 @@ simulated as a historical market reference, labelled so, never as "the bookmaker
 Artefact: `.research/forecast/season_replays.json` (histograms, quantiles and probabilities only,
 no raw simulations; input hash, simulation version, seed). Default engine of the future simulator:
 ScoutVision reproduced.
+
+## Product V1: season simulator in the Forecast page
+
+`scripts/backtest/export_replays.py` derives a compact product export from the research artefact:
+`public/data/forecast/replays/index.json` (schema, generation, simulation version, competitions /
+seasons / replay points / dates, models, general limitations), `summary.json` (error by replay
+point, model comparison on common replays, objective calibration with counts) and one
+`{competition}/{season}.json` per league-season (rules, teams, every replay either `simulated` with
+rank distributions, points, objectives, actual table and errors, or `unavailable` with the reason).
+The export is published in the private data release with the other datasets by the data workflow
+(`research-odds` download, dataset, frozen predictions, market benchmark, replays, export); nothing
+from `.research/` is published or committed.
+
+The Forecast page gains a "Simulateur de saison" tab (replacing the generic projected tables) and a
+"Méthode & fiabilité" tab. The simulator only selects precomputed replays (competition, season,
+start point with unavailable points disabled and explained, model with ScoutVision by default and
+the market closing as "Référence marché historique"), shows the rolling-knowledge banner, the
+approximate-tiebreak banner when the rules are not exact or the fallback share is ≥ 1 %, the simulated
+table against the real final table, the rank heatmap (focusable cells, text alternative), a team
+detail, the error-evolution curve and the historical model comparison. States: Skeleton, LoadError
+with retry (`role="alert"`), EmptyState. Browser code never trains nor simulates.
