@@ -188,3 +188,35 @@ sits above or below the snapshot (descriptive, no stake); the over/under 2.5 ben
 models against the closing over/under where it exists. Results: `backtests.json`, block
 `marketBenchmark`; registry entries `market_*` with `uses_odds = true`. No ROI, no edge, no bet, no
 post-hoc calibration.
+
+## Step 3: historical replay and season simulation
+
+`scripts/backtest/competition_rules.py` is a typed registry: for each supported league (ENG, ENG2,
+GER, GER2, FRA, ESP, ESP2, ITA, ITA2, POR, NED) the points, the number of teams and rounds, the
+ordered ranking criteria (goal difference first or head-to-head first), the objectives that really
+exist (title, continental places by rule, direct promotion / promotion play-off positions, direct
+relegation / relegation play-off positions) and the documented approximations (away goals,
+play-off matches, bonus UEFA places by coefficient, head-to-head applied to two-team ties only).
+Nothing is generalised from the country; every other competition is listed as unsupported with the
+reason (conferences, zones, splits, play-offs) and gets match-by-match predictions only, never a
+P(title) / P(top) / P(relegation).
+
+`scripts/backtest/season_replay.py` answers "what did the model project at date D?" from the frozen
+prediction parquets only (no model recalled, no feature recomputed): the standings at D are rebuilt
+from the finished matches (awarded matches count), every remaining match takes its immutable
+prediction (the one fitted in the week of that match, so with the information available just before
+it — "rolling knowledge", not a model state frozen at D; this is a documented limit), 20 000 seasons
+are drawn with seed 7 (1-N-2 from the probabilities, 3/1/0, then the league's ranking criteria).
+Goal difference: for models with expected goals the score is drawn conditionally on the drawn
+outcome from independent Poissons; for 1-N-2-only engines (Elo, market) from the empirical score
+distribution of the competition on earlier seasons; a "none" policy serves to measure the impact.
+STRICT mode (the product mode) refuses to simulate when a remaining match has no prediction.
+Outputs per team: rank distribution (P(rank = k), sums to one), mean / median / P5–P95 rank, mean /
+median / 80 % interval of points, objective probabilities for the registry's objectives; actual final
+table and errors (MAE points, MAE rank, Spearman, top-1 hit, continental / promotion / relegation
+Brier, 80 % interval coverage, log score of the final rank); replay points start / 25 % / 50 % / 75 %
+and any custom date. Market closing probabilities (where every remaining match has one) are
+simulated as a historical market reference, labelled so, never as "the bookmakers' prediction".
+Artefact: `.research/forecast/season_replays.json` (histograms, quantiles and probabilities only,
+no raw simulations; input hash, simulation version, seed). Default engine of the future simulator:
+ScoutVision reproduced.
