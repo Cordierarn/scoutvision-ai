@@ -117,8 +117,41 @@ function loadOptional<T>(path: string): Promise<T | null> {
   return pending;
 }
 
+
+// ----- Suggestions de paris (Labo paris, onglet Matchs à venir) : artefact privé calculé par le pipeline -----
+export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote';
+export interface Suggestion {
+  rank: number; marketId: number; outcomeId: number; family: string; label: string;
+  odds: number; oddsAt: string; p: number; ev: number;
+  stakeFraction: number; stakeMode: 'kelly' | 'fixed'; reasons: string[];
+}
+export interface SuggestionCombo {
+  labels: string[]; marketIds: number[]; outcomeIds: number[]; jointP: number; odds: number; ev: number;
+  stakeFraction: number; stakeMode: 'kelly' | 'fixed';
+}
+export interface SuggestionMatch {
+  matchId: string; competition: string; date: string; home: string; away: string;
+  status: 'ok' | 'no_odds'; kickoff?: string; oddsAt?: string; oddsStale?: boolean; xg?: [number, number];
+  evaluated?: number; excluded?: Record<string, number>;
+  profiles?: Record<SuggestionProfile, { suggestions: Suggestion[]; combo: SuggestionCombo | null }>;
+}
+export interface BilanBlock { bets: number; hitRate: number | null; returnFlat: number | null }
+export interface BilanProfile {
+  overall: BilanBlock & { finalBankroll: number; maxDrawdown: number; curve: { date: string; bankroll: number }[] };
+  combos: BilanBlock; byFamily: Record<string, BilanBlock>; byCompetition: Record<string, BilanBlock>;
+}
+export interface SuggestionsIndex {
+  schemaVersion: string; generatedAt: string; season: string; bookmaker: string;
+  profiles: { id: SuggestionProfile; label: string }[]; defaultProfile: SuggestionProfile; defaultBankroll: number;
+  rules: { minOdds: number; bigOdds: number; maxAgeHours: number; kellyFraction: number; capPerBet: number; capPerMatch: number; fixedStake: number };
+  matches: SuggestionMatch[];
+  bilan: { start: number; profiles: Record<SuggestionProfile, BilanProfile> } | null;
+  journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
+}
+
 export const replayData = {
   marketBenchmark: () => loadOptional<MarketBenchmark>('/data/forecast/market_benchmark.json'),
+  suggestions: () => loadOptional<SuggestionsIndex>('/data/forecast/suggestions/index.json'),
   index: () => load<ReplayIndex>('/data/forecast/replays/index.json'),
   summary: () => load<ReplaySummary>('/data/forecast/replays/summary.json'),
   season: (competition: string, season: string) => load<ReplaySeasonFile>(`/data/forecast/replays/${encodeURIComponent(competition)}/${encodeURIComponent(season)}.json`),

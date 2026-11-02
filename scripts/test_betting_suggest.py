@@ -1,0 +1,188 @@
+"""
+Tests du moteur de suggestions (scripts/betting/suggest.py) et du produit (product.py) sans réseau ni
+données réelles : classement par profil, doublons, cote ancienne, famille exclue, combiné, mises, bilan et
+journal.
+
+  python3 -m unittest test_betting_suggest -v        # ou : npm run test:data
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import tempfile
+import unittest
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from betting import markets as mk
+from betting import product
+from betting import simulate as sm
+from betting import suggest as sg
+
+KO = dt.datetime(2026, 11, 7, 15, 0, tzinfo=dt.timezone.utc)
+NOW = dt.datetime(2026, 11, 7, 13, 30, tzinfo=dt.timezone.utc)
+
+
+def outcome(t, name, odds, period="fulltime", hcp=0.0, at=None, mid=None, oid=None):
+    key = hash((t, name, period, hcp)) % 100000
+    return {"market_id": mid or key, "outcome_id": oid or key * 10 + 1, "spec": mk.Spec(t, period, hcp, name), "odds": odds, "odds_at": at or NOW - dt.timedelta(minutes=20),
+            "home": "Club A", "away": "Club B"}
+
+
+def market_1x2(o1, ox, o2, at=None):
+    return [outcome("1x2", "1", o1, at=at, mid=101, oid=101), outcome("1x2", "X", ox, at=at, mid=101, oid=102), outcome("1x2", "2", o2, at=at, mid=101, oid=103)]
+
+
+class SelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.sims = sm.simulate(1.7, 0.9, 0.45)
+
+    def test_profiles_rank_a_complete_market_differently(self):
+        cands = sg.evaluate_candidates(self.sims, market_1x2(1.70, 3.80, 5.50), KO, NOW)
+        self.assertEqual(len(cands), 3)
+        sur = sg.rank(cands, "sur")
+        self.assertEqual(sur[0].candidate.spec.outcome, "1")                       # la plus probable
+        self.assertTrue(all(s.candidate.odds >= sg.MIN_ODDS for s in sur))
+        grosse = sg.rank(cands, "grosse_cote")
+        self.assertTrue(all(s.candidate.odds >= sg.BIG_ODDS for s in grosse))        # cote ≥ 3 seulement
+        self.assertEqual(len(grosse), 2)
+        eq = sg.rank(cands, "equilibre")
+        self.assertAlmostEqual(eq[0].score, eq[0].candidate.p * (1 + eq[0].candidate.ev), places=9)
+        self.assertEqual(eq[0].score, max(s.score for s in eq))
+
+    def test_near_duplicates_keep_the_best_ranked(self):
+        outs = [outcome("totals", "Over", 1.35, hcp=1.5, mid=1, oid=11), outcome("totals", "Over", 1.95, hcp=2.5, mid=2, oid=21),
+                outcome("exactscore", "3+", 1.90, mid=3, oid=31), outcome("totals", "Under", 1.85, hcp=2.5, mid=2, oid=22)]
+        cands = sg.evaluate_candidates(self.sims, outs, KO, NOW)
+        ranked = sg.rank(cands, "sur")
+        groups = [s.candidate.group for s in ranked]
+        self.assertEqual(len(groups), len(set(groups)))
+        self.assertEqual(sum(1 for s in ranked if s.candidate.group.startswith("over|")), 1)
+        self.assertEqual(ranked[0].candidate.spec.handicap, 1.5)                   # plus probable des « over »
+
+    def test_equivalent_selections_across_markets_are_deduplicated(self):
+        outs = [outcome("correctscore", "0:0", 9.0, mid=1, oid=11), outcome("exactscore", "0", 9.0, mid=2, oid=21), outcome("firstgoal", "No Goal", 9.0, mid=3, oid=31),
+                outcome("lastgoal", "No Goal", 9.0, mid=4, oid=41), outcome("totals", "Under", 9.0, hcp=1.0, mid=5, oid=51), outcome("1x2", "X", 3.3, mid=101, oid=102)]
+        ranked = sg.rank(sg.evaluate_candidates(self.sims, outs, KO, NOW), "grosse_cote")
+        labels = [s.candidate.label for s in ranked]
+        self.assertEqual(sum(1 for l in labels if "0-0" in l or "Aucun but" in l or "0 but" in l or "Moins de 1 but" in l), 1, labels)
+        self.assertEqual(sg.describe(mk.Spec("totals", "fulltime", 1.0, "Under"), "A", "B"), "Moins de 1 but")
+
+    def test_old_odds_are_never_suggested(self):
+        old = NOW - dt.timedelta(hours=2, minutes=1)
+        cands = sg.evaluate_candidates(self.sims, market_1x2(1.70, 3.80, 5.50, at=old), KO, NOW)
+        self.assertTrue(all(c.excluded == "cote_ancienne" for c in cands))
+        self.assertEqual(sg.rank(cands, "sur"), [])
+        after_ko = sg.evaluate_candidates(self.sims, market_1x2(1.70, 3.80, 5.50, at=KO + dt.timedelta(minutes=1)), KO, KO + dt.timedelta(minutes=2))
+        self.assertTrue(all(c.excluded for c in after_ko))
+
+    def test_badly_calibrated_family_and_low_odds_are_excluded(self):
+        cands = sg.evaluate_candidates(self.sims, market_1x2(1.25, 3.80, 5.50), KO, NOW, excluded_families={("résultat", "AAA")}, competition="AAA")
+        self.assertEqual([c.excluded for c in cands], ["cote_minimale", "famille_mal_calibree", "famille_mal_calibree"])
+        other = sg.evaluate_candidates(self.sims, market_1x2(1.25, 3.80, 5.50), KO, NOW, excluded_families={("résultat", "AAA")}, competition="BBB")
+        self.assertEqual([c.excluded for c in other], ["cote_minimale", None, None])
+
+    def test_labels_are_readable(self):
+        self.assertEqual(sg.describe(mk.Spec("1x2", "fulltime", 0.0, "1"), "Club A", "Club B"), "Club A gagne")
+        self.assertEqual(sg.describe(mk.Spec("totals", "p1", 1.5, "Under"), "Club A", "Club B"), "Moins de 1,5 buts (1re mi-temps)")
+        self.assertEqual(sg.describe(mk.Spec("spreads", "fulltime", -1.5, "1"), "Club A", "Club B"), "Club A avec handicap -1,5")
+        self.assertEqual(sg.describe(mk.Spec("spreads", "fulltime", -1.5, "2"), "Club A", "Club B"), "Club B avec handicap +1,5")
+        self.assertEqual(sg.describe(mk.Spec("winningmargin", "fulltime", 0.0, "2 By 3+"), "Club A", "Club B"), "Club B gagne de 3 buts ou plus")
+
+
+class ComboTests(unittest.TestCase):
+    def setUp(self):
+        self.sims = sm.simulate(1.7, 0.9, 0.45)
+
+    def test_joint_probability_is_co_occurrence(self):
+        outs = market_1x2(1.70, 3.80, 5.50) + [outcome("totals", "Under", 2.10, hcp=3.5, mid=5, oid=51)]
+        cands = sg.evaluate_candidates(self.sims, outs, KO, NOW)
+        ranked = sg.rank(cands, "sur")
+        combo = sg.combine(ranked, "sur")
+        self.assertIsNotNone(combo)
+        masks = [c.win_mask for c in combo.candidates]
+        self.assertAlmostEqual(combo.joint_p, float(np.logical_and.reduce(masks).mean()), places=12)
+        self.assertAlmostEqual(combo.odds, float(np.prod([c.odds for c in combo.candidates])), places=9)
+        self.assertLess(combo.joint_p, min(c.p for c in combo.candidates))
+
+    def test_combo_bounds_on_joint_probability_and_odds(self):
+        sims = sm.simulate(1.3, 1.2, 0.45)
+        outs = [outcome("correctscore", "3:2", 35.0, mid=1, oid=11), outcome("winningmargin", "1 By 1", 3.4, mid=2, oid=21), outcome("firstgoal", "2", 3.2, mid=3, oid=31),
+                outcome("totals", "Over", 3.1, hcp=4.5, mid=4, oid=41), outcome("halftime-fulltime", "2/1", 15.0, mid=5, oid=51)]
+        ranked = sg.rank(sg.evaluate_candidates(sims, outs, KO, NOW), "grosse_cote")
+        combo = sg.combine(ranked, "grosse_cote")
+        if combo is not None:
+            self.assertGreaterEqual(combo.joint_p, sg.COMBO_MIN_JOINT_P)
+            self.assertLessEqual(combo.odds, sg.COMBO_MAX_ODDS)
+
+    def test_incompatible_selections_are_never_combined(self):
+        outs = market_1x2(1.70, 3.80, 5.50)
+        cands = sg.evaluate_candidates(self.sims, outs, KO, NOW)
+        ranked = sg.rank(cands, "grosse_cote")   # X et 2 : jamais gagnés ensemble
+        self.assertIsNone(sg.combine(ranked, "grosse_cote"))
+        nested = [outcome("totals", "Over", 1.40, hcp=1.5, mid=1, oid=11), outcome("bothteamsscore", "Yes", 1.70, mid=7, oid=71)]
+        c2 = sg.evaluate_candidates(self.sims, nested, KO, NOW)
+        r2 = sg.rank(c2, "sur")
+        combo = sg.combine(r2, "sur")
+        if combo is not None:  # BTTS implique plus de 1,5 : emboîtées, donc jamais combinées
+            self.fail("sélections emboîtées combinées")
+
+
+class StakeTests(unittest.TestCase):
+    def test_quarter_kelly_known_cases(self):
+        self.assertAlmostEqual(sg.kelly_fraction(0.6, 2.0), 0.2)
+        f, mode = sg.stake_for(0.6, 2.0, 0.6 * 2.0 - 1)
+        self.assertEqual(mode, "kelly"); self.assertAlmostEqual(f, 0.05)             # 0,2 / 4 = 0,05 = plafond
+        f2, _ = sg.stake_for(0.55, 2.0, 0.1)
+        self.assertAlmostEqual(f2, 0.025)                                            # (1,1 − 1)/1 /4
+        self.assertEqual(sg.stake_for(0.4, 2.0, -0.2), (sg.FIXED_STAKE, "fixed"))    # espérance négative : mise fixe
+        self.assertEqual(sg.kelly_fraction(0.3, 2.0), 0.0)
+
+    def test_caps_per_bet_and_per_match(self):
+        sims = sm.simulate(2.4, 0.5, 0.45)
+        outs = [outcome("1x2", "1", 2.2, mid=101, oid=101), outcome("totals", "Over", 2.5, hcp=1.5, mid=1, oid=11), outcome("bothteamsscore", "No", 2.4, mid=7, oid=72),
+                outcome("teamtotals-team1", "Over", 2.6, hcp=1.5, mid=8, oid=81)]
+        ranked = sg.rank(sg.evaluate_candidates(sims, outs, KO, NOW), "equilibre")
+        self.assertTrue(all(s.stake_fraction <= sg.CAP_PER_BET + 1e-9 for s in ranked))
+        self.assertLessEqual(sum(s.stake_fraction for s in ranked), sg.CAP_PER_MATCH + 1e-6)
+
+    def test_bankroll_curve_exact_to_the_cent(self):
+        bets = pd.DataFrame({"kickoff_utc": pd.to_datetime(["2026-01-01", "2026-01-01", "2026-01-02", "2026-01-03"], utc=True),
+                             "stake_fraction": [0.05, 0.02, 0.05, 0.05], "realised": [1.5, -1.0, -1.0, 0.75]})
+        curve, final, dd = product.bankroll_curve(bets, 300.0)
+        # jour 1 : mises 15 + 6 sur 300 → +22,5 − 6 = 316,5 ; jour 2 : mise 15,83 perdue → 300,67 ; jour 3 : mise 15,03 × 0,75 = +11,27 → 311,94
+        self.assertEqual([c["bankroll"] for c in curve], [316.5, 300.67, 311.94])
+        self.assertEqual(final, 311.94)
+        self.assertAlmostEqual(dd, (316.5 - 300.67) / 316.5, places=6)
+
+
+class JournalTests(unittest.TestCase):
+    def test_published_suggestions_are_never_rewritten_and_settled_once(self):
+        from betting import catalogue
+        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]},
+                               {"marketId": 1030, "marketType": "spreads", "period": "fulltime", "handicap": -0.75, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 1030, "outcomeName": "1"}, {"outcomeId": 1031, "outcomeName": "2"}]}])
+        entries = [{"status": "ok", "matchId": "m1", "competition": "AAA", "kickoff": KO.isoformat(), "profiles": {"sur": {"suggestions": [
+            {"rank": 1, "marketId": 101, "outcomeId": 101, "family": "résultat", "label": "Club A gagne", "odds": 1.8, "oddsAt": NOW.isoformat(), "p": 0.6, "ev": 0.08, "stakeFraction": 0.02, "stakeMode": "kelly"},
+            {"rank": 2, "marketId": 1030, "outcomeId": 1030, "family": "handicap asiatique", "label": "Club A -0,75", "odds": 2.0, "oddsAt": NOW.isoformat(), "p": 0.5, "ev": 0.0, "stakeFraction": 0.02, "stakeMode": "fixed"}]}}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            product.JOURNAL = Path(tmp) / "journal.parquet"
+            empty = pd.DataFrame(columns=["match_id", "ft_home", "ft_away", "ht_home", "ht_away", "first_goal", "last_goal"])
+            j1 = product.journal_append(entries, NOW, empty, cat)
+            self.assertEqual(len(j1), 2); self.assertTrue(j1["settled"].isna().all())
+            entries[0]["profiles"]["sur"]["suggestions"][0]["odds"] = 9.9        # tentative de réécriture : ignorée
+            j2 = product.journal_append(entries, NOW + dt.timedelta(hours=1), empty, cat)
+            self.assertEqual(len(j2), 2); self.assertEqual(float(j2.iloc[0]["odds"]), 1.8)
+            res = pd.DataFrame([{"match_id": "m1", "ft_home": 2, "ft_away": 1, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "away"}])
+            j3 = product.journal_append(entries, NOW + dt.timedelta(days=1), res, cat)
+            self.assertEqual(float(j3.iloc[0]["settled"]), 1.0); self.assertAlmostEqual(float(j3.iloc[0]["realised"]), 0.8)
+            self.assertEqual(float(j3.iloc[1]["settled"]), 0.5); self.assertAlmostEqual(float(j3.iloc[1]["realised"]), 0.5)   # -0,75 : moitié gagnée
+            j4 = product.journal_append([], NOW + dt.timedelta(days=2), res, cat)
+            self.assertEqual(j4.iloc[0]["settled_at"], j3.iloc[0]["settled_at"])   # réglé une seule fois
+
+
+if __name__ == "__main__":
+    unittest.main()
