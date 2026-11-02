@@ -135,6 +135,68 @@ par bootstrap des matchs. Aucun seuil n'est optimisé.
 C. Synthèse famille × compétition (`.research/betting/phase2/synthesis.csv`), classée par calibration
 puis borne basse de l'intervalle du rendement H−1.
 
+## Produit : suggestions de paris dans Pronostics › Matchs à venir
+
+Décision du propriétaire : l'objectif devient un produit ; le gel de Pronostics est levé pour le seul
+onglet « Matchs à venir », qui peut employer le vocabulaire des paris. Les trois autres onglets restent
+gelés. La comparaison de phase 2 sert d'indicateur, pas de filtre.
+
+### Buts attendus ajustés (`scripts/betting/adjust.py`)
+
+Base : prévisions figées (ScoutVision reproduit) ou prévisions du pipeline pour les rencontres à venir.
+Ajustement multiplicatif log(xg) + Σ β · feature, features point-in-time, β par maximum de vraisemblance
+de Poisson sur 2024-25, décision sur 2025-26 (log-loss du score exact avec la variante figée) :
+
+| Ajout | Effet mesuré sur 2025-26 | Décision |
+|---|---|---|
+| Forme pondérée, demi-vie 60 / 120 / 240 jours, terrain propre | score exact 2,8833 → 2,8826 (240 j, le meilleur), 1N2 1,0013 → 1,0004 | gardé, demi-vie 240 j |
+| Confrontations directes 5 ans (différence de buts rétrécie) | 2,8826 → 2,8823, 1N2 → 1,0001 | gardé |
+| Part de 1re mi-temps propre à chaque équipe | 1N2 de mi-temps 1,0378 → 1,0439 (dégradé) | rejeté |
+| Compositions officielles, absences | aucune donnée avant le match dans nos sources | non testé |
+
+Gains réels mais faibles : l'essentiel de l'information est déjà dans la base.
+
+### Moteur de suggestions (`suggest.py`, `product.py`)
+
+- Toutes les issues de tous les marchés Winamax relevés pour le match sont évaluées dans la simulation
+  (probabilité hors remboursement, espérance pour 1 €).
+- Exclusions : cote < 1,30 ; relevé de plus de 2 h ou postérieur au coup d'envoi (affiché « ancienne »,
+  jamais suggéré) ; famille × compétition marquée non utilisable par la calibration de phase 2.
+- Profils : « Sûr » (probabilité la plus forte), « Équilibré » (score = p × (1 + espérance) = p² × cote,
+  la probabilité pondérée par le multiplicateur attendu de la mise), « Grosse cote » (cote ≥ 3, meilleure
+  espérance). Un seul pari par groupe de doublons (même direction sur le même objet : les « plus de »
+  d'un même match, un résultat et ses doubles chances, etc.), 3 à 5 suggestions.
+- Combiné : 2 ou 3 sélections de groupes différents, compatibles et non emboîtées, probabilité jointe =
+  co-occurrence dans la simulation, cote = produit ; proposé si l'espérance jointe est positive, ou en
+  profil « Sûr » si la probabilité jointe atteint 45 %.
+- Mises : quart de Kelly, plafonds 5 % par pari et 15 % par match ; espérance négative → mise fixe 2 %
+  signalée. Le pipeline publie des fractions ; le navigateur applique la bankroll saisie (300 € par
+  défaut, mémorisée dans `localStorage`).
+- Raisons : forme à domicile / à l'extérieur sur 5 matchs, buts attendus du modèle, confrontations
+  directes, part de 1re mi-temps pour les marchés de mi-temps.
+- Rejeu 2026-27 (`product replay`) : prévisions figées, features point-in-time, dernier relevé avant le
+  coup d'envoi, bankroll de 300 € par profil misée sur la bankroll courante, arrondie au centime.
+- Journal (`.research/betting/journal/suggestions.parquet`) : chaque suggestion publiée est enregistrée
+  avec l'horodatage du relevé et n'est jamais réécrite ; réglée après le match (remboursements et
+  demi-gains compris).
+- Export `public/data/forecast/suggestions/index.json` (artefact privé) : rencontres à venir, profils,
+  bilan du rejeu, résumé du journal.
+
+### Interface (`components/forecast/Suggestions.tsx`)
+
+Panneau de contrôle (profils en `sv-seg`, bankroll, bilan du profil), bloc repliable sous chaque match
+(ouvert sur le premier), une ligne par suggestion (sélection, cote et heure du relevé, probabilité,
+espérance, mise, raisons, bilan du type), combiné, « Cotes Winamax non disponibles pour ce match. » ;
+cartes empilées sous 640 px avec cote et mise visibles ; espérance positive en `text-pos`, négative en
+encre neutre.
+
+### Workflow (`.github/workflows/betting-odds.yml`, livré non activé)
+
+Rencontres, relevés à venir (`/historical-odds`, non décompté), historiques, vues, appariement, résultats,
+suggestions et export, puis publication de l'archive de cotes (release `betting-odds`) et de l'artefact
+des suggestions dans `scoutvision-data.tar.gz` lue par le serveur. Planification proposée en commentaire :
+toutes les 2 h de 9 h à 21 h UTC.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans
