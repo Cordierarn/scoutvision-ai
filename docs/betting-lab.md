@@ -79,6 +79,62 @@ Tests sans réseau (`npm run test:data`) : `scripts/test_betting_client.py`, `te
 `test_betting_matching.py`, sur des réponses synthétiques calquées sur la forme réelle (« Club A »,
 « Joueur 1 »).
 
+## Phase 2 : simulation, probabilités par marché, calibration et comparaison à Winamax
+
+Points ouverts de la phase 1, tranchés sur de vraies réponses (2 novembre 2026) :
+
+- **Cotes courantes** : `/historical-odds` répond pour une rencontre pas encore jouée (tous les relevés
+  depuis l'ouverture du marché, 69 marchés, dernier relevé à la minute) et n'est pas décompté du quota
+  (compteur serveur inchangé après trois appels). Le relevé courant passe donc par cet endpoint : la
+  commande `snapshot` reste disponible mais `history` sur les rencontres à venir suffit. Le workflow
+  `betting-odds.yml` est livré avec sa planification commentée ; il n'est pas activé.
+- **Compositions** : le cache PitchAPI ne contient que des matchs terminés et des compositions
+  `confirmed = true` post-match (`lineup_type` standard ou absent) ; l'export PitchAPI tourne le lundi et
+  le vendredi. Aucune composition officielle n'atteint ScoutVision avant le coup d'envoi, et le délai de
+  publication côté PitchAPI n'est pas observable d'ici.
+
+### Moteur (`scripts/betting/simulate.py`, `markets.py`, `results.py`)
+
+- Buts attendus lus dans les prévisions figées point-in-time de la recherche (modèle
+  `scoutvision_reproduced`, `fitted_at` = date logique du réajustement hebdomadaire, contrôlée ≤ coup
+  d'envoi) ; aucun modèle modifié. Les prévisions figées n'existent que pour 2024-25, 2025-26 et 2026-27 :
+  la calibration porte sur 2024-25 et 2025-26, la comparaison aux cotes sur 2026-27.
+- Loi conjointe du score : Poisson, Dixon-Coles (rho) ou binomiale négative (k), ajustée par maximum de
+  vraisemblance sur 2024-25 et choisie sur 2025-26 au log-loss du score exact, puis figée
+  (`.research/betting/phase2/variant.json`). Résultat : Dixon-Coles rho = −0,03 (log-loss score exact
+  2,8833 contre 2,8838 Poisson et 2,8841 binomiale négative k = 500 ; 1N2 1,0013 contre 1,0020 ;
+  plus/moins 2,5 identique à 0,6829), sur 2 906 matchs.
+- 20 000 tirages par match, graine 7 ; chaque but est en première mi-temps avec la part observée dans la
+  compétition sur les saisons antérieures (0,44 à 0,45) ; ordre des buts par permutation uniforme
+  (premier et dernier but).
+- 26 types de marchés d'équipe (résultat, double chance, remboursé si nul, plus/moins total et par
+  équipe, handicap asiatique, score exact, nombre de buts, BTTS, clean sheet, gagne sans encaisser,
+  marque / gagne les deux mi-temps ou l'une d'elles, marge de victoire, premier et dernier but,
+  mi-temps / fin de match), sur le temps réglementaire et la 1re mi-temps.
+
+Règlement (règles usuelles des paris football Winamax ; le site n'est pas consultable depuis
+l'environnement de développement, à confirmer sur la page « Règles des paris » de Winamax) : temps
+réglementaire, prolongations exclues ; but contre son camp crédité à l'équipe bénéficiaire ; remboursé si
+nul et handicap entier remboursés en cas d'égalité ; ligne en quart = moitié de la mise sur chaque ligne
+voisine (moitié gagnée / moitié remboursée, moitié perdue / moitié remboursée) ; match reporté ou
+interrompu : hors périmètre (seuls les matchs terminés sont réglés, matchs à score administratif ou avec
+prolongation exclus).
+
+### Mesures (`scripts/betting/phase2.py`)
+
+A. Calibration sans cotes : issues canoniques de chaque famille (lignes usuelles), tranches de
+probabilité prédite, prédit / observé / N, log-loss, Brier ; une famille est « utilisable » si l'écart
+moyen |prédit − observé| pondéré est ≤ 2 points sur au moins 500 issues.
+
+B. Comparaison à Winamax (2026-27, vues H−1 et dernier relevé, jamais un relevé postérieur au coup
+d'envoi) : probabilité Winamax sans marge par normalisation proportionnelle sur les marchés complets ;
+log-loss nous contre Winamax ; part des issues à espérance de gain positive (p × cote > 1, demi-mises et
+remboursements compris) ; sur ces issues, rendement réel à mise fixe, taux de réussite, intervalle à 90 %
+par bootstrap des matchs. Aucun seuil n'est optimisé.
+
+C. Synthèse famille × compétition (`.research/betting/phase2/synthesis.csv`), classée par calibration
+puis borne basse de l'intervalle du rendement H−1.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans
