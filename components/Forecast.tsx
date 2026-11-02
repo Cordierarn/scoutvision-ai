@@ -250,7 +250,8 @@ const Forecast: React.FC = () => {
   }, [upcoming, competition]);
 
   const dates = freshness(dataLoader.getCachedIndex()?.generatedAt ?? null, null, null);
-  const firstMatchId = byDate[0]?.[1][0]?.match_id;
+  // Bloc de suggestions ouvert par défaut sur le premier match qui en a
+  const firstMatchId = byDate.flatMap(([, list]) => list).find(m => suggestionByMatch.get(m.match_id)?.status === 'ok')?.match_id;
 
   return (
     <div className="max-w-7xl mx-auto p-5 space-y-4 animate-fade-in">

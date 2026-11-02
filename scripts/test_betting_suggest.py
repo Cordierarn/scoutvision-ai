@@ -62,6 +62,14 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(sum(1 for s in ranked if s.candidate.group.startswith("over|")), 1)
         self.assertEqual(ranked[0].candidate.spec.handicap, 1.5)                   # plus probable des « over »
 
+    def test_equivalent_selections_across_markets_are_deduplicated(self):
+        outs = [outcome("correctscore", "0:0", 9.0, mid=1, oid=11), outcome("exactscore", "0", 9.0, mid=2, oid=21), outcome("firstgoal", "No Goal", 9.0, mid=3, oid=31),
+                outcome("lastgoal", "No Goal", 9.0, mid=4, oid=41), outcome("totals", "Under", 9.0, hcp=1.0, mid=5, oid=51), outcome("1x2", "X", 3.3, mid=101, oid=102)]
+        ranked = sg.rank(sg.evaluate_candidates(self.sims, outs, KO, NOW), "grosse_cote")
+        labels = [s.candidate.label for s in ranked]
+        self.assertEqual(sum(1 for l in labels if "0-0" in l or "Aucun but" in l or "0 but" in l or "Moins de 1 but" in l), 1, labels)
+        self.assertEqual(sg.describe(mk.Spec("totals", "fulltime", 1.0, "Under"), "A", "B"), "Moins de 1 but")
+
     def test_old_odds_are_never_suggested(self):
         old = NOW - dt.timedelta(hours=2, minutes=1)
         cands = sg.evaluate_candidates(self.sims, market_1x2(1.70, 3.80, 5.50, at=old), KO, NOW)
@@ -98,6 +106,16 @@ class ComboTests(unittest.TestCase):
         self.assertAlmostEqual(combo.joint_p, float(np.logical_and.reduce(masks).mean()), places=12)
         self.assertAlmostEqual(combo.odds, float(np.prod([c.odds for c in combo.candidates])), places=9)
         self.assertLess(combo.joint_p, min(c.p for c in combo.candidates))
+
+    def test_combo_bounds_on_joint_probability_and_odds(self):
+        sims = sm.simulate(1.3, 1.2, 0.45)
+        outs = [outcome("correctscore", "3:2", 35.0, mid=1, oid=11), outcome("winningmargin", "1 By 1", 3.4, mid=2, oid=21), outcome("firstgoal", "2", 3.2, mid=3, oid=31),
+                outcome("totals", "Over", 3.1, hcp=4.5, mid=4, oid=41), outcome("halftime-fulltime", "2/1", 15.0, mid=5, oid=51)]
+        ranked = sg.rank(sg.evaluate_candidates(sims, outs, KO, NOW), "grosse_cote")
+        combo = sg.combine(ranked, "grosse_cote")
+        if combo is not None:
+            self.assertGreaterEqual(combo.joint_p, sg.COMBO_MIN_JOINT_P)
+            self.assertLessEqual(combo.odds, sg.COMBO_MAX_ODDS)
 
     def test_incompatible_selections_are_never_combined(self):
         outs = market_1x2(1.70, 3.80, 5.50)

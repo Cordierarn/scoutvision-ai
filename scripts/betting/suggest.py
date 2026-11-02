@@ -35,11 +35,14 @@ BIG_ODDS = 3.00
 MAX_AGE = dt.timedelta(hours=2)
 MAX_SUGGESTIONS = 5
 MIN_SUGGESTIONS = 3
+OVERLAP_DUPLICATE = 0.85      # deux issues gagnées ensemble dans ≥ 85 % des cas où l'une gagne sont un même pari
 KELLY_FRACTION = 0.25
 CAP_PER_BET = 0.05
 CAP_PER_MATCH = 0.15
 FIXED_STAKE = 0.02
 COMBO_MIN_SELECTIONS, COMBO_MAX_SELECTIONS = 2, 3
+COMBO_MIN_JOINT_P = 0.05      # un combiné à moins de 5 % de chances n'est jamais proposé
+COMBO_MAX_ODDS = 30.0         # ni un empilement de cotes au-delà de 30
 
 
 @dataclass
@@ -151,6 +154,7 @@ def describe(spec: mk.Spec, home: str, away: str) -> str:
     team = {1: home, 2: away}
     suffix = {"fulltime": "", "p1": " (1re mi-temps)", "p2": " (2e mi-temps)"}[per]
     line = f"{h:g}".replace(".", ",")
+    buts = "but" if abs(h) == 1 else "buts"
     if t == "1x2":
         base = {"1": f"{home} gagne", "X": "Match nul", "2": f"{away} gagne"}[n]
     elif t == "doublechance":
@@ -158,9 +162,9 @@ def describe(spec: mk.Spec, home: str, away: str) -> str:
     elif t == "drawnobet":
         base = f"{team[int(n)]} gagne, remboursé si nul"
     elif t == "totals":
-        base = f"{'Plus' if n == 'Over' else 'Moins'} de {line} buts"
+        base = f"{'Plus' if n == 'Over' else 'Moins'} de {line} {buts}"
     elif t in ("teamtotals-team1", "teamtotals-team2"):
-        base = f"{team[1 if t.endswith('team1') else 2]} : {'plus' if n == 'Over' else 'moins'} de {line} buts"
+        base = f"{team[1 if t.endswith('team1') else 2]} : {'plus' if n == 'Over' else 'moins'} de {line} {buts}"
     elif t == "spreads":
         tm = team[int(n)]
         hh = h if n == "1" else -h
@@ -226,6 +230,14 @@ def admissible(c: Candidate, profile: str) -> bool:
     return True
 
 
+def overlap(a: Candidate, b: Candidate) -> float:
+    """Part des tirages gagnés en commun parmi ceux où l'une des deux issues gagne (Jaccard des gains) :
+    « 0 but dans le match », « score exact 0-0 », « aucun premier but » ou « moins de 1 but » sont un même pari."""
+    both = float(np.logical_and(a.win_mask, b.win_mask).sum())
+    either = float(np.logical_or(a.win_mask, b.win_mask).sum())
+    return both / either if either > 0 else 0.0
+
+
 def kelly_fraction(p: float, odds: float) -> float:
     """Fraction de Kelly entière (avant le quart) pour une issue sans remboursement ; 0 si pas d'avantage."""
     if odds <= 1.0:
@@ -245,7 +257,7 @@ def rank(candidates: list[Candidate], profile: str, max_n: int = MAX_SUGGESTIONS
     ok = sorted((c for c in candidates if admissible(c, profile)), key=lambda c: score(c, profile), reverse=True)
     seen, chosen = set(), []
     for c in ok:
-        if c.group in seen:
+        if c.group in seen or any(overlap(c, k) >= OVERLAP_DUPLICATE for k in chosen):
             continue
         seen.add(c.group)
         chosen.append(c)
@@ -280,7 +292,11 @@ def combine(suggestions: list[Suggestion], profile: str) -> Combo | None:
                 continue  # incompatibles, ou emboîtées
             odds = float(np.prod([c.odds for c in combo]))
             ev = joint * odds - 1.0
-            sc = {"sur": joint, "equilibre": joint * (1 + ev), "grosse_cote": ev}[profile]
+            if joint < COMBO_MIN_JOINT_P or odds > COMBO_MAX_ODDS:
+                continue
+            # tous profils : probabilité jointe pondérée par le multiplicateur attendu (l'espérance seule
+            # favorise des empilements de cotes extrêmes à probabilité infime)
+            sc = joint * (1 + ev)
             if profile == "grosse_cote" and odds < BIG_ODDS:
                 continue
             if best is None or sc > best[0]:
