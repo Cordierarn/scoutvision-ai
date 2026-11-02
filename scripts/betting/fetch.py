@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import BIG5, BOOKMAKER, RESEARCH, ROOT, TOURNAMENTS
+from . import BOOKMAKER, COMPETITIONS, RESEARCH, ROOT, TOURNAMENTS
 from . import archive, matching
 from .client import OddsPapiClient, QuotaExceeded
 
@@ -63,7 +63,7 @@ def load_fixtures() -> pd.DataFrame:
     return pd.read_parquet(FIXTURES) if FIXTURES.exists() else pd.DataFrame(columns=archive.FIXTURE_COLUMNS)
 
 
-def load_snapshots(competitions=BIG5) -> pd.DataFrame:
+def load_snapshots(competitions=COMPETITIONS) -> pd.DataFrame:
     frames = [pd.read_parquet(p) for c in competitions for p in sorted((ODDS / c).glob("*.parquet"))] if ODDS.exists() else []
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=archive.SNAPSHOT_COLUMNS)
 
@@ -97,10 +97,27 @@ def cmd_fixtures(args) -> int:
     return 0
 
 
+def player_props_enabled(client: OddsPapiClient) -> bool | None:
+    """Lit l'option « player props » de Winamax FR dans le compte (appel non décompté) et l'affiche."""
+    try:
+        acc = client.account()
+        sub = next((s for s in acc.get("subscriptions", []) if s.get("is_active")), {})
+        flag = sub.get("bookmakers", {}).get(BOOKMAKER, {}).get("has_player_props")
+    except Exception as exc:  # le compte n'est pas indispensable à l'archivage
+        print(f"Compte OddsPapi illisible ({client.redact(str(exc))[:80]}) : option marchés joueurs inconnue")
+        return None
+    print(f"Marchés joueurs Winamax FR ({BOOKMAKER}) dans le plan : {'oui' if flag else 'non'}")
+    return bool(flag)
+
+
 def cmd_history(args) -> int:
     client = OddsPapiClient()
+    props = player_props_enabled(client)
+    if args.refresh_players and not props:
+        print("--refresh-players refusé : l'option marchés joueurs n'est pas active sur Winamax FR, la passe serait inutile.")
+        return 2
     fx = load_fixtures()
-    comps = args.competitions.split(",") if args.competitions else list(BIG5)
+    comps = args.competitions.split(",") if args.competitions else list(COMPETITIONS)
     snaps = load_snapshots(comps)
     if args.refresh_players:
         # matchs archivés sans aucun marché joueur (plan sans « player props » au moment de l'appel) : à redemander
@@ -132,9 +149,10 @@ def cmd_history(args) -> int:
 
 def cmd_snapshot(args) -> int:
     client = OddsPapiClient()
+    player_props_enabled(client)
     comp_of = {tid: c for c, tid in TOURNAMENTS.items()}
     now = dt.datetime.now(dt.timezone.utc)
-    fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in BIG5], [BOOKMAKER])
+    fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in COMPETITIONS], [BOOKMAKER])
     rows = archive.fixture_rows(fixtures, comp_of, season="")
     if not rows.empty:
         rows["season"] = rows["start_time"].map(archive.season_of)
@@ -153,7 +171,7 @@ def cmd_snapshot(args) -> int:
 def cmd_views(args) -> int:
     fx = load_fixtures()
     total = 0
-    for comp in BIG5:
+    for comp in COMPETITIONS:
         for p in sorted((ODDS / comp).glob("*.parquet")) if (ODDS / comp).exists() else []:
             views = archive.derived_views(pd.read_parquet(p), fx)
             out = VIEWS / comp / p.name
@@ -170,12 +188,12 @@ def pitchapi_matches() -> pd.DataFrame:
     replay = ROOT / ".research" / "forecast" / "replay_pitchapi.parquet"
     if replay.exists():
         d = pd.read_parquet(replay, columns=["match_id", "competition", "kickoff_utc", "home_team_name", "away_team_name"])
-        frames.append(d[d["competition"].isin(BIG5)])
+        frames.append(d[d["competition"].isin(COMPETITIONS)])
     forecast = ROOT / "public" / "data" / "forecast.json"
     if forecast.exists():
         ms = json.loads(forecast.read_text(encoding="utf-8")).get("matches", [])
         frames.append(pd.DataFrame([{"match_id": m["match_id"], "competition": m["competition"], "kickoff_utc": pd.Timestamp(m["date"]),
-                                     "home_team_name": m["home"], "away_team_name": m["away"]} for m in ms if m["competition"] in BIG5]))
+                                     "home_team_name": m["home"], "away_team_name": m["away"]} for m in ms if m["competition"] in COMPETITIONS]))
     if not frames:
         return pd.DataFrame(columns=["match_id", "competition", "kickoff_utc", "home_team_name", "away_team_name"])
     df = pd.concat(frames, ignore_index=True).drop_duplicates("match_id")

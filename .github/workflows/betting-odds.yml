@@ -1,0 +1,68 @@
+# Labo paris : archive quotidienne des cotes Winamax FR (OddsPapi) — LIVRÉ NON ACTIVÉ.
+#
+# Déclenchement manuel seulement tant que la fréquence n'est pas validée par le propriétaire ; pour activer
+# la planification, décommenter le bloc `schedule` ci-dessous (11:00 UTC chaque jour).
+#
+# Chaque exécution : rencontres des 8 compétitions sur 10 jours glissants (1 requête décomptée), relevé
+# courant des rencontres à venir via /historical-odds (non décompté, tous les relevés depuis l'ouverture du
+# marché), historique complet des matchs terminés non archivés (non décompté), vues dérivées, appariement,
+# puis publication de l'archive dans la release privée des données. La clé OddsPapi vient du secret
+# ODDSPAPI_API_KEY et n'apparaît dans aucun journal.
+name: Labo paris — cotes Winamax
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 11 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: betting-odds
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances
+        run: pip install --quiet numpy pandas pyarrow scipy requests
+
+      - name: Archive précédente (release privée)
+        env:
+          GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
+        run: |
+          mkdir -p .research/betting
+          id="$(gh api repos/Cordierarn/PitchApi-big-5/releases/tags/betting-odds -q '.assets[] | select(.name == "betting-odds.tar.gz") | .id' 2>/dev/null || true)"
+          if [ -n "$id" ]; then
+            gh api -H "Accept: application/octet-stream" "repos/Cordierarn/PitchApi-big-5/releases/assets/$id" > betting-odds.tar.gz
+            tar -xzf betting-odds.tar.gz -C .research/betting
+          fi
+
+      - name: Cotes Winamax (rencontres, relevé courant, historiques, vues, appariement)
+        env:
+          ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
+        run: |
+          cd scripts
+          python3 -m betting.fetch fixtures --from "$(date -u -d '-1 day' +%F)" --to "$(date -u -d '+9 days' +%F)"
+          python3 -m betting.fetch snapshot
+          python3 -m betting.fetch history --max-requests 400
+          python3 -m betting.fetch views
+          python3 -m betting.fetch match
+          python3 -m betting.fetch status
+
+      - name: Publication de l'archive (release privée)
+        env:
+          GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
+        run: |
+          tar -czf betting-odds.tar.gz -C .research/betting odds views fixtures.parquet matches.parquet match_failures.parquet aliases.json quota.json
+          gh release view betting-odds --repo Cordierarn/PitchApi-big-5 >/dev/null 2>&1 || gh release create betting-odds --repo Cordierarn/PitchApi-big-5 --title "Labo paris — archive de cotes" --notes "Archive privée des cotes Winamax FR (OddsPapi), mise à jour par betting-odds.yml" --prerelease
+          gh release upload betting-odds betting-odds.tar.gz --repo Cordierarn/PitchApi-big-5 --clobber
