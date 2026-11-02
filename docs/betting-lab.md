@@ -61,10 +61,19 @@ marquer, marge) sont ceux du Labo.
 
 Coût en requêtes : 1 par fenêtre de 10 jours de fixtures, 1 par match pour l'historique complet (qui
 contient tous les relevés pré-match, donc les vues H−24 et H−1), 1 par tournoi pour un relevé courant.
-Le serveur compte chaque appel HTTP, réponses 429 et 5xx comprises (mesuré : 27 comptés pour 14 réponses
-utiles au premier lot) ; le compteur local fait de même et `status --account --sync` le réaligne.
-Besoin mensuel Big 5 : environ 205 historiques, 150 relevés quotidiens, 14 fenêtres de fixtures, soit
-moins de 400 sur 5 000. Rattrapage initial de la saison 2026-27 : 447 matchs terminés au 2 novembre.
+Comptage serveur mesuré le 2 novembre 2026 : `/fixtures`, `/odds` et `/odds-by-tournaments` sont
+décomptés à chaque appel HTTP, réponses 429 comprises (27 comptés pour 14 fenêtres utiles) ;
+`/historical-odds` et `/account` ne le sont pas (447 historiques téléchargés, compteur serveur inchangé).
+Le compteur local compte prudemment chaque appel ; `status --account --sync` le réaligne sur le serveur.
+Limite de débit : `/historical-odds` renvoie 429 sous environ 6 s entre deux appels (intervalle 6,5 s,
+relevé automatiquement au délai annoncé après un 429) ; `/fixtures` 1,5 s.
+Besoin mensuel Big 5 décompté : 150 relevés quotidiens et 3 fenêtres de fixtures par mois, loin des 5 000.
+
+Rattrapage initial (2 novembre 2026) : 447 matchs terminés de 2026-27, 9,1 millions de relevés, 23 Mo
+en parquet, 58 à 98 marchés par match, médiane 20 000 relevés par match ; vues dérivées sur 103 870
+lignes avec H−1 disponible à 99,5 % (manque surtout sur les scores exacts par équipe, 7,7 %) ;
+appariement avec PitchAPI 447/447 après deux alias saisis à la main (Bilbao, Cologne).
+Deux processus ne doivent jamais écrire l'archive en même temps (verrou `.research/betting/.lock`).
 
 Tests sans réseau (`npm run test:data`) : `scripts/test_betting_client.py`, `test_betting_archive.py`,
 `test_betting_matching.py`, sur des réponses synthétiques calquées sur la forme réelle (« Club A »,
