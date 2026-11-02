@@ -153,3 +153,38 @@ reproduced (`models.fit_joint`, 730-day window as in production) and ScoutVision
 validation only; 2025-26 is the "évaluation rétrospective hors ajustement du modèle"; 2026-27
 predictions are frozen and not evaluated. Results: `.research/forecast/backtests.json` (no ROI, no
 edge, no bet). No post-hoc calibration in this step.
+
+## Step 2B: real market benchmark on the frozen predictions
+
+Nothing from step 2A is re-run or re-tuned: the benchmark reads the frozen prediction parquets. Odds
+come from the real football-data.co.uk CSVs, downloaded by the CI workflow `research-odds.yml` (the
+runner reaches the domain) and published as `football-data-raw.tar.gz` in the private release
+`research-odds` of the data repository; locally they live in `.research/forecast/odds_raw/`
+(ignored by Git, never committed). `scripts/backtest/odds.py` audits every file before the join
+(`odds_ingestion_manifest.json`: encoding, columns, rows, dates, `Time`, providers per market and
+per type, coverage of the retained columns) and classifies every ScoutVision match as
+`matched_exact` (same date), `matched_mapped` (date ± 1 day, time-zone shifts), `ambiguous` or
+`unmatched` (`join_quality.json`, with the team-name votes and the unmatched football-data rows).
+
+Semantics stay as in step 1: non-closing prices are **available odds snapshot**, suffix `C` is
+**closing**. Three 1X2 benchmarks: `market_snapshot_avg`, `market_snapshot_pinnacle` and the
+reference `market_closing_pinnacle` with an explicit per-row fallback to the market-average closing
+when Pinnacle is missing (`mkt_closing_source`). De-vig: power (main), proportional (sensitivity);
+every row keeps the raw implied probabilities, the overround, the de-vig probabilities and the
+method (`replay_market.parquet`). The "new" files (ARG, AUT, BRA, DEN, JPN, MEX, NOR, POL, SWE, SUI,
+USA) carry closing 1X2 only: no snapshot, no over/under.
+
+`scripts/backtest/market_benchmark.py` compares, on the common population (frozen predictions of
+ScoutVision reproduced, Dixon-Coles decay, Elo and xG-20 + market reference + result), log-loss,
+RPS, Brier and ECE with the paired block bootstrap of step 2A (date × competition, 2 000 draws),
+globally and for Big 5 / other main leagues / "new"-file leagues / each competition; the
+logarithmic pool `p ∝ p_model^w · p_market^(1−w)` with `w` chosen on the 2024-25 validation over the
+pre-registered grid 0, 0.1, …, 1 and applied unchanged to 2025-26 (`w = 0`: no measurable extra
+information on the validation; `0 < w ≤ 0.2`: marginal; `w > 0.2`: measurable complementary
+information — descriptive labels, not profitability); divergence buckets |p_model − p_market|
+(0–2, 2–5, 5–10, 10–15, 15+ points: counts, mean probabilities, observed frequency, log-loss
+differential); the direction of the move from the available snapshot to the closing when the model
+sits above or below the snapshot (descriptive, no stake); the over/under 2.5 benchmark for the goal
+models against the closing over/under where it exists. Results: `backtests.json`, block
+`marketBenchmark`; registry entries `market_*` with `uses_odds = true`. No ROI, no edge, no bet, no
+post-hoc calibration.

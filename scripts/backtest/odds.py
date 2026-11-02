@@ -62,8 +62,15 @@ ODDS_FIELDS: list[OddsField] = (
        for o, s in (("over", ">2.5"), ("under", "<2.5"))]
 )
 ODDS_COLUMNS = [f.column for f in ODDS_FIELDS]
+# Colonnes par fournisseur explicite (benchmarks distincts : moyenne, Pinnacle ; snapshot et clôture)
+SPECIFIC = {"odds_avg_snapshot": (("Avg",), "market_average", SNAPSHOT, "1x2"), "odds_ps_snapshot": (("PS", "P"), "pinnacle", SNAPSHOT, "1x2"),
+            "odds_avg_closing": (("AvgC",), "market_average", CLOSING, "1x2"), "odds_ps_closing": (("PSC", "PC"), "pinnacle", CLOSING, "1x2"),
+            "odds_avg_ou_snapshot": (("Avg",), "market_average", SNAPSHOT, "ou25"), "odds_p_ou_snapshot": (("P",), "pinnacle", SNAPSHOT, "ou25"),
+            "odds_avg_ou_closing": (("AvgC",), "market_average", CLOSING, "ou25"), "odds_p_ou_closing": (("PC",), "pinnacle", CLOSING, "ou25")}
+SPECIFIC_COLUMNS = [f"{k}_{o}" for k, (_, _, _, m) in SPECIFIC.items() for o in (("home", "draw", "away") if m == "1x2" else ("over", "under"))]
 PROVIDER_COLUMNS = ["odds_snapshot_1x2_provider", "odds_closing_1x2_provider", "odds_snapshot_ou25_provider", "odds_closing_ou25_provider"]
-CLOSING_COLUMNS = [f.column for f in ODDS_FIELDS if f.snapshot_type == CLOSING] + ["odds_closing_1x2_provider", "odds_closing_ou25_provider"]
+CLOSING_COLUMNS = [f.column for f in ODDS_FIELDS if f.snapshot_type == CLOSING] + ["odds_closing_1x2_provider", "odds_closing_ou25_provider"] \
+    + [c for c in SPECIFIC_COLUMNS if "closing" in c]
 
 
 def field_metadata() -> list[dict]:
@@ -128,6 +135,12 @@ def normalize(df: pd.DataFrame, competition: str, kind: str, source_file: str) -
         "odds_closing_ou25_over": co[:, 0], "odds_closing_ou25_under": co[:, 1], "odds_closing_ou25_provider": pco,
         "odds_source_file": source_file,
     })
+    for key, (prefixes, _prov, _typ, market) in SPECIFIC.items():
+        suffixes = ("H", "D", "A") if market == "1x2" else (">2.5", "<2.5")
+        names = ("home", "draw", "away") if market == "1x2" else ("over", "under")
+        vals, _ = _pick(df, tuple((p, _prov) for p in prefixes), suffixes)
+        for i, o in enumerate(names):
+            out[f"{key}_{o}"] = vals[:, i]
     return out.dropna(subset=["odds_date", "odds_home_goals", "odds_away_goals"]).reset_index(drop=True)
 
 
@@ -252,3 +265,157 @@ def power_devig(odds: np.ndarray) -> np.ndarray:
         p = inv ** ((lo + hi) / 2)[:, None]
         out[ok] = p / p.sum(axis=1, keepdims=True)
     return out
+
+
+# ============================================
+# AUDIT DES FICHIERS RÉELS (étape 2B)
+# ============================================
+
+PROVIDER_PREFIXES = {"B365": "bet365", "BW": "bwin", "IW": "interwetten", "PS": "pinnacle", "P": "pinnacle", "WH": "william_hill",
+                     "VC": "vc_bet", "BF": "betfair", "BFE": "betfair_exchange", "1XB": "1xbet", "Max": "market_max", "Avg": "market_average",
+                     "LB": "ladbrokes", "SJ": "stan_james", "SB": "sportingbet", "GB": "gamebookers", "BS": "blue_square", "SO": "sporting_odds",
+                     "SY": "stanleybet", "BB": "betbrain"}
+
+
+def _provider_of(col: str) -> tuple[str | None, str | None, str | None]:
+    """(fournisseur, marché, type) d'une colonne de cotes football-data ; None si ce n'est pas une cote."""
+    import re
+    m = re.match(r"^(?P<p>[A-Za-z0-9]+?)(?P<c>C)?(?P<m>H|D|A|>2\.5|<2\.5|AHH|AHA|AHh|AH)$", col)
+    if not m:
+        return None, None, None
+    p = m.group("p")
+    if p == "AH" or p not in PROVIDER_PREFIXES and not (p.endswith("C") and p[:-1] in PROVIDER_PREFIXES):
+        return None, None, None
+    closing = bool(m.group("c"))
+    if p.endswith("C") and p[:-1] in PROVIDER_PREFIXES and p not in PROVIDER_PREFIXES:
+        p, closing = p[:-1], True
+    market = "1x2" if m.group("m") in ("H", "D", "A") else "ou25" if "2.5" in m.group("m") else "ah"
+    return PROVIDER_PREFIXES[p], market, CLOSING if closing else SNAPSHOT
+
+
+def audit_file(path: Path, competition: str, kind: str) -> dict:
+    """Ce que contient réellement un CSV football-data : colonnes, lignes, dates, heure, fournisseurs par
+    marché et par type, valeurs manquantes des colonnes retenues."""
+    raw = path.read_bytes()
+    encoding = None
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            raw.decode(enc); encoding = enc; break
+        except UnicodeDecodeError:
+            continue
+    df = read_csv(path)
+    date = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce") if "Date" in df else pd.Series(pd.NaT, index=df.index)
+    providers: dict[str, dict[str, set]] = {}
+    for c in df.columns:
+        prov, market, typ = _provider_of(c)
+        if prov:
+            providers.setdefault(market, {}).setdefault(typ, set()).add(prov)
+    norm = normalize(df, competition, kind, path.name)
+    return {
+        "file": path.name, "competition": competition, "kind": kind, "bytes": len(raw), "encoding": encoding,
+        "rows": int(len(df)), "rowsWithScore": int(len(norm)), "columns": int(len(df.columns)),
+        "firstDate": str(date.min().date()) if date.notna().any() else None, "lastDate": str(date.max().date()) if date.notna().any() else None,
+        "timeColumn": "Time" in df.columns, "timeCoverage": round(float(df["Time"].notna().mean()), 4) if "Time" in df.columns else 0.0,
+        "providers": {m: {t: sorted(v) for t, v in d.items()} for m, d in providers.items()},
+        "coverage": {c: round(float(norm[c].notna().mean()), 4) for c in ODDS_COLUMNS} if len(norm) else {},
+        "seasonsInFile": sorted(df["Season"].astype(str).unique().tolist()) if "Season" in df.columns else None,
+    }
+
+
+def audit_directory(directory: Path, seasons: list[str]) -> list[dict]:
+    out = []
+    for comp, div in MAIN_LEAGUES.items():
+        for season in seasons:
+            path = directory / f"{season_code(season)}_{div}.csv"
+            if path.exists():
+                out.append({**audit_file(path, comp, "main"), "season": season})
+    for comp, code in EXTRA_LEAGUES.items():
+        path = directory / f"new_{code}.csv"
+        if path.exists():
+            out.append({**audit_file(path, comp, "new"), "season": "all"})
+    return out
+
+
+# ============================================
+# APPARIEMENT CLASSÉ (étape 2B)
+# ============================================
+
+def classify_join(rows: pd.DataFrame, odds: pd.DataFrame, mapping: dict[tuple[str, str], str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Statut d'appariement de chaque match ScoutVision : matched_exact (date identique), matched_mapped
+    (date à un jour près), ambiguous (plusieurs lignes football-data candidates), unmatched. Renvoie aussi
+    la table des lignes football-data et leur statut (dont les ambiguïtés, avec exemples)."""
+    h = odds.copy()
+    h["home_team_id"] = [mapping.get((c, n)) for c, n in zip(h["competition"], h["odds_home_name"])]
+    h["away_team_id"] = [mapping.get((c, n)) for c, n in zip(h["competition"], h["odds_away_name"])]
+    h["day"] = h["odds_date"].dt.normalize()
+    h["_odds_row"] = np.arange(len(h))
+    r = rows[["match_id", "competition", "match_date", "home_team_id", "away_team_id"]].copy()
+    r["day"] = pd.to_datetime(r["match_date"]).dt.normalize()
+    cands = []
+    for shift in (0, -1, 1):
+        j = r.merge(h.dropna(subset=["home_team_id", "away_team_id"]).assign(day=h["day"] + pd.Timedelta(days=shift))[
+            ["competition", "day", "home_team_id", "away_team_id", "_odds_row"]], on=["competition", "day", "home_team_id", "away_team_id"])
+        j["shift"] = shift
+        cands.append(j)
+    c = pd.concat(cands, ignore_index=True)
+    per_match = c.groupby("match_id")["_odds_row"].nunique()
+    per_odds = c.groupby("_odds_row")["match_id"].nunique()
+    status = pd.Series("unmatched", index=r["match_id"])
+    exact = c[c["shift"] == 0].groupby("match_id")["_odds_row"].nunique()
+    ambiguous_matches = set(per_match[per_match > 1].index) | set(c[c["_odds_row"].isin(per_odds[per_odds > 1].index)]["match_id"])
+    status.loc[list(set(exact.index) - ambiguous_matches)] = "matched_exact"
+    mapped = set(per_match.index) - set(exact.index) - ambiguous_matches
+    status.loc[list(mapped)] = "matched_mapped"
+    status.loc[list(ambiguous_matches)] = "ambiguous"
+    chosen = c[~c["match_id"].isin(ambiguous_matches)].sort_values(["match_id", "shift"], key=lambda s: s.abs() if s.name == "shift" else s).drop_duplicates("match_id")
+    match_status = pd.DataFrame({"match_id": status.index, "join_status": status.to_numpy()}).merge(chosen[["match_id", "_odds_row", "shift"]], on="match_id", how="left")
+    used = set(chosen["_odds_row"])
+    ambiguous_rows = set(per_odds[per_odds > 1].index) | set(c[c["match_id"].isin(ambiguous_matches)]["_odds_row"])
+    odds_status = h[["competition", "odds_date", "odds_home_name", "odds_away_name", "odds_source_file", "_odds_row", "home_team_id", "away_team_id"]].copy()
+    odds_status["status"] = np.where(odds_status["_odds_row"].isin(used), "matched",
+                             np.where(odds_status["_odds_row"].isin(ambiguous_rows), "ambiguous",
+                             np.where(odds_status["home_team_id"].isna() | odds_status["away_team_id"].isna(), "team_not_mapped", "no_match_on_date")))
+    return match_status, odds_status
+
+
+def attach(rows: pd.DataFrame, odds: pd.DataFrame, match_status: pd.DataFrame) -> pd.DataFrame:
+    """Colonnes de cotes jointes aux lignes appariées (exact ou mapped) ; statut conservé."""
+    h = odds.copy(); h["_odds_row"] = np.arange(len(h))
+    keep = ODDS_COLUMNS + PROVIDER_COLUMNS + SPECIFIC_COLUMNS + ["odds_source_file", "odds_date", "odds_time"]
+    j = match_status.merge(h[["_odds_row"] + keep], on="_odds_row", how="left")
+    out = rows.merge(j.drop(columns=["_odds_row"]), on="match_id", how="left")
+    out["odds_has_snapshot_1x2"] = out["odds_snapshot_1x2_home"].notna()
+    out["odds_has_closing_1x2"] = out["odds_closing_1x2_home"].notna()
+    out["odds_has_snapshot_ou25"] = out["odds_snapshot_ou25_over"].notna()
+    out["odds_has_closing_ou25"] = out["odds_closing_ou25_over"].notna()
+    out["odds_semantics"] = np.where(out["odds_has_snapshot_1x2"] & out["odds_has_closing_1x2"], "available_snapshot+closing",
+                            np.where(out["odds_has_snapshot_1x2"], SNAPSHOT, np.where(out["odds_has_closing_1x2"], CLOSING, "none")))
+    return out
+
+
+# ============================================
+# DE-VIG (étape 2B : power en principal, proportionnel en sensibilité)
+# ============================================
+
+def implied(odds: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Probabilités implicites brutes 1/o et surcote (somme − 1) ; lignes incomplètes -> NaN."""
+    odds = np.asarray(odds, float)
+    ok = ~np.isnan(odds).any(axis=1) & (odds > 1).all(axis=1)
+    raw = np.full(odds.shape, np.nan)
+    raw[ok] = 1.0 / odds[ok]
+    over = np.full(len(odds), np.nan)
+    over[ok] = raw[ok].sum(axis=1) - 1
+    return raw, over
+
+
+def proportional_devig(odds: np.ndarray) -> np.ndarray:
+    raw, _ = implied(odds)
+    return raw / raw.sum(axis=1, keepdims=True)
+
+
+def devig(odds: np.ndarray, method: str = "power") -> np.ndarray:
+    if method == "power":
+        return power_devig(odds)
+    if method == "proportional":
+        return proportional_devig(odds)
+    raise ValueError(f"méthode de de-vig inconnue : {method}")
