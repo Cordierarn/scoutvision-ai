@@ -1,0 +1,59 @@
+name: Recherche prévision — cotes football-data
+
+# Télécharge les CSV publics de football-data.co.uk (recherche prévision, étape 2B) et les publie
+# comme archive dans la release privée `research-odds` du dépôt de données PitchApi-big-5.
+# Rien n'est commité dans ce dépôt public ; l'archive sert au benchmark marché local
+# (`.research/forecast/odds_raw`, ignoré par Git).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/forecast-point-in-time-dataset]
+    paths:
+      - .github/workflows/research-odds.yml
+      - scripts/backtest/odds_fetch.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-odds
+  cancel-in-progress: false
+
+env:
+  DATA_REPO: Cordierarn/PitchApi-big-5
+  ODDS_RELEASE: research-odds
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances
+        run: pip install -r scripts/requirements.txt
+      - name: Téléchargement football-data
+        run: |
+          cd scripts
+          python3 -m backtest.odds_fetch --out "$RUNNER_TEMP/odds_raw"
+      - name: Archive
+        run: tar -czf "$RUNNER_TEMP/football-data-raw.tar.gz" -C "$RUNNER_TEMP/odds_raw" .
+      - name: Publication dans la release privée
+        run: |
+          if ! gh release view "$ODDS_RELEASE" -R "$DATA_REPO" >/dev/null 2>&1; then
+            gh release create "$ODDS_RELEASE" -R "$DATA_REPO" --latest=false \
+              --title "Cotes football-data (recherche prévision)" \
+              --notes "CSV publics de football-data.co.uk téléchargés par Cordierarn/scoutvision-ai (research-odds.yml) pour le benchmark marché de la recherche prévision."
+          fi
+          gh release upload "$ODDS_RELEASE" "$RUNNER_TEMP/football-data-raw.tar.gz" -R "$DATA_REPO" --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: football-data-raw
+          path: ${{ runner.temp }}/football-data-raw.tar.gz
+          retention-days: 7

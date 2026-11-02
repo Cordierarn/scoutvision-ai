@@ -196,8 +196,8 @@ export interface ForecastMatch {
   pHome: number;
   pDraw: number;
   pAway: number;
-  xgHome: number;
-  xgAway: number;
+  xgHome: number | null;      // buts attendus du modèle ; null quand le pipeline ne les a pas (affiché N/D)
+  xgAway: number | null;
   // Enjeu : variation de P(objectif de saison) entre victoire et défaite, par équipe
   leverage?: { home?: { objective: string; delta: number }; away?: { objective: string; delta: number } };
   // Cotes football-data : probabilités du marché sans marge, meilleures cotes, avantage du modèle

@@ -13,6 +13,9 @@
     "data:pull": "bash scripts/pull_data.sh",
     "data:prepare": "python3 scripts/prepare_data.py",
     "data:lab": "python3 scripts/prepare_lab.py",
+    "research:replay": "cd scripts && python3 -m backtest.build",
+    "research:models": "cd scripts && python3 -m backtest.run_models --phase all",
+    "research:seasons": "cd scripts && python3 -m backtest.season_replay && python3 -m backtest.export_replays",
     "test": "vitest run",
     "test:data": "python3 -m unittest discover -s scripts -p \"test_*.py\""
   },

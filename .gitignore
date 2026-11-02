@@ -54,3 +54,6 @@ ScoutVision_*.pdf
 dist-server/
 # Dossier de travail du téléchargement des données au démarrage (npm start)
 .scoutvision-sync/
+
+# Dataset de recherche prévision (scripts/backtest, étape 1) : parquet et manifeste locaux, jamais commités
+.research/
