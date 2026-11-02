@@ -241,3 +241,55 @@ approximate-tiebreak banner when the rules are not exact or the fallback share i
 table against the real final table, the rank heatmap (focusable cells, text alternative), a team
 detail, the error-evolution curve and the historical model comparison. States: Skeleton, LoadError
 with retry (`role="alert"`), EmptyState. Browser code never trains nor simulates.
+
+## Closing pass: the Forecast page is frozen
+
+No new model, feature, optimisation or betting content. The pass only tightens what the page says
+and shows, with the numbers read from the artefacts.
+
+- **Tiebreak signal graded by the real share** (`tiebreakSignal` in
+  `components/forecast/forecastLogic.ts`): 0 → nothing; below 1 % → only described in the method
+  tab; 1 to 5 % → the compact line « Départage simplifié sur X % des simulations. » with an InfoTip
+  giving the rules; above 5 % → the banner « Certaines égalités utilisent un départage simplifié. »
+  with « X % des simulations concernées. ». The engine is unchanged. Measured on the current
+  export: Premier League 0.3 % (nothing shown), LaLiga 37 %, LaLiga 2 54 %, Liga Portugal 22 %
+  (banner).
+- **STRICT replay kept**; a start point without full prediction coverage stays disabled with the
+  exact reason (`Indisponible : N rencontres restantes sans prévision du modèle`).
+- **No "Mode actuel"**: the 2026-27 season is not shown in the simulator. A strictly complete
+  current artefact would need (1) frozen predictions for the unplayed 2026-27 fixtures — the
+  prediction parquets only contain finished matches, (2) the fixture list in the point-in-time
+  dataset (the raw `fixtures` table is not in the cache the research pipeline reads), (3) a
+  predict-only pass of the frozen models on those fixtures and (4) an export with the current
+  table and the "Projection actuelle" wording. None of this exists; nothing is approximated.
+- **Upcoming matches**: percentages rounded by largest remainder to total 100 (`roundToHundred`),
+  N/D when a probability or an expected-goals value is missing (never NaN, never 0 by default),
+  no market line, no edge; a stacked layout under 640 px.
+- **Model vs market**: the page states the reference result — « Le marché de clôture reste plus
+  précis que les modèles sportifs testés. » — with the ScoutVision vs closing-market log-loss
+  delta, its 90 % interval, the period (real kick-off range of the evaluated matches, exported as
+  `dateRanges`), the common population and the optimal pool weight, plus « Les grands écarts
+  entre ScoutVision et le marché sont principalement du bruit du modèle dans les données
+  historiques. ». Source: `public/data/forecast/market_benchmark.json`, derived from
+  `backtests.json` by `export_replays.py`. The pipeline's own evaluation (`forecast.json.market`)
+  is shown when present and an EmptyState otherwise.
+- **Vocabulary**: « Probabilité », « Buts attendus », « Impact simulé », « Référence marché
+  historique », « Replay historique », « Erreur historique » ; no « favori », « avantage »,
+  « value », « pari », « bookmakers », « confiance », « gagnant probable ».
+- **Freshness**: forecasts dated by `index.json.generatedAt`, replays by the replay index
+  `generatedAt`, market by the benchmark period; never mixed.
+- **Method & reliability**: one tab with Prévisions, Simulation et replay, Validation match
+  (log-loss table from the benchmark), Validation saison (MAE rank / points / coverage per start
+  point from `summary.json`), Limites and the objective calibration table (predicted bin, observed
+  frequency, N, with a caution sentence).
+- **Tests**: `components/forecast/forecastLogic.test.ts` (rounding to 100, N/D for missing xG,
+  tiebreak thresholds, freshness dates, market wording). Vitest 429, Python 82.
+- **Validation** (production build, real Chromium, real data, 2026-11-02): four tabs at 320, 390,
+  768, 1024, 1440, 1600 px and zoom 200 % with no horizontal overflow, no console error, no failed
+  request; keyboard only with focus never on BODY; LoadError + Réessayer on a failed
+  `forecast.json`, graceful fallback on a failed `market_benchmark.json`; 403 upcoming rows all
+  totalling 100; a model switch downloads nothing (replay files 132–205 KB raw, gzip on the wire;
+  index 16 KB; benchmark 6 KB).
+
+The reference results above are bound to the measured seasons (2024-25 validation, 2025-26
+retrospective evaluation) and competitions; they are not a general law and are not re-opened.

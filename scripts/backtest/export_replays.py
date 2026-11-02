@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from . import SCHEMA_VERSION
 from .run_models import OUT
@@ -36,7 +37,7 @@ LIMITATIONS = [
     "Barrages, matchs d'appui et déductions de points ne sont pas modélisés.",
     "La confrontation directe n'est reproduite que pour les égalités à deux équipes.",
     "Seuls les replays dont toutes les rencontres restantes ont une prévision sont publiés.",
-    "La référence marché historique est un repère, pas une prévision des bookmakers.",
+    "La référence marché historique est un repère, pas une prévision du marché actuel.",
 ]
 
 
@@ -164,6 +165,41 @@ def main() -> int:
                "goalPolicyImpact": {"meanAbsDeltaTitle": round(float(np.mean([x["meanAbsDeltaTitle"] for x in d["goalPolicyImpact"]])), 4) if d["goalPolicyImpact"] else None,
                                     "meanAbsDeltaRelegation": round(float(np.mean([x["meanAbsDeltaRelegation"] for x in d["goalPolicyImpact"]])), 4) if d["goalPolicyImpact"] else None}}
     (args.dest / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    # Résultat de référence de l'étape 2B pour la page produit (sans ROI, mise ni pari)
+    bt_path = OUT / "backtests.json"
+    if bt_path.exists():
+        bt = json.loads(bt_path.read_text(encoding="utf-8"))
+        mb = bt.get("marketBenchmark")
+        if mb:
+            def season_block(season: str) -> dict | None:
+                sb = mb["seasons"].get(season)
+                if not sb:
+                    return None
+                full = sb["full"]
+                paired = {p["model"]: p["logLoss"] for p in full["paired"]}
+                return {"population": full["population"], "logLoss": {m: v["logLoss"] for m, v in full["scores"].items() if "logLoss" in v},
+                        "vsMarket": paired}
+            def date_range(season: str) -> list[str] | None:
+                # Bornes réelles (dates de coup d'envoi) des rencontres évaluées face à la clôture : prévisions ∩ cotes de clôture
+                pred_path, mkt_path = OUT / "predictions" / f"{season}.parquet", OUT / "replay_market.parquet"
+                if not pred_path.exists() or not mkt_path.exists():
+                    return None
+                ids = pd.read_parquet(pred_path, columns=["match_id"])["match_id"].unique()
+                col = f"mkt_{mb['reference']}_p_home"
+                mkt = pd.read_parquet(mkt_path, columns=["match_id", "kickoff_utc", col])
+                rows = mkt[mkt["match_id"].isin(ids)].dropna(subset=[col])
+                if rows.empty:
+                    return None
+                return [str(rows["kickoff_utc"].min().date()), str(rows["kickoff_utc"].max().date())]
+            scores = bt.get("scores", {})
+            match_validation = {season: {m: v["overall"]["logLoss"] for m, v in scores[season]["main"]["byModel"].items()} for season in scores if "main" in scores[season]}
+            bench = {"schemaVersion": SCHEMA_VERSION, "generatedAt": mb["generatedAt"], "headline": "Le marché de clôture reste plus précis que les modèles sportifs testés.",
+                     "divergence": "Les grands écarts entre ScoutVision et le marché sont principalement du bruit du modèle dans les données historiques.",
+                     "reference": mb["reference"], "periods": mb["periods"], "dateRanges": {s: date_range(s) for s in mb["seasons"]}, "coverage": mb["coverage"]["rates"]["global"],
+                     "seasons": {s: season_block(s) for s in mb["seasons"]}, "pool": {m: {"selectedWeight": v["selectedWeight"], "interpretation": v["interpretation"]} for m, v in mb["pool"].items()},
+                     "divergenceBuckets": {s: mb["divergence"][s].get("scoutvision_reproduced") for s in mb["divergence"]},
+                     "matchValidation": match_validation, "limits": mb["limits"]}
+            (args.dest.parent / "market_benchmark.json").write_text(json.dumps(bench, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     sizes = {"index": (args.dest / "index.json").stat().st_size, "summary": (args.dest / "summary.json").stat().st_size, "seasonsTotal": total,
              "seasonFiles": sum(len(c["seasons"]) for c in index_comps), "source": args.source.stat().st_size}
     print(json.dumps(sizes))

@@ -129,7 +129,7 @@ the career (estimate pulled towards the average under 50 shots).
 |---|---|---|
 | **Forecasts** | Forecasts page | leagues: pipeline `forecast` model (xG attack/defence strengths, home advantage). European cups (UCL, UEL, UECL): pipeline `forecast` model as well (current data). Fallback when the pipeline does not cover the cups: joint all-competition Poisson model in `scripts/models.py` (league level + team deviation, linked through cup matches, Dixon-Coles) |
 | **Season outlook & match leverage** | Forecasts page | 20,000 simulations of the remaining fixtures (pipeline 1-X-2 probabilities): P(title), P(top 4), P(bottom 3); leverage of a match = change in P(objective) between a win and a loss (Serie A study, 2026) |
-| **Model vs market** | Forecasts page | odds from football-data.co.uk (27 competitions): pipeline backtest vs margin-free closing odds (power de-vig) — RPS, log-loss, model weight in a logarithmic pool, simulated value bets judged by closing line value. Oct. 2026: RPS 0.2102 vs 0.2034, weight 0.00, CLV −10.5 % on 1,702 bets: no edge |
+| **Model vs market** | Forecasts page | reference result of the research benchmark (`docs/forecast-research.md`): frozen walk-forward predictions vs margin-free Pinnacle closing odds (power de-vig), paired log-loss with a block-bootstrap 90 % interval, optimal weight in a logarithmic pool, divergence buckets. 2025-26 (8,256 matches): ScoutVision reproduced 1.0129 vs closing 1.0005, delta +0.0160 [+0.0132; +0.0190], weight 0: the closing market stays more accurate than the sports models tested; large model-market gaps are mostly model noise. Period-bound, not a general law. No bets, no ROI, no odds on upcoming matches |
 
 ### European cup fallback model
 

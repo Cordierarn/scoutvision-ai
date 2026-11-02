@@ -11,9 +11,10 @@ import { Replay, ReplayIndex, ReplayModel, ReplayPoint, ReplaySeasonFile, Replay
 import { CONTEXT, INK, SERIES, axisProps, tooltipProps } from '../../theme/charts';
 import { EmptyState, InfoTip, LoadError, Panel, Skeleton, Stat, StatStrip } from '../ui';
 import RankHeatmap from './RankHeatmap';
+import { tiebreakSignal } from './forecastLogic';
 import {
   APPROXIMATE_TIEBREAK, MODEL_LABELS, MODEL_ORDER, POINT_ORDER, ROLLING_KNOWLEDGE, ROLLING_KNOWLEDGE_DETAIL, comparison, competitions, defaultSelection,
-  findReplay, formatDate, headline, modelOptions, needsApproximateBanner, num, objectiveColumns, pct, pointOptions, seasonsOf, signed,
+  findReplay, formatDate, headline, modelOptions, num, objectiveColumns, pct, pointOptions, seasonsOf, signed,
 } from './simulatorLogic';
 
 type Simulated = Extract<Replay, { status: 'simulated' }>;
@@ -96,7 +97,8 @@ const SeasonSimulator: React.FC = () => {
 
   const seasons = seasonsOf(index, competition);
   const selectedTeamData = sim?.teams.find(t => t.id === selectedTeam) ?? null;
-  const approx = sim ? needsApproximateBanner(file!.rules.exact, sim.approximateTiebreakShare) : false;
+  const signal = sim ? tiebreakSignal(sim.approximateTiebreakShare) : 'none';
+  const rulesTip = file ? `Règles non reproduites : ${file.rules.approximations.join(' ; ') || 'aucune'}. Critères appliqués : ${file.rules.tiebreaks.join(', ')}.` : '';
 
   return (
     <div className="space-y-4">
@@ -111,7 +113,7 @@ const SeasonSimulator: React.FC = () => {
             <Select id="sim-point" label="Point de départ" value={point} onChange={v => setPoint(v as ReplayPoint)} options={pointOptions(file, model, pointLabels)}
               tip="Début, 25 %, 50 % ou 75 % des rencontres de la saison. Le classement à cette date est celui des rencontres terminées ; le reste est simulé." />
             <Select id="sim-model" label="Modèle" value={model} onChange={v => setModel(v as ReplayModel)} options={modelOptions(file, point, index)}
-              tip={`Identifiants techniques : ${index.models.map(m => `${m.label} = ${m.technical}`).join(' ; ')}. La référence marché historique est un repère, pas une prévision des bookmakers.`} />
+              tip={`Identifiants techniques : ${index.models.map(m => `${m.label} = ${m.technical}`).join(' ; ')}. La référence marché historique est un repère, pas une prévision du marché actuel.`} />
           </>
         ) : <><Skeleton className="h-14" /><Skeleton className="h-14" /></>}
       </div>
@@ -142,20 +144,22 @@ const SeasonSimulator: React.FC = () => {
             <span>Modèle : {MODEL_LABELS[model]}</span>
             <span>{file.nSims.toLocaleString('fr-FR')} simulations</span>
             <span>Généré le {new Date(file.generatedAt).toLocaleDateString('fr-FR')}</span>
-            <span className={`inline-flex items-center rounded border px-1.5 h-5 text-2xs ${approx ? 'border-warn/50 text-ink-2' : 'border-line text-ink-3'}`}>
-              {approx ? 'Départage approximatif' : 'Règles reproduites'}
-            </span>
+            <span className="inline-flex items-center rounded border border-line px-1.5 h-5 text-2xs text-ink-3">Replay historique</span>
+            {signal === 'none' && file.rules.exact && <span className="inline-flex items-center rounded border border-line px-1.5 h-5 text-2xs text-ink-3">Règles reproduites</span>}
+            {signal === 'compact' && (
+              <span className="inline-flex items-center gap-1 text-2xs text-ink-2">Départage simplifié sur {pct(sim.approximateTiebreakShare, 1)} des simulations.<InfoTip text={rulesTip} align="end" /></span>
+            )}
           </div>
-          {approx && (
-            <div className="rounded-md border border-line bg-raised/40 px-3 py-2 text-xs text-ink-2 flex items-start gap-2">
-              <span className="flex-1">{APPROXIMATE_TIEBREAK} {sim.approximateTiebreakShare >= 0.01 && `Part des simulations concernées : ${pct(sim.approximateTiebreakShare)}.`}</span>
-              <InfoTip align="end" text={`Règles non reproduites : ${file.rules.approximations.join(' ; ')}. Critères appliqués : ${file.rules.tiebreaks.join(', ')}.`} />
+          {signal === 'banner' && (
+            <div className="rounded-md border border-warn/40 bg-raised/40 px-3 py-2 text-xs text-ink-2 flex items-start gap-2">
+              <span className="flex-1">{APPROXIMATE_TIEBREAK} {pct(sim.approximateTiebreakShare)} des simulations concernées.</span>
+              <InfoTip align="end" text={rulesTip} />
             </div>
           )}
 
           {/* Synthèse */}
           <StatStrip className="sv-panel py-3 grid-cols-2 lg:grid-cols-4">
-            <Stat label="Équipe favorite au titre" value={head.favourite?.name ?? '–'} sub="simulation" />
+            <Stat label="Équipe la plus probable au titre" value={head.favourite?.name ?? '–'} sub="simulation" />
             <Stat label="Probabilité de titre" value={head.pTitle !== null ? pct(head.pTitle) : '–'} sub={head.champion ? `Champion réel : ${head.champion.name}` : undefined} />
             <Stat label="Erreur moyenne du modèle à ce stade" value={evo ? `${num(evo.maeRank, 2)} rang` : 'N/D'} sub={evo ? `${num(evo.maePoints, 1)} pts · ${evo.replays} replays historiques` : 'non mesurée'} />
             <Stat label="Couverture de l'intervalle 80 %" value={evo ? pct(evo.coverage80) : 'N/D'} sub="points finaux réels dans l'intervalle" />

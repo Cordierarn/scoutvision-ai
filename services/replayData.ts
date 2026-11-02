@@ -69,6 +69,18 @@ export interface ReplaySummary {
   goalPolicyImpact: { meanAbsDeltaTitle: number | null; meanAbsDeltaRelegation: number | null };
 }
 
+/** Résultat de référence de l'étape 2B (benchmark marché historique) publié pour la page produit */
+export interface MarketBenchmark {
+  schemaVersion: string; generatedAt: string; headline: string; divergence: string; reference: string;
+  periods: Record<string, string>; dateRanges?: Record<string, [string, string] | null>; coverage: { matches: number; matchedRate: number | null; closing1x2Rate: number | null };
+  seasons: Record<string, { population: number; logLoss: Record<string, number>; vsMarket: Record<string, { delta: number; ci90: [number, number]; pModelBetter: number }> } | null>;
+  pool: Record<string, { selectedWeight: number; interpretation: string }>;
+  divergenceBuckets: Record<string, { bucket: string; outcomes: number; matches: number; meanModelProbability: number | null; meanMarketProbability: number | null; observedFrequency: number | null;
+    modelHigher: { outcomes: number; meanModel: number | null; meanMarket: number | null; observedFrequency: number | null }; logLossDifferential: number | null }[] | null>;
+  matchValidation: Record<string, Record<string, number>>;
+  limits: string[];
+}
+
 const cache = new Map<string, Promise<unknown>>();
 
 async function fetchJSON<T>(path: string): Promise<T> {
@@ -87,7 +99,26 @@ function load<T>(path: string): Promise<T> {
   return pending;
 }
 
+async function fetchOptionalJSON<T>(path: string): Promise<T | null> {
+  const response = await fetch(path);
+  const isJson = (response.headers.get('content-type') || '').includes('json');
+  if (response.status === 404 || (response.ok && !isJson)) return null;
+  if (!response.ok) throw new Error(`Chargement impossible (${response.status})`);
+  return response.json();
+}
+
+function loadOptional<T>(path: string): Promise<T | null> {
+  let pending = cache.get(path) as Promise<T | null> | undefined;
+  if (!pending) {
+    pending = fetchOptionalJSON<T>(path);
+    pending.catch(() => cache.delete(path));
+    cache.set(path, pending);
+  }
+  return pending;
+}
+
 export const replayData = {
+  marketBenchmark: () => loadOptional<MarketBenchmark>('/data/forecast/market_benchmark.json'),
   index: () => load<ReplayIndex>('/data/forecast/replays/index.json'),
   summary: () => load<ReplaySummary>('/data/forecast/replays/summary.json'),
   season: (competition: string, season: string) => load<ReplaySeasonFile>(`/data/forecast/replays/${encodeURIComponent(competition)}/${encodeURIComponent(season)}.json`),
