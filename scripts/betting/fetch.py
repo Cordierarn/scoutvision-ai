@@ -5,9 +5,10 @@ Ligne de commande du Labo paris, phase 1 (tout sous .research/betting/, ignoré 
   python3 -m betting.fetch status [--account]              compteur local du quota (et compteur serveur, 1 requête)
   python3 -m betting.fetch fixtures --from 2026-07-01 --to 2026-11-10
                                                            rencontres Big 5 (1 requête par fenêtre de 10 jours)
-  python3 -m betting.fetch history --max-requests 20 [--since 2026-10-01] [--competitions ENG,ESP]
+  python3 -m betting.fetch history --max-requests 20 [--since 2026-10-01] [--competitions ENG,ESP] [--refresh-players]
                                                            historique Winamax complet des matchs terminés non archivés,
-                                                           du plus récent au plus ancien (1 requête par match)
+                                                           du plus récent au plus ancien (1 requête par match) ;
+                                                           --refresh-players redemande les matchs archivés sans marché joueur
   python3 -m betting.fetch snapshot                        relevé courant des rencontres à venir (1 requête par tournoi)
   python3 -m betting.fetch views                           vues dérivées premier / H−24 / H−1 / dernier avant coup d'envoi
   python3 -m betting.fetch match                           appariement avec les matchs PitchAPI (alias appris)
@@ -100,7 +101,12 @@ def cmd_history(args) -> int:
     client = OddsPapiClient()
     fx = load_fixtures()
     comps = args.competitions.split(",") if args.competitions else list(BIG5)
-    done = set(load_snapshots(comps)["fixture_id"].unique())
+    snaps = load_snapshots(comps)
+    if args.refresh_players:
+        # matchs archivés sans aucun marché joueur (plan sans « player props » au moment de l'appel) : à redemander
+        done = set(snaps.loc[snaps["player_id"].notna(), "fixture_id"].unique())
+    else:
+        done = set(snaps["fixture_id"].unique())
     todo = fx[(fx["status_id"] == STATUS_FINISHED) & fx["competition"].isin(comps) & ~fx["fixture_id"].isin(done)]
     if args.since:
         todo = todo[todo["start_time"] >= pd.Timestamp(args.since, tz="UTC")]
@@ -196,7 +202,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("status"); p.add_argument("--account", action="store_true"); p.add_argument("--sync", action="store_true"); p.set_defaults(fn=cmd_status)
     p = sub.add_parser("fixtures"); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True); p.set_defaults(fn=cmd_fixtures)
-    p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.set_defaults(fn=cmd_history)
+    p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.add_argument("--refresh-players", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("snapshot"); p.set_defaults(fn=cmd_snapshot)
     p = sub.add_parser("views"); p.set_defaults(fn=cmd_views)
     p = sub.add_parser("match"); p.set_defaults(fn=cmd_match)

@@ -118,7 +118,12 @@ class ClientTests(unittest.TestCase):
         c, http, sleeps = make_client([(200, {"fixtureId": "a", "bookmakers": {}}), (200, {"fixtureId": "b", "bookmakers": {}})])
         c.historical_odds("a", ["w"])
         c.historical_odds("b", ["w"])
-        self.assertTrue(any(abs(s - 3.0) < 1e-6 for s in sleeps))
+        self.assertTrue(any(abs(s - 5.5) < 1e-6 for s in sleeps))
+
+    def test_429_raises_the_endpoint_interval(self):
+        c, http, sleeps = make_client([(429, {"error": {"retryMs": 4000}}), (200, {"fixtureId": "a", "bookmakers": {}})])
+        c.historical_odds("a", ["w"])
+        self.assertGreaterEqual(c.min_interval["historical-odds"], 4.7)
 
     def test_account_strips_key_and_email(self):
         c, _, _ = make_client([(200, {"api_key": KEY, "email": "x@y.z", "subscriptions": [{"plan": "free", "request_limit": 250}]})])

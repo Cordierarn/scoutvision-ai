@@ -31,7 +31,7 @@ FIXTURE_WINDOW_DAYS = 10
 MAX_BOOKMAKERS_PER_CALL = 3
 DEFAULT_BUDGET = 250
 # Délai minimal entre deux appels d'un même endpoint (429 constaté à 0,9 s sur /fixtures ; 5 s annoncés sur /historical-odds)
-MIN_INTERVAL = {"fixtures": 1.5, "historical-odds": 3.0, "odds-by-tournaments": 2.0, "odds": 1.0}
+MIN_INTERVAL = {"fixtures": 1.5, "historical-odds": 5.5, "odds-by-tournaments": 2.0, "odds": 1.0}
 DEFAULT_INTERVAL = 1.0
 CACHE_TTL = {"sports": 30 * 86400, "bookmakers": 30 * 86400, "markets": 30 * 86400, "historical-odds": 0,
              "fixtures": 6 * 3600, "odds-by-tournaments": 0, "odds": 0, "account": 0}
@@ -173,6 +173,7 @@ class OddsPapiClient:
             text = self.redact(body.decode("utf-8", "replace")[:300])
             if status == 429:
                 delay = self._retry_delay(body, attempt)
+                self.min_interval[endpoint] = max(self.min_interval.get(endpoint, DEFAULT_INTERVAL), delay + 0.5)
                 last_error = f"429 (attente {delay:.1f} s) : {text}"
             elif status >= 500:
                 delay = float(2 ** attempt)
