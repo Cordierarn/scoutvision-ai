@@ -31,7 +31,7 @@ FIXTURE_WINDOW_DAYS = 10
 MAX_BOOKMAKERS_PER_CALL = 3
 DEFAULT_BUDGET = 250
 # Délai minimal entre deux appels d'un même endpoint (429 constaté à 0,9 s sur /fixtures ; 5 s annoncés sur /historical-odds)
-MIN_INTERVAL = {"fixtures": 1.5, "historical-odds": 5.5, "odds-by-tournaments": 2.0, "odds": 1.0}
+MIN_INTERVAL = {"fixtures": 1.5, "historical-odds": 6.5, "odds-by-tournaments": 2.0, "odds": 1.0}
 DEFAULT_INTERVAL = 1.0
 CACHE_TTL = {"sports": 30 * 86400, "bookmakers": 30 * 86400, "markets": 30 * 86400, "historical-odds": 0,
              "fixtures": 6 * 3600, "odds-by-tournaments": 0, "odds": 0, "account": 0}
@@ -191,7 +191,7 @@ class OddsPapiClient:
         try:
             ms = json.loads(body.decode("utf-8")).get("error", {}).get("retryMs")
             if ms:
-                return max(float(ms) / 1000.0, 0.1) + 0.2
+                return max(float(ms) / 1000.0, 0.1) + 1.0
         except (ValueError, AttributeError):
             pass
         return float(2 ** attempt)

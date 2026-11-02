@@ -86,10 +86,11 @@ class IdempotenceTests(unittest.TestCase):
             p = Path(tmp) / "fixtures.parquet"
             a = fixtures_df()
             archive.write_fixtures(a, p)
-            b = a.copy(); b["status_id"] = 2; b["has_odds"] = False
+            b = a.copy(); b["status_id"] = 2; b["has_odds"] = False; b["home_name"] = None
             merged = archive.write_fixtures(b, p)
             self.assertEqual(len(merged), 1)
             self.assertEqual(bool(merged.iloc[0]["has_odds"]), False)
+            self.assertEqual(merged.iloc[0]["home_name"], "Club A")  # un nom absent ne remplace pas un nom connu
 
 
 class ViewsTests(unittest.TestCase):

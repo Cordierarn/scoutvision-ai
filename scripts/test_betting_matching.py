@@ -72,6 +72,13 @@ class MatchingTests(unittest.TestCase):
         self.assertTrue(matched.empty)
         self.assertEqual(failures.iloc[0]["reason"], "ambigu")
 
+    def test_missing_names_never_match(self):
+        f = fx([("f1", "AAA", "2026-11-01T15:00:00Z", None, "Beta")])
+        m = ms([("m1", "AAA", "2026-11-01 15:00:00", "Alpha", "Beta")])
+        matched, failures = matching.match_fixtures(f, m)
+        self.assertTrue(matched.empty)
+        self.assertEqual(matching.normalize(float("nan")), set())
+
     def test_normalisation(self):
         self.assertEqual(matching.normalize("Śląsk Wrocław FC"), {"slask", "wroclaw"})
         self.assertGreaterEqual(matching.similarity("Bodø/Glimt", "Bodoe/Glimt"), 0.9)

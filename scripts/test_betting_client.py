@@ -59,7 +59,7 @@ class ClientTests(unittest.TestCase):
         c, http, sleeps = make_client([(429, {"error": {"code": "RATE_LIMITED", "retryMs": 904}}), (200, [{"sportId": 10}])])
         self.assertEqual(c.get("sports"), [{"sportId": 10}])
         self.assertEqual(len(http.calls), 2)
-        self.assertTrue(any(abs(s - 1.104) < 1e-6 for s in sleeps))
+        self.assertTrue(any(abs(s - 1.904) < 1e-6 for s in sleeps))
         self.assertEqual(c.quota.used, 2)  # la tentative 429 est facturée par le serveur (mesuré en phase 1)
 
     def test_three_5xx_failures_raise_and_write_nothing(self):
@@ -118,7 +118,7 @@ class ClientTests(unittest.TestCase):
         c, http, sleeps = make_client([(200, {"fixtureId": "a", "bookmakers": {}}), (200, {"fixtureId": "b", "bookmakers": {}})])
         c.historical_odds("a", ["w"])
         c.historical_odds("b", ["w"])
-        self.assertTrue(any(abs(s - 5.5) < 1e-6 for s in sleeps))
+        self.assertTrue(any(abs(s - 6.5) < 1e-6 for s in sleeps))
 
     def test_429_raises_the_endpoint_interval(self):
         c, http, sleeps = make_client([(429, {"error": {"retryMs": 4000}}), (200, {"fixtureId": "a", "bookmakers": {}})])

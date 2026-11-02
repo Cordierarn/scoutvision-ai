@@ -37,7 +37,9 @@ SPECIAL = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O", "đ": "d", 
 
 
 def normalize(name: str) -> set[str]:
-    s = unicodedata.normalize("NFKD", (name or "").translate(SPECIAL)).encode("ascii", "ignore").decode().lower()
+    if not isinstance(name, str):
+        return set()
+    s = unicodedata.normalize("NFKD", name.translate(SPECIAL)).encode("ascii", "ignore").decode().lower()
     s = re.sub(r"[^a-z0-9 ]", " ", s)
     return {t for t in s.split() if t not in STOP}
 
@@ -79,7 +81,7 @@ def save_aliases(aliases: dict[str, str], path: Path = ALIASES_PATH) -> None:
 
 
 def team_score(oddspapi_name: str, pitchapi_name: str, aliases: dict[str, str]) -> float:
-    if aliases.get(oddspapi_name) == pitchapi_name:
+    if isinstance(oddspapi_name, str) and aliases.get(oddspapi_name) == pitchapi_name:
         return 1.0
     return similarity(oddspapi_name, pitchapi_name)
 
@@ -122,6 +124,7 @@ def learn_aliases(matched: pd.DataFrame, fixtures: pd.DataFrame, matches: pd.Dat
     f = fixtures.set_index("fixture_id")
     m = matches.set_index("match_id")
     for r in matched.itertuples(index=False):
-        out.setdefault(f.loc[r.fixture_id, "home_name"], m.loc[r.match_id, "home_team_name"])
-        out.setdefault(f.loc[r.fixture_id, "away_name"], m.loc[r.match_id, "away_team_name"])
+        for a, b in ((f.loc[r.fixture_id, "home_name"], m.loc[r.match_id, "home_team_name"]), (f.loc[r.fixture_id, "away_name"], m.loc[r.match_id, "away_team_name"])):
+            if isinstance(a, str) and isinstance(b, str):
+                out.setdefault(a, b)
     return out

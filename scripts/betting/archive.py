@@ -112,8 +112,14 @@ def write_snapshots(new: pd.DataFrame, path: Path) -> int:
 
 
 def write_fixtures(new: pd.DataFrame, path: Path = RESEARCH / "fixtures.parquet") -> pd.DataFrame:
+    """Fusion par identifiant ; une valeur absente dans la nouvelle ligne (noms d'équipes manquants dans
+    `/odds-by-tournaments`) ne remplace jamais une valeur connue."""
     existing = pd.read_parquet(path) if path.exists() else None
-    merged = merge_unique(existing, new, ["fixture_id"])
+    frames = [f for f in (existing, new) if f is not None and not f.empty]
+    if not frames:
+        merged = new.iloc[0:0].copy()
+    else:
+        merged = pd.concat(frames, ignore_index=True).groupby("fixture_id", as_index=False, sort=True).last()[FIXTURE_COLUMNS]
     atomic_to_parquet(merged, path)
     return merged
 
