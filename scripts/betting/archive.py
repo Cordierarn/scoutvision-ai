@@ -50,9 +50,10 @@ def flatten_historical(payload: dict, source: str = "historical") -> pd.DataFram
     return df
 
 
-def flatten_live(fixture: dict, observed_at: dt.datetime | None = None) -> pd.DataFrame:
-    """Aplatit une rencontre de `/odds-by-tournaments` (cotes courantes) dans le même schéma : la date du
-    relevé est `changedAt` (dernier changement de prix chez le bookmaker)."""
+def flatten_live(fixture: dict, observed_at: dt.datetime | None = None, stamp: str = "changed") -> pd.DataFrame:
+    """Aplatit une rencontre de `/odds-by-tournaments` (cotes courantes) dans le même schéma. La date du relevé
+    est `changedAt` (dernier changement de prix chez le bookmaker) ou, avec `stamp="observed"`, l'heure de
+    l'appel : le prix est alors attesté à cet instant, comme un relevé de `/historical-odds`."""
     rows = []
     for bookmaker, bk in (fixture.get("bookmakerOdds") or {}).items():
         for market_id, market in (bk.get("markets") or {}).items():
@@ -60,7 +61,7 @@ def flatten_live(fixture: dict, observed_at: dt.datetime | None = None) -> pd.Da
                 for player_id, o in (outcome.get("players") or {}).items():
                     if o.get("price") is None:
                         continue
-                    at = o.get("changedAt") or (observed_at.isoformat() if observed_at else None)
+                    at = observed_at.isoformat() if stamp == "observed" and observed_at else o.get("changedAt") or (observed_at.isoformat() if observed_at else None)
                     if at is None:
                         continue
                     rows.append((fixture["fixtureId"], bookmaker, int(market_id), int(outcome_id), None if str(player_id) == "0" else str(player_id),

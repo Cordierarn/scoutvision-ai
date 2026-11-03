@@ -10,7 +10,7 @@ Ligne de commande du Labo paris, phase 1 (tout sous .research/betting/, ignoré 
                                                            du plus récent au plus ancien (1 requête par match) ;
                                                            --refresh-players redemande les matchs archivés sans marché joueur
   python3 -m betting.fetch snapshot                        relevé courant des rencontres à venir (1 requête décomptée par tournoi)
-  python3 -m betting.fetch upcoming [--days 7]             tous les relevés des rencontres à venir via /historical-odds (non décompté)
+  python3 -m betting.fetch upcoming [--days 7] [--per-fixture]  cotes courantes des rencontres à venir (un appel par tournoi)
   python3 -m betting.fetch views                           vues dérivées premier / H−24 / H−1 / dernier avant coup d'envoi
   python3 -m betting.fetch match                           appariement avec les matchs PitchAPI (alias appris)
 
@@ -113,6 +113,28 @@ def player_props_enabled(client: OddsPapiClient) -> bool | None:
     return bool(flag)
 
 
+class SnapshotBuffer:
+    """Regroupe les relevés par fichier de saison : chaque `write_snapshots` relit et réécrit tout le fichier,
+    une écriture par match coûte donc plusieurs secondes une fois l'archive volumineuse."""
+
+    def __init__(self, every: int = 50) -> None:
+        self.every, self.pending, self.count, self.added = every, {}, 0, 0
+
+    def add(self, snaps: pd.DataFrame, path: Path) -> None:
+        if snaps.empty:
+            return
+        self.pending.setdefault(path, []).append(snaps)
+        self.count += 1
+        if self.count >= self.every:
+            self.flush()
+
+    def flush(self) -> int:
+        for path, frames in self.pending.items():
+            self.added += archive.write_snapshots(pd.concat(frames, ignore_index=True), path)
+        self.pending, self.count = {}, 0
+        return self.added
+
+
 def cmd_history(args) -> int:
     client = OddsPapiClient()
     props = player_props_enabled(client)
@@ -133,7 +155,8 @@ def cmd_history(args) -> int:
     todo = todo.sort_values("start_time", ascending=False)
     budget = min(args.max_requests, client.quota.remaining)
     print(f"{len(todo)} matchs terminés à archiver, {budget} requêtes autorisées pour cette exécution (environ 6,5 s par match)", flush=True)
-    added, fetched, missing = 0, 0, 0
+    fetched, missing = 0, 0
+    buffer = SnapshotBuffer()
     for f in todo.head(budget).itertuples(index=False):
         try:
             payload = client.historical_odds(f.fixture_id, [BOOKMAKER])
@@ -146,20 +169,49 @@ def cmd_history(args) -> int:
         if payload is None:
             missing += 1
             continue
-        snaps = archive.flatten_historical(payload)
-        added += archive.write_snapshots(snaps, _odds_path(f.competition, f.season))
+        buffer.add(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+    added = buffer.flush()
     print(f"{fetched} matchs demandés, {missing} sans historique Winamax, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
     return 0
 
 
 def cmd_upcoming(args) -> int:
-    """Relevés des rencontres à venir via /historical-odds (non décompté) : tous les relevés depuis l'ouverture."""
+    """Cotes courantes des rencontres à venir : un appel /odds-by-tournaments par tournoi (quelques secondes,
+    décompté du quota), datées de l'heure du relevé. `--per-fixture` : ancien mode, /historical-odds match par
+    match (non décompté, environ 6,5 s par rencontre)."""
     client = OddsPapiClient()
     player_props_enabled(client)
+    if args.per_fixture:
+        return _upcoming_per_fixture(client, args)
+    comp_of = {tid: c for c, tid in TOURNAMENTS.items()}
+    now = dt.datetime.now(dt.timezone.utc)
+    horizon = pd.Timestamp(now) + pd.Timedelta(days=args.days)
+    try:
+        fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in COMPETITIONS], [BOOKMAKER])
+    except QuotaExceeded as exc:
+        print(f"{exc} : repli sur /historical-odds match par match", flush=True)
+        return _upcoming_per_fixture(client, args)
+    kept, buffer = 0, SnapshotBuffer(every=10_000)
+    for f in fixtures:
+        start = pd.Timestamp(f["startTime"])
+        if int(f["tournamentId"]) not in comp_of or not (pd.Timestamp(now) <= start <= horizon):
+            continue
+        snaps = archive.flatten_live(f, now, stamp="observed")
+        if snaps.empty:
+            continue
+        kept += 1
+        buffer.add(snaps, _odds_path(comp_of[int(f["tournamentId"])], archive.season_of(start)))
+    added = buffer.flush()
+    print(f"{kept} rencontres à venir sous {args.days} jours avec cotes ({len(COMPETITIONS)} tournois, un appel chacun), "
+          f"{added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
+    return 0
+
+
+def _upcoming_per_fixture(client: OddsPapiClient, args) -> int:
     fx = load_fixtures()
     now = pd.Timestamp.now(tz="UTC")
     todo = fx[(fx["status_id"] == 0) & (fx["start_time"] >= now) & (fx["start_time"] <= now + pd.Timedelta(days=args.days))].sort_values("start_time")
-    added, fetched = 0, 0
+    fetched, buffer = 0, SnapshotBuffer()
     print(f"{len(todo)} rencontres à venir sous {args.days} jours (environ 6,5 s par rencontre)", flush=True)
     for f in todo.head(args.max_requests).itertuples(index=False):
         try:
@@ -171,7 +223,8 @@ def cmd_upcoming(args) -> int:
             print(f"  {fetched} rencontres relevées…", flush=True)
         if payload is None:
             continue
-        added += archive.write_snapshots(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+        buffer.add(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+    added = buffer.flush()
     print(f"{len(todo)} rencontres à venir sous {args.days} jours, {fetched} demandées, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
     return 0
 
@@ -186,13 +239,11 @@ def cmd_snapshot(args) -> int:
     if not rows.empty:
         rows["season"] = rows["start_time"].map(archive.season_of)
         archive.write_fixtures(rows, FIXTURES)
-    added = 0
+    buffer = SnapshotBuffer(every=10_000)
     for f in fixtures:
-        snaps = archive.flatten_live(f, now)
-        if snaps.empty:
-            continue
         start = pd.Timestamp(f["startTime"])
-        added += archive.write_snapshots(snaps, _odds_path(comp_of[int(f["tournamentId"])], archive.season_of(start)))
+        buffer.add(archive.flatten_live(f, now), _odds_path(comp_of[int(f["tournamentId"])], archive.season_of(start)))
+    added = buffer.flush()
     print(f"{len(fixtures)} rencontres à venir, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
     return 0
 
@@ -251,7 +302,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("fixtures"); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True); p.set_defaults(fn=cmd_fixtures)
     p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.add_argument("--refresh-players", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("snapshot"); p.set_defaults(fn=cmd_snapshot)
-    p = sub.add_parser("upcoming"); p.add_argument("--days", type=int, default=7); p.add_argument("--max-requests", type=int, default=200); p.set_defaults(fn=cmd_upcoming)
+    p = sub.add_parser("upcoming"); p.add_argument("--days", type=int, default=7); p.add_argument("--max-requests", type=int, default=200); p.add_argument("--per-fixture", action="store_true"); p.set_defaults(fn=cmd_upcoming)
     p = sub.add_parser("views"); p.set_defaults(fn=cmd_views)
     p = sub.add_parser("match"); p.set_defaults(fn=cmd_match)
     args = parser.parse_args(argv)

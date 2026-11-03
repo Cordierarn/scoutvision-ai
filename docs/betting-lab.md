@@ -86,7 +86,8 @@ Points ouverts de la phase 1, tranchés sur de vraies réponses (2 novembre 2026
 - **Cotes courantes** : `/historical-odds` répond pour une rencontre pas encore jouée (tous les relevés
   depuis l'ouverture du marché, 69 marchés, dernier relevé à la minute) et n'est pas décompté du quota
   (compteur serveur inchangé après trois appels). Le relevé courant passe donc par cet endpoint : la
-  commande `snapshot` reste disponible mais `history` sur les rencontres à venir suffit. Le workflow
+  commande `snapshot` reste disponible mais `history` sur les rencontres à venir suffit (remplacé le
+  3 novembre par `/odds-by-tournaments`, voir « Cycle quotidien »). Le workflow
   `betting-odds.yml` est livré avec sa planification commentée ; il n'est pas activé.
 - **Compositions** : le cache PitchAPI ne contient que des matchs terminés et des compositions
   `confirmed = true` post-match (`lineup_type` standard ou absent) ; l'export PitchAPI tourne le lundi et
@@ -233,8 +234,15 @@ encre neutre.
 
 ### Cycle quotidien (`.github/workflows/betting-odds.yml`, actif à la demande du propriétaire)
 
-- **Le soir** (10 h, 14 h, 17 h UTC) : rencontres, relevés des rencontres à venir (`/historical-odds`,
-  non décompté), historiques des matchs terminés, vues, appariement, suggestions et journal, export.
+- **Le soir** (10 h, 14 h, 17 h UTC) : rencontres de la fenêtre, cotes courantes des rencontres à venir
+  (`/odds-by-tournaments`, un appel par tournoi, décompté : 11 appels par passage), vues, appariement,
+  suggestions et journal, export. Les cotes sont datées de l'heure de l'appel (`flatten_live(stamp="observed")`) :
+  prix vérifiés identiques au dernier relevé de `/historical-odds` sur 834 issues (3 novembre 2026), alors que
+  `changedAt` daterait de plusieurs heures une cote inchangée et la ferait écarter comme périmée. L'ancien
+  relevé match par match reste disponible (`upcoming --per-fixture`, environ 6,5 s par rencontre).
+- **Historiques des matchs terminés** (`/historical-odds`, environ 6,5 s par match, limite d'OddsPapi) :
+  au passage du matin seulement, ou tant que l'archive est incomplète. Les relevés sont écrits par lots
+  (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison.
 - **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
   (`betting/results_web.py`, scores finaux, mi-temps, premier et dernier but, sans clé), fusionnés aux
   résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis

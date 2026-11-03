@@ -82,14 +82,20 @@ jobs:
           if [ -z "$ODDSPAPI_API_KEY" ]; then echo "::warning::Secret ODDSPAPI_API_KEY absent : étapes de cotes sautées."; exit 0; fi
           cd scripts
           python3 -m betting.fetch status --account --sync
-          # le matin, ou tant que l'archive de cotes est incomplète : toute la saison (14 fenêtres) pour rattraper les matchs joués
-          if [ "$(date -u +%H)" -lt 9 ] || [ ! -d ../.research/betting/odds ] || [ "$(find ../.research/betting/odds -name '*.parquet' | wc -l)" -lt 8 ]; then
+          # passage complet le matin, ou tant que l'archive de cotes est incomplète
+          FULL=0
+          if [ "$(date -u +%H)" -lt 9 ] || [ ! -d ../.research/betting/odds ] || [ "$(find ../.research/betting/odds -name '*.parquet' | wc -l)" -lt 8 ]; then FULL=1; fi
+          if [ "$FULL" = 1 ]; then
+            # toute la saison (14 fenêtres) pour rattraper les matchs joués
             python3 -m betting.fetch fixtures --from 2026-07-01 --to "$(date -u -d '+9 days' +%F)"
           else
             python3 -m betting.fetch fixtures --from "$(date -u -d '-1 day' +%F)" --to "$(date -u -d '+9 days' +%F)"
           fi
+          # cotes courantes des matchs à venir : un appel par tournoi (quelques secondes)
           python3 -m betting.fetch upcoming --days 7
-          python3 -m betting.fetch history --max-requests 400
+          # historique des matchs terminés : environ 6,5 s par match (limite d'OddsPapi), donc le matin seulement ;
+          # les suggestions de l'après-midi n'en ont pas besoin
+          if [ "$FULL" = 1 ]; then python3 -m betting.fetch history --max-requests 400; fi
           python3 -m betting.fetch views
           python3 -m betting.fetch match
           python3 -m betting.fetch status
