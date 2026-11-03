@@ -81,7 +81,13 @@ jobs:
         run: |
           if [ -z "$ODDSPAPI_API_KEY" ]; then echo "::warning::Secret ODDSPAPI_API_KEY absent : étapes de cotes sautées."; exit 0; fi
           cd scripts
-          python3 -m betting.fetch fixtures --from "$(date -u -d '-1 day' +%F)" --to "$(date -u -d '+9 days' +%F)"
+          python3 -m betting.fetch status --account --sync
+          # le matin, ou tant que l'archive de cotes est incomplète : toute la saison (14 fenêtres) pour rattraper les matchs joués
+          if [ "$(date -u +%H)" -lt 9 ] || [ ! -d ../.research/betting/odds ] || [ "$(find ../.research/betting/odds -name '*.parquet' | wc -l)" -lt 8 ]; then
+            python3 -m betting.fetch fixtures --from 2026-07-01 --to "$(date -u -d '+9 days' +%F)"
+          else
+            python3 -m betting.fetch fixtures --from "$(date -u -d '-1 day' +%F)" --to "$(date -u -d '+9 days' +%F)"
+          fi
           python3 -m betting.fetch upcoming --days 7
           python3 -m betting.fetch history --max-requests 400
           python3 -m betting.fetch views
