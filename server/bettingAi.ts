@@ -21,9 +21,10 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { NUMBER, factNumbers, supported } from './reportAudit';
+import { ContextLoader, MatchContext, regulars } from './bettingContext';
 import { Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
-export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v1', plan: 'ai-betting-plan-v1' } as const;
+export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v2' } as const;
 export const BETTING_NEWS_PATH = '/api/ai/betting-news';
 export const BETTING_PLAN_PATH = '/api/ai/betting-plan';
 export const MAX_PLAN_MATCHES = 8;
@@ -70,12 +71,15 @@ export function indexLoader(dataDir: string): LoadIndex {
 }
 
 /** Suggestion telle que le modèle la reçoit : une référence stable `matchId#rang` et les chiffres du moteur */
-export interface FactSuggestion { ref: string; label: string; family: string; odds: number; probability: number; expectedValue: number; stakeMode: 'kelly' | 'fixed'; reasons: string[] }
+/** Probabilité et espérance en pourcentages à une décimale : le modèle les recopie lisiblement (« 78,7 % ») */
+export interface FactSuggestion { ref: string; label: string; family: string; odds: number; probabilityPct: number; expectedValuePct: number; stakeMode: 'kelly' | 'fixed'; reasons: string[] }
 export interface MatchFacts {
   matchId: string; competition: string; kickoff: string; home: string; away: string;
   expectedGoals: [number, number] | null; oddsStale: boolean;
   suggestions: FactSuggestion[];
+  context?: MatchContext | null;
 }
+const pct = (v: number) => Math.round(v * 1000) / 10;
 export interface PlanFacts {
   date: string; profile: Profile; bookmaker: string; season: string;
   matches: MatchFacts[];
@@ -90,14 +94,15 @@ export function matchFacts(m: IndexMatch, profile: Profile): MatchFacts {
     matchId: m.matchId, competition: m.competition, kickoff: m.kickoff ?? m.date, home: m.home, away: m.away,
     expectedGoals: m.xg ?? null, oddsStale: !!m.oddsStale,
     suggestions: list.map(s => ({
-      ref: `${m.matchId}#${s.rank}`, label: s.label, family: s.family, odds: s.odds, probability: s.p, expectedValue: s.ev, stakeMode: s.stakeMode,
+      ref: `${m.matchId}#${s.rank}`, label: s.label, family: s.family, odds: s.odds, probabilityPct: pct(s.p), expectedValuePct: pct(s.ev), stakeMode: s.stakeMode,
       reasons: (s.reasons ?? []).slice(0, 4),
     })),
   };
 }
 
-export function buildPlanFacts(index: SuggestionsIndexFile, matchIds: string[], profile: Profile, today: string): PlanFacts {
-  const matches = matchIds.map(id => findMatch(index, id)).filter((m): m is IndexMatch => !!m).map(m => matchFacts(m, profile));
+export function buildPlanFacts(index: SuggestionsIndexFile, matchIds: string[], profile: Profile, today: string, context?: ContextLoader): PlanFacts {
+  const matches = matchIds.map(id => findMatch(index, id)).filter((m): m is IndexMatch => !!m)
+    .map(m => ({ ...matchFacts(m, profile), context: context?.(m.matchId, m.competition, m.home, m.away, index.season) ?? null }));
   const families = new Set(matches.flatMap(m => m.suggestions.map(s => s.family)));
   const byFamily = index.bilan?.profiles?.[profile]?.byFamily ?? {};
   const familyRecord = Object.fromEntries(Object.entries(byFamily).filter(([f]) => families.has(f)));
@@ -151,10 +156,13 @@ export function parseGrounding(metadata: unknown): Omit<GroundedGeneration, 'tex
 // 1. ACTUALITÉ D'AVANT-MATCH (ancrée Google Search)
 // ============================================
 
-export function buildNewsPrompt(m: MatchFacts, today: string): string {
+export function buildNewsPrompt(m: MatchFacts, today: string, context?: MatchContext | null): string {
+  const check = context ? [[m.home, regulars(context.home)], [m.away, regulars(context.away)]].filter(([, names]) => names.length)
+    .map(([team, names]) => `${team}: ${(names as string[]).join(', ')}`).join('; ') : '';
   return `Today is ${today}. Football match: ${m.home} vs ${m.away} (${m.competition}), kickoff ${m.kickoff} (UTC).
-Search the web for the latest pre-match team news about this exact match, published in the last 4 days:
-- confirmed absences (injuries, suspensions) and doubtful players, for both teams;
+Search the web (several searches if needed, in English and in the clubs' languages) for the latest pre-match team news about this exact match, published in the last 4 days:
+- confirmed absences (injuries, suspensions) and doubtful players, for both teams;${check ? `
+- in particular the availability of these regular players (${check});` : ''}
 - probable line-ups or rotation hints (for example a more important match a few days later);
 - coach statements about availability, and notable context (weather, pitch, travel, stakes).
 Rules: report only facts found in your search results, attributed to the team they concern; never guess a line-up; no prediction, no odds, no betting advice.
@@ -194,6 +202,7 @@ export interface BettingDeps {
   generateGrounded: GenerateGrounded;
   generateJson: GenerateJson;
   news: NewsCache;
+  loadContext?: ContextLoader;
   now?: () => Date;
   log?: (message: string) => void;
   sleep?: (ms: number) => Promise<void>;
@@ -221,9 +230,10 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
 
   const now = deps.now?.() ?? new Date();
   const facts = matchFacts(m, 'equilibre');
+  const context = deps.loadContext?.(m.matchId, m.competition, m.home, m.away, index.season) ?? null;
   try {
-    const g = await withRetry(() => deps.generateGrounded(buildNewsPrompt(facts, today(now))), deps.sleep);
-    if (!g.text.trim()) return { status: 502, body: { error: 'Le modèle n\'a renvoyé aucune actualité. Réessayez.' } };
+    const g = await withRetry(() => deps.generateGrounded(buildNewsPrompt(facts, today(now), context)), deps.sleep);
+    if (!g.text.trim()) return { status: 502, body: { error: 'Gemini n\'a renvoyé aucun texte pour ce match (réponse vide). Réessayez.' } };
     const entry: NewsEntry = {
       matchId: m.matchId, text: cleanNews(g.text), sources: g.sources, queries: g.queries, ...(g.searchHtml ? { searchHtml: g.searchHtml } : {}),
       fetchedAt: now.toISOString(), model: g.modelVersion?.trim() || resolveGeminiModel(deps.model),
@@ -232,9 +242,20 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
     deps.log?.(`[betting-news] ${m.matchId} : ${entry.sources.length} source(s), ${entry.queries.length} requête(s)`);
     return { status: 200, body: { ...entry, cached: false, promptVersion: BETTING_PROMPT_VERSIONS.news } };
   } catch (error) {
-    deps.log?.(`[betting-news] échec : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey)}`);
-    return { status: 502, body: { error: 'Recherche d\'actualité indisponible pour le moment. Réessayez dans quelques instants.' } };
+    const detail = redact(error instanceof Error ? error.message : String(error), deps.apiKey);
+    deps.log?.(`[betting-news] échec : ${detail}`);
+    return { status: 502, body: { error: newsErrorMessage(error, detail) } };
   }
+}
+
+/** Message d'échec explicite (privé) : délai, quota, accès à la recherche Google, refus du modèle */
+export function newsErrorMessage(error: unknown, detail: string): string {
+  const status = errorStatus(error);
+  const short = detail.replace(/\s+/g, ' ').slice(0, 160);
+  if (error instanceof Error && /délai/.test(error.message)) return 'Recherche trop longue : Gemini n\'a pas répondu à temps. Réessayez ; l\'actualité déjà trouvée reste en cache.';
+  if (status === 429) return `Quota Gemini atteint (429) : recherche Google ou modèle limité. Détail : ${short}`;
+  if (status === 400 || status === 403 || status === 404) return `Gemini a refusé la recherche Google (${status}) : vérifiez que la clé et le modèle donnent accès à « Grounding with Google Search ». Détail : ${short}`;
+  return `Recherche d'actualité indisponible${status ? ` (${status})` : ''}. Détail : ${short}`;
 }
 
 // ============================================
@@ -285,7 +306,10 @@ Hard rules:
 - "picks": at most ${MAX_PICKS} refs among suggestions you kept ("garder" or "prudence"), best first, one sentence each. "combo": 2 or 3 refs from different matches, all "garder", or an empty refs list. "avoid": matches to skip today, with the reason.
 - "discipline": one sentence on stake discipline (stakes stay those of the engine, never chase losses).
 
-**FACTS (JSON) — engine output:**
+Each match also carries "context", the ScoutVision statistics of both teams (season to date): model and no-vig market 1X2 probabilities, expected goals, league standings with title / top 4 / relegation probabilities, "seasonStakes" (how much this result moves the team's season objective), team profiles per competition (xG and xGA per 90, shots, goals, possession, field tilt, PPDA, pressing and style), usual system and XI, and "keyPlayers" (most used players: share of minutes, goals, assists, xG, xA, rating, VAEP per 90, RAPM net impact).
+Use this context to judge how much a reported absence matters (a regular with a large share of minutes, goals or impact weighs much more than a squad player), whether a team may rotate (low "seasonStakes", bigger match soon), and whether a suggestion fits both teams' profiles. Cite the statistic you rely on, with its value as written in the facts. Probabilities and expected values are in percent: write them like "78,7 %".
+
+**FACTS (JSON) — engine output and team context:**
 ${JSON.stringify(facts, null, 1)}
 
 **PRE-MATCH NEWS (web search, per matchId):**
@@ -336,10 +360,10 @@ export function validatePlan(raw: unknown, facts: PlanFacts, news: Record<string
   if (missing) warnings.push(`${missing} suggestion(s) sans avis de l'IA.`);
 
   // Sélection : suggestions gardées ou à prendre avec prudence, sans doublon, bornée
-  const fractionOf = (ref: string) => {
+  const source = (ref: string) => {
     const { m } = byRef.get(ref)!;
     const rank = Number(ref.split('#')[1]);
-    return index.matches.find(x => x.matchId === m.matchId)?.profiles?.[facts.profile]?.suggestions.find(s => s.rank === rank)?.stakeFraction ?? 0;
+    return index.matches.find(x => x.matchId === m.matchId)?.profiles?.[facts.profile]?.suggestions.find(s => s.rank === rank);
   };
   const picks: PlanPick[] = [];
   for (const p of Array.isArray(plan.picks) ? plan.picks : []) {
@@ -347,8 +371,9 @@ export function validatePlan(raw: unknown, facts: PlanFacts, news: Record<string
     const v = verdictOf.get(p.ref);
     if (!v || v.verdict === 'eviter') continue;
     const { s, m } = byRef.get(p.ref)!;
-    picks.push({ ref: s.ref, matchId: m.matchId, match: matchName(m), label: s.label, family: s.family, odds: s.odds, probability: s.probability, expectedValue: s.expectedValue,
-      stakeFraction: fractionOf(s.ref), stakeMode: s.stakeMode, verdict: v.verdict, why: say(p.why) });
+    const src = source(s.ref);
+    picks.push({ ref: s.ref, matchId: m.matchId, match: matchName(m), label: s.label, family: s.family, odds: s.odds, probability: src?.p ?? s.probabilityPct / 100,
+      expectedValue: src?.ev ?? s.expectedValuePct / 100, stakeFraction: src?.stakeFraction ?? 0, stakeMode: s.stakeMode, verdict: v.verdict, why: say(p.why) });
   }
 
   // Combiné : 2 ou 3 suggestions « garder » de matchs différents, sinon aucun
@@ -391,7 +416,7 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
   if (!index) return noIndex();
 
   const now = deps.now?.() ?? new Date();
-  const facts = buildPlanFacts(index, ids, profile, today(now));
+  const facts = buildPlanFacts(index, ids, profile, today(now), deps.loadContext);
   if (!facts.matches.length) return { status: 404, body: { error: 'Aucun de ces matchs n\'a de suggestions publiées.' } };
   if (!facts.matches.some(m => m.suggestions.length)) return { status: 422, body: { error: 'Aucune suggestion admissible pour ce profil sur ces matchs.' } };
   const news: Record<string, NewsEntry | undefined> = Object.fromEntries(facts.matches.map(m => [m.matchId, deps.news.get(m.matchId)?.value]));

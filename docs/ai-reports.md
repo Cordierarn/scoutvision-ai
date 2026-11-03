@@ -273,12 +273,29 @@ Design, from the research done on 3 November 2026:
   `prudence`, `eviter`) and a short plan. Combining Google Search and a JSON schema in a single call has
   reported issues on Gemini 3.5 and 3.6 Flash (empty grounding chunks, truncated JSON).
 
+Team context (`server/bettingContext.ts`, version `ai-betting-*-v2`): for both teams the plan call also
+receives the ScoutVision statistics read from the server data folder: model and no-vig market 1X2
+probabilities, expected goals, league standings with title / top 4 / relegation probabilities, season
+stakes of the match (`forecast.json`), team profiles per competition (xG and xGA per 90, shots, goals,
+possession, field tilt, PPDA, defensive line, passes per sequence, direct speed, pass accuracy, style;
+`teams/{season}.json`), usual system and XI (`lineups/{season}/{competition}.json`) and key players: the 6
+most used and the 4 most decisive, with share of minutes, goals, assists, xG, xA, rating, VAEP per 90 and
+RAPM net, summed over competitions (`players/{season}.json`). The news call names the key players of both
+teams so the search checks their availability. Probabilities and expected values go to the model in percent.
+
+Long searches: in production the two assistant endpoints answer with an open response (headers and a
+space at once, then a space every 5 s, then the JSON). The Heroku router cuts a request without a first byte
+after 30 s; with bytes flowing a search can take up to 100 s. An error is then carried by the JSON body
+(`error`, `status`) with HTTP 200. The news call asks for a low thinking level (retried without it if the
+model refuses the setting). A failed search shows its reason per match in the panel: time-out, quota (429),
+or access to Grounding with Google Search refused (400, 403, 404) with the API detail.
+
 Server checks: references must exist in the published suggestions; picks exclude `eviter` and are capped
 at 5; a combo needs 2 or 3 `garder` selections from different matches; sentences that quote a number absent
 from the engine facts and the news are removed and counted in `warnings`; stakes are the engine's fractions,
 converted to euros in the browser. News is cached 90 minutes per match (refresh at most every 15 minutes);
-own rate limit of 40 requests per 10 minutes. Each request stays under the 25 s Heroku deadline (one Gemini
-call per request); the browser runs up to 3 news requests in parallel, then asks for the plan.
+own rate limit of 40 requests per 10 minutes. One Gemini call per request; the browser runs up to 3 news
+requests in parallel, then asks for the plan.
 
 Search suggestions: the queries run by the model are shown as links to the Google results page next to the
 sources. The `searchEntryPoint.renderedContent` HTML is not injected: the app's Content-Security-Policy
