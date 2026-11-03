@@ -30,7 +30,7 @@ const TEAM_NEWS_TERMS: Record<Edition['lang'], string> = {
   fr: '(blessure OR blessé OR forfait OR absent OR suspendu OR composition)',
 };
 
-// Sigles de forme juridique retirés des noms (« VfB Stuttgart » → « Stuttgart ») : la presse les omet souvent
+// Sigles de forme juridique retirés des noms (« VfB Club » → « Club ») : la presse les omet souvent
 const LEGAL = new Set(['fc', 'cf', 'afc', 'ac', 'as', 'sc', 'sv', 'vfb', 'vfl', 'tsg', 'ssc', 'ogc', 'rc', 'rcd', 'cd', 'ud', 'sd', 'fk', 'sk', 'bk', 'if', '1.']);
 export function shortName(team: string): string {
   const kept = team.split(/\s+/).filter(t => !LEGAL.has(t.toLowerCase()));

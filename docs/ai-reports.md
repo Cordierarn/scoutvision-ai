@@ -320,7 +320,7 @@ News fallback (`server/newsFeed.ts`): when Google Search grounding fails (quota,
 model, time-out), the server builds the news itself, for free and without a key:
 
 1. RSS feeds of Google News and Bing News, English and French editions, last 4 days. Team names are
-   shortened (« VfB Stuttgart » → « Stuttgart »), and three queries run per edition: the match, then
+   shortened (« VfB Club » → « Club »), and three queries run per edition: the match, then
    injuries and line-ups of each team (`(injury OR injured OR "ruled out" …)`, `(blessure OR forfait …)`).
    Bing redirect links are turned into the publisher's address.
 2. Streaming spam is dropped (« watch live », « free stream », fancy Unicode letters). Headlines are ranked
@@ -333,8 +333,8 @@ model, time-out), the server builds the news itself, for free and without a key:
 The entry carries `method: "news-feed"`, `articlesRead` and the reason of the failed search
 (`fallbackReason`). In the panel, the articles read come first, marked « [lu] ».
 
-Checked on 3 November 2026 against the real API with a free key and real articles of the evening
-(Galatasaray – Stuttgart): two articles read, two injured Stuttgart players named with their injury,
+Checked on 3 November 2026 against the real API with a free key and real articles of the evening:
+two articles read, two injured players of the away team named with their injury,
 about 28 s. The feeds themselves could not be fetched from the development sandbox (network policy); on
 Heroku the Google News feed was read successfully.
 

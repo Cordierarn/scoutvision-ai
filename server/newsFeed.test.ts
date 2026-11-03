@@ -46,9 +46,9 @@ describe('flux Google News', () => {
   });
 
   it('noms courts, requêtes par équipe, liens Bing directs, extrait, spam écarté', () => {
-    expect(shortName('VfB Stuttgart')).toBe('Stuttgart');
+    expect(shortName('VfB Club C')).toBe('Club C');
     expect(shortName('Real Madrid')).toBe('Real Madrid');
-    expect(newsQueries('VfB Stuttgart', 'Galatasaray', 'en')).toEqual(['Stuttgart Galatasaray', 'Stuttgart (injury OR injured OR "ruled out" OR suspended OR "team news" OR lineup)', 'Galatasaray (injury OR injured OR "ruled out" OR suspended OR "team news" OR lineup)']);
+    expect(newsQueries('VfB Club C', 'Club D', 'en')).toEqual(['Club C Club D', 'Club C (injury OR injured OR "ruled out" OR suspended OR "team news" OR lineup)', 'Club D (injury OR injured OR "ruled out" OR suspended OR "team news" OR lineup)']);
     expect(directLink('https://www.bing.com/news/apiclick.aspx?ref=FexRss&url=http%3a%2f%2fwww.example.test%2farticle&c=1')).toBe('https://www.example.test/article');
     const bing = parseRss('<item><title>Club B defender suspended</title><link>https://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fwww.example.test%2fa</link><description>The defender misses the trip after a red card.</description><pubDate>Sat, 07 Nov 2026 08:00:00 GMT</pubDate></item>');
     expect(bing[0]).toMatchObject({ link: 'https://www.example.test/a', source: 'example.test', snippet: 'The defender misses the trip after a red card.' });
