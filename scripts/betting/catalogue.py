@@ -35,7 +35,10 @@ def load(path: Path = CATALOGUE, client=None) -> dict[int, Market]:
     else:
         if client is None:
             from .client import OddsPapiClient
-            client = OddsPapiClient()
+            try:
+                client = OddsPapiClient()
+            except RuntimeError as exc:
+                raise RuntimeError(f"Catalogue des marchés absent ({path}) et clé OddsPapi indisponible : lancer `betting.fetch fixtures` avec la clé pour le constituer. {exc}") from exc
         raw = client.markets(SPORT_ID)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
