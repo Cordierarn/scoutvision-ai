@@ -3,7 +3,7 @@
  * réseau : lecture du flux RSS, tri des titres récents, extraction par un modèle texte simulé.
  */
 import { describe, expect, it } from 'vitest';
-import { buildHeadlinesPrompt, decodeEntities, googleNewsFetcher, googleNewsUrl, parseRss, selectHeadlines } from './newsFeed';
+import { articlesToRead, buildArticlesPrompt, buildHeadlinesPrompt, decodeEntities, directLink, googleNewsUrl, isSpam, newsFeedFetcher, newsQueries, parseRss, selectHeadlines, shortName } from './newsFeed';
 import { NewsCache, handleBettingNews, SuggestionsIndexFile } from './bettingAi';
 import { NoModelAvailable } from './geminiModels';
 
@@ -28,24 +28,46 @@ describe('flux Google News', () => {
     expect(selectHeadlines([...items, items[0]], NOW).map(i => i.link)).toEqual(['https://news.example.test/2', 'https://news.example.test/1']);
   });
 
-  it('interroge deux éditions et tolère un flux en échec', async () => {
+  it('interroge Google News (match + absences de chaque équipe) et Bing News, en anglais et en français ; tolère un flux en échec', async () => {
     const urls: string[] = [];
-    const fetcher = googleNewsFetcher((async (url: string) => {
+    const fetcher = newsFeedFetcher((async (url: string) => {
       urls.push(url);
-      return url.includes('hl=fr') ? new Response('erreur', { status: 503 }) : new Response(RSS, { status: 200 });
+      return url.includes('bing.com') ? new Response('erreur', { status: 503 }) : new Response(RSS, { status: 200 });
     }) as unknown as typeof fetch);
-    const out = await fetcher('Club A', 'Club B', NOW);
-    expect(urls).toHaveLength(2);
-    expect(urls[0]).toBe(googleNewsUrl('"Club A" "Club B"', { hl: 'en-GB', gl: 'GB', ceid: 'GB:en' }));
+    const out = await fetcher('VfB Club A', 'Club B', NOW);
+    expect(urls).toHaveLength(8);                                   // 2 éditions × (3 requêtes Google + 1 Bing)
+    expect(urls[0]).toBe(googleNewsUrl('Club A Club B', { hl: 'en-GB', gl: 'GB', ceid: 'GB:en' }));
     expect(urls[0]).toContain('when%3A4d');
-    expect(out.items).toHaveLength(2);
-    const down = googleNewsFetcher((async () => new Response('', { status: 503 })) as unknown as typeof fetch);
+    expect(urls.some(u => u.includes(encodeURIComponent('Club A (blessure OR')))).toBe(true);
+    expect(out.items.map(i => i.link)).toEqual(['https://news.example.test/1', 'https://news.example.test/2']);   // absence d'abord
+    expect(out.queries).toEqual(['Club A Club B']);
+    const down = newsFeedFetcher((async () => new Response('', { status: 503 })) as unknown as typeof fetch);
     await expect(down('Club A', 'Club B', NOW)).rejects.toThrow('inaccessibles');
+  });
+
+  it('noms courts, requêtes par équipe, liens Bing directs, extrait, spam écarté', () => {
+    expect(shortName('VfB Club C')).toBe('Club C');
+    expect(shortName('Real Madrid')).toBe('Real Madrid');
+    expect(newsQueries('VfB Club C', 'Club D', 'en')).toEqual(['Club C Club D', 'Club C (injury OR injured OR "ruled out" OR suspended OR "team news" OR lineup)', 'Club D (injury OR injured OR "ruled out" OR suspended OR "team news" OR lineup)']);
+    expect(directLink('https://www.bing.com/news/apiclick.aspx?ref=FexRss&url=http%3a%2f%2fwww.example.test%2farticle&c=1')).toBe('https://www.example.test/article');
+    const bing = parseRss('<item><title>Club B defender suspended</title><link>https://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fwww.example.test%2fa</link><description>The defender misses the trip after a red card.</description><pubDate>Sat, 07 Nov 2026 08:00:00 GMT</pubDate></item>');
+    expect(bing[0]).toMatchObject({ link: 'https://www.example.test/a', source: 'example.test', snippet: 'The defender misses the trip after a red card.' });
+    expect(isSpam({ title: '!!+[free/Live] Club A vs Club B watch Live free', link: '', source: '', published: '' })).toBe(true);
+    expect(isSpam({ title: '[𝐖𝐀𝐓𝐂𝐇𝐋𝐈𝐕𝐄] Club A vs Club B', link: '', source: '', published: '' })).toBe(true);
+    expect(isSpam({ title: 'Club A striker ruled out', link: '', source: '', published: '' })).toBe(false);
+  });
+
+  it('fait lire les articles qui parlent d\'effectif, au plus 4', () => {
+    const items = parseRss(RSS);
+    expect(articlesToRead(items).map(a => a.link)).toEqual(['https://news.example.test/1']);
+    const prompt = buildArticlesPrompt('Club A', 'Club B', 'AAA', '2026-11-07T19:00:00Z', '2026-11-07', articlesToRead(items), items, '');
+    expect(prompt).toContain('- https://news.example.test/1 (Daily Test: Club A striker ruled out against Club B)');
+    expect(prompt).toContain('use the URL context tool');
   });
 
   it('demande de n\'extraire que ce que disent les titres', () => {
     const prompt = buildHeadlinesPrompt('Club A', 'Club B', 'AAA', '2026-11-07T19:00:00Z', '2026-11-07', parseRss(RSS).slice(0, 1), 'Club A: Buteur A');
-    expect(prompt).toContain('use only what the headlines state');
+    expect(prompt).toContain('use only what the articles or headlines state');
     expect(prompt).toContain('1. [Fri, 06 Nov 2026 18:00:00 GMT] Club A striker ruled out against Club B — Daily Test');
     expect(prompt).toContain('Buteur A');
   });
@@ -75,6 +97,26 @@ describe('secours dans l\'assistant', () => {
     expect((out.body.sources as { title: string }[])[0].title).toBe('Daily Test : Club A striker ruled out against Club B');
     expect(String(out.body.fallbackReason)).toContain('Dernier refus de Google : models/gemini-2.5-flash is not found');
     expect(prompt).toContain('HEADLINES');
+  });
+
+  it('lit les articles quand c\'est possible : sources lues en tête, nombre d\'articles lus', async () => {
+    let usedHeadlinesOnly = false;
+    const out = await handleBettingNews({ matchId: 'm1' }, {
+      ...base, news: new NewsCache(),
+      fetchHeadlines: async () => ({ items: parseRss(RSS).slice(0, 2), queries: ['Club A Club B'] }),
+      readArticles: async () => ({ text: '- Club A : Buteur A forfait (selon Daily Test).', modelVersion: 'modele-lecture', read: ['https://news.example.test/1'] }),
+      generateText: async () => { usedHeadlinesOnly = true; return ''; },
+    });
+    expect(out.body).toMatchObject({ articlesRead: 1, model: 'modele-lecture', text: '- Club A : Buteur A forfait (selon Daily Test).' });
+    expect((out.body.sources as { title: string }[])[0].title).toBe('[lu] Daily Test : Club A striker ruled out against Club B');
+    expect(usedHeadlinesOnly).toBe(false);
+    const unreadable = await handleBettingNews({ matchId: 'm1' }, {
+      ...base, news: new NewsCache(),
+      fetchHeadlines: async () => ({ items: parseRss(RSS).slice(0, 2), queries: ['q'] }),
+      readArticles: async () => ({ text: 'rien', read: [] }),
+      generateText: async () => ({ text: '- Club A : attaquant absent (selon Daily Test).' }),
+    });
+    expect(unreadable.body).toMatchObject({ articlesRead: 0, text: '- Club A : attaquant absent (selon Daily Test).' });
   });
 
   it('sans titre récent : « Aucune information fiable trouvée. » sans appeler le modèle ; secours en échec : les deux motifs', async () => {

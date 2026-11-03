@@ -270,7 +270,9 @@ often overloaded (503). Chains:
   `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` (`GEMINI_MODEL` first when set; `GEMINI_TEXT_MODELS`);
 - Google Search grounding: `gemini-3.8-flash`, `gemini-3.5-flash-lite` (`GEMINI_SEARCH_MODELS`); works only
   with billing enabled, otherwise the news falls back to Google News headlines (below);
-- headline extraction: `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, then the writing chain.
+- article reading and headline extraction: `gemini-flash-lite-latest`, `gemini-3.5-flash-lite`,
+  `gemini-3.1-flash-lite`, then the writing chain. The `-latest` alias answered while the versioned ID was
+  overloaded.
 
 Gemini 3+ calls ask for a low thinking level; 2.x models get no thinking setting.
 
@@ -315,13 +317,26 @@ model refuses the setting). A failed search shows its reason per match in the pa
 or access to Grounding with Google Search refused (400, 403, 404) with the API detail.
 
 News fallback (`server/newsFeed.ts`): when Google Search grounding fails (quota, refused access, retired
-model, time-out), the server reads the public Google News RSS feed (`"home" "away" when:4d`, English and
-French editions, no key), keeps up to 15 headlines from the last 4 days without duplicates, and asks the
-headline-extraction chain to state only what the headlines say, attributed to a team and a source (a fact
-without names is reported as such). The entry carries `method: "news-feed"` and the reason of the failed
-search (`fallbackReason`); the panel says the news comes from Google News headlines. Checked on 3 November
-2026 against the real API with real headlines of the evening (about 20 s); the feed itself could not be
-fetched from the development sandbox (network policy) and is first exercised on Heroku.
+model, time-out), the server builds the news itself, for free and without a key:
+
+1. RSS feeds of Google News and Bing News, English and French editions, last 4 days. Team names are
+   shortened (« VfB Club » → « Club »), and three queries run per edition: the match, then
+   injuries and line-ups of each team (`(injury OR injured OR "ruled out" …)`, `(blessure OR forfait …)`).
+   Bing redirect links are turned into the publisher's address.
+2. Streaming spam is dropped (« watch live », « free stream », fancy Unicode letters). Headlines are ranked
+   by squad-news words in the languages of the covered leagues (injured, blessé, verletzt, lesión, sakat…),
+   by mentions of both teams, then by recency. Up to 15 are kept.
+3. Gemini reads up to 4 of those articles with the URL context tool, available on the free tier, with the
+   lite models first. If no article can be read, for example an unreadable redirect, the facts come from the
+   headlines alone. Only stated facts are kept, attributed to a team and a source.
+
+The entry carries `method: "news-feed"`, `articlesRead` and the reason of the failed search
+(`fallbackReason`). In the panel, the articles read come first, marked « [lu] ».
+
+Checked on 3 November 2026 against the real API with a free key and real articles of the evening:
+two articles read, two injured players of the away team named with their injury,
+about 28 s. The feeds themselves could not be fetched from the development sandbox (network policy); on
+Heroku the Google News feed was read successfully.
 
 Server checks: references must exist in the published suggestions; picks exclude `eviter` and are capped
 at 5; a combo needs 2 or 3 `garder` selections from different matches; sentences that quote a number absent
