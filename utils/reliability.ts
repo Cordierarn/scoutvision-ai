@@ -47,6 +47,10 @@ export function reliabilityClass(level: ReliabilityLevel): string {
 /** Matchs complets (90 minutes) équivalents à un nombre de minutes, arrondis */
 export const fullMatches = (minutes: number) => Math.max(1, Math.round(minutes / 90));
 
+/** Au-delà de trois saisons pleines, le nombre exact de matchs n'a plus de sens pour un lecteur */
+const MATCHES_CAP = 100;
+export const matchesLabel = (matches: number) => (matches > MATCHES_CAP ? `plus de ${MATCHES_CAP} matchs` : `${matches} matchs`);
+
 /**
  * Intervalle à 90 % autour d'une valeur : ± 1,645 × écart-type vrai du rôle × √(1 − fiabilité).
  * Borne basse ramenée à 0 (volumes par 90 positifs, sauf métriques signées comme les buts évités).
@@ -86,7 +90,7 @@ export function playerMetricReliability(model: ReliabilityModel | null | undefin
 /** Texte d'infobulle : fiabilité, intervalle et minutes nécessaires */
 export function reliabilityText(m: MetricReliability): string {
   const interval = m.interval ? `, intervalle à 90 % : ${num.format(m.interval[0])} – ${num.format(m.interval[1])}` : '';
-  return `Fiabilité ${pct.format(m.reliability * 100)} % (${m.level})${interval}. Fiable (70 %) à partir d'environ ${m.matchesForReliable} matchs complets.`;
+  return `Fiabilité ${pct.format(m.reliability * 100)} % (${m.level})${interval}. Fiable (70 %) à partir d'environ ${matchesLabel(m.matchesForReliable)} complets.`;
 }
 
 // ----- Joueurs à faible temps de jeu -----

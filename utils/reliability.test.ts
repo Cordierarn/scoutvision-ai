@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ReliabilityModel, SmallSamplesFile, expandSmallSamples, filterSmallSamples, fullMatches, metricReliability, playerMetricReliability,
+  ReliabilityModel, SmallSamplesFile, expandSmallSamples, filterSmallSamples, fullMatches, matchesLabel, metricReliability, playerMetricReliability,
   reliabilityLevel, reliabilityText, valueInterval,
 } from './reliability';
 
@@ -59,5 +59,13 @@ describe('joueurs à faible temps de jeu', () => {
     expect(filterSmallSamples(players, { ...base, maxAge: 21 }).map(p => p.Player)).toEqual(['Joueur A']);
     expect(filterSmallSamples(players, { ...base, minMatches: 10 }).map(p => p.Player)).toEqual(['Joueur B']);
     expect(filterSmallSamples(players, { ...base, competition: 'BBB' })).toEqual([]);
+  });
+});
+
+describe('matchesLabel', () => {
+  it('plafonne les très longs échantillons à « plus de 100 matchs »', () => {
+    expect(matchesLabel(34)).toBe('34 matchs');
+    expect(matchesLabel(100)).toBe('100 matchs');
+    expect(matchesLabel(323)).toBe('plus de 100 matchs');
   });
 });

@@ -251,12 +251,12 @@ def add_small_sample_percentiles(small: pd.DataFrame, qualified: pd.DataFrame) -
     du même niveau et du même rôle (groupement des percentiles de l'app)."""
     if small.empty:
         return small
-    small = small.copy()
     keys = ["_app_season", "League tier", "Position"]
     labels = sorted({l for ls in CATEGORY_METRICS.values() for l in ls if l in small.columns})
+    new_cols = [c for label in labels for c in (f"{label} pct", f"{label} pct lo", f"{label} pct hi")]
+    small = pd.concat([small.drop(columns=new_cols, errors="ignore"),
+                       pd.DataFrame(np.nan, index=small.index, columns=new_cols)], axis=1)
     for label in labels:
-        for c in (f"{label} pct", f"{label} pct lo", f"{label} pct hi"):
-            small[c] = np.nan
         if label not in qualified.columns:
             continue
         for key, idx in small.groupby(keys).groups.items():

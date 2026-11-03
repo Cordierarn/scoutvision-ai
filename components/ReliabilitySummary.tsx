@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { InfoTip } from './ui';
-import { MetricReliability, ReliabilityLevel, ReliabilityModel, fullMatches, playerMetricReliability, reliabilityClass } from '../utils/reliability';
+import { MetricReliability, ReliabilityLevel, ReliabilityModel, fullMatches, matchesLabel, playerMetricReliability, reliabilityClass } from '../utils/reliability';
 
 const LEVELS: { level: ReliabilityLevel; title: string }[] = [
   { level: 'faible', title: 'Faible (moins de 40 %)' },
@@ -52,7 +52,7 @@ export const ReliabilitySummary: React.FC<{
                     <span className="truncate text-ink-2" title={r.label}>{r.label}</span>
                     <span className="num shrink-0 text-right">
                       <span className={reliabilityClass(level)}>{pct.format(r.reliability * 100)} %</span>
-                      {level !== 'fiable' && <span className="text-2xs text-ink-4"> · fiable vers {r.matchesForReliable} matchs</span>}
+                      {level !== 'fiable' && <span className="text-2xs text-ink-4"> · fiable vers {matchesLabel(r.matchesForReliable)}</span>}
                     </span>
                   </div>
                 ))}

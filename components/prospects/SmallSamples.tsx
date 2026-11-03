@@ -20,7 +20,7 @@ const SORTS: { id: SmallSampleSort; label: string; tip: string }[] = [
   { id: 'reliability', label: 'Fiabilité', tip: 'Part de signal de la valeur, selon les minutes jouées.' },
 ];
 const PAGE = 50;
-const num = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
+const num = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Percentile et son intervalle à 90 % sur une barre 0-100 */
 export const PercentileRange: React.FC<{ pct: number | null; low: number | null; high: number | null }> = ({ pct, low, high }) => {
