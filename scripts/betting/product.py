@@ -30,7 +30,7 @@ import pandas as pd
 from . import COMPETITIONS, RESEARCH, ROOT
 from . import adjust, markets as mk, simulate as sm, suggest as sg
 from .catalogue import load as load_catalogue
-from .phase2 import OUT as PHASE2, frozen_variant, load_results, matches_with_predictions
+from .phase2 import OUT as PHASE2, frozen_variant, load_results as _pitchapi_results, matches_with_predictions
 from .results import half_share
 
 JOURNAL = RESEARCH / "journal" / "suggestions.parquet"
@@ -44,6 +44,19 @@ JOURNAL_COLUMNS = ["suggestion_id", "published_at", "match_id", "fixture_id", "c
 
 
 # ----- données communes -----
+
+def load_results() -> pd.DataFrame:
+    """Résultats PitchAPI, complétés par les résultats web (ESPN) des rencontres pas encore exportées par le
+    pipeline : le règlement du journal n'attend pas l'export du lundi ou du vendredi."""
+    base = _pitchapi_results()
+    web_path = RESEARCH / "results_web.parquet"
+    if not web_path.exists():
+        return base
+    from .results_web import as_results
+    web = as_results(pd.read_parquet(web_path))
+    web = web[~web["match_id"].isin(base["match_id"])]
+    return pd.concat([base, web], ignore_index=True) if len(web) else base
+
 
 def excluded_families() -> set[tuple[str, str]]:
     p = PHASE2 / "calibration.json"
