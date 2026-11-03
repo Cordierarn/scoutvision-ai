@@ -16,6 +16,7 @@ import SeasonSimulator from './forecast/SeasonSimulator';
 import MethodPanel from './forecast/MethodPanel';
 import { SuggestionsBlock, SuggestionsControls } from './forecast/Suggestions';
 import BetHistory from './forecast/BetHistory';
+import BettingAssistant from './forecast/BettingAssistant';
 import { BANKROLL_KEY, DEFAULT_PROFILE, PROFILE_KEY, PROFILE_ORDER, parseBankroll } from './forecast/suggestionsLogic';
 import { MARKET_RESULT, formatGoals, freshness, pctFr, poolLabel, roundToHundred } from './forecast/forecastLogic';
 
@@ -307,6 +308,11 @@ const Forecast: React.FC = () => {
               {suggestions && (
                 <div className="mb-4">
                   <SuggestionsControls index={suggestions} profile={profile} onProfile={setProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={setBankroll} onShowHistory={() => setTab('history')} />
+                </div>
+              )}
+              {suggestions && (
+                <div className="mb-4">
+                  <BettingAssistant index={suggestions} profile={profile} bankroll={bankroll} now={now} />
                 </div>
               )}
               <div className="flex items-center gap-4 mb-3 flex-wrap">

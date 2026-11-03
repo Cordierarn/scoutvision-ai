@@ -11,6 +11,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport, resolveGeminiModel } from './scoutReport';
 import { AI_TASKS, AiTask, handleGroundedAi } from './groundedAi';
+import {
+  BETTING_NEWS_PATH, BETTING_PLAN_PATH, GenerateGrounded, GenerateJson, LoadIndex, NewsCache, handleBettingNews, handleBettingPlan, indexLoader, parseGrounding,
+} from './bettingAi';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
 /** Chemins des tâches d'IA ancrée : /api/ai/compare, /api/ai/opposition, /api/ai/hunter */
@@ -20,6 +23,8 @@ export const GROUNDED_AI_PREFIX = '/api/ai/';
 const RATE_LIMIT = 20;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const GEMINI_TIMEOUT_MS = 60 * 1000;
+// Assistant du Labo paris : jusqu'à 8 recherches d'actualité et un plan par génération
+const BETTING_RATE_LIMIT = 40;
 
 type Next = (err?: unknown) => void;
 
@@ -85,6 +90,50 @@ export function geminiGenerator(apiKey: string, model: string): GenerateText {
   };
 }
 
+/** Appel Gemini avec l'outil Google Search : texte, sources, requêtes et bloc de suggestions Google */
+export function geminiGroundedGenerator(apiKey: string, model: string): GenerateGrounded {
+  return async prompt => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), GEMINI_TIMEOUT_MS); });
+    try {
+      const response = await Promise.race([ai.models.generateContent({ model, contents: prompt, config: { tools: [{ googleSearch: {} }] } }), timeout]);
+      return { text: response.text ?? '', modelVersion: response.modelVersion, ...parseGrounding(response.candidates?.[0]?.groundingMetadata) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/** Appel Gemini en JSON strict (schéma imposé), sans outil */
+export function geminiJsonGenerator(apiKey: string, model: string): GenerateJson {
+  return async (prompt, schema) => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), GEMINI_TIMEOUT_MS); });
+    try {
+      const response = await Promise.race([ai.models.generateContent({ model, contents: prompt, config: { responseMimeType: 'application/json', responseJsonSchema: schema } }), timeout]);
+      return { text: response.text ?? '', modelVersion: response.modelVersion };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/** Échéance d'une requête appliquée à un appel quelconque (temps restant, au moins 1 s) */
+function boundedCall<A extends unknown[], R>(call: (...args: A) => Promise<R>, deadline: number | undefined): (...args: A) => Promise<R> {
+  if (!deadline) return call;
+  return async (...args: A) => {
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) throw new DeadlineError('délai de la requête dépassé');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DeadlineError('délai de la requête dépassé')), remaining); });
+    try { return await Promise.race([call(...args), timeout]); } finally { clearTimeout(timer); }
+  };
+}
+
 export interface ScoutReportMiddlewareOptions {
   apiKey: string | undefined;
   model?: string;                          // GEMINI_MODEL ; modèle par défaut si absente
@@ -97,6 +146,12 @@ export interface ScoutReportMiddlewareOptions {
    * pour répondre lui-même avant. Absent : seul le délai de 60 s par appel s'applique.
    */
   deadlineMs?: number;
+  /** Assistant IA du Labo paris : dossier des données servies (artefact des suggestions) */
+  dataDir?: string;
+  loadIndex?: LoadIndex;                   // remplaçable dans les tests
+  generateGrounded?: GenerateGrounded;     // remplaçable dans les tests
+  generateJson?: GenerateJson;             // remplaçable dans les tests
+  bettingRateLimit?: { limit: number; windowMs: number };
 }
 
 export class DeadlineError extends Error {}
@@ -120,11 +175,18 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   const model = resolveGeminiModel(options.model);
   const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey, model) : async () => '');
   const allow = createRateLimiter(options.rateLimit?.limit ?? RATE_LIMIT, options.rateLimit?.windowMs ?? RATE_WINDOW_MS);
+  // Assistant du Labo paris : une recherche d'actualité par match puis un plan ; actualité en cache 90 min
+  const allowBetting = createRateLimiter(options.bettingRateLimit?.limit ?? BETTING_RATE_LIMIT, options.bettingRateLimit?.windowMs ?? RATE_WINDOW_MS);
+  const loadIndex = options.loadIndex ?? (options.dataDir ? indexLoader(options.dataDir) : () => null);
+  const generateGrounded = options.generateGrounded ?? (apiKey ? geminiGroundedGenerator(apiKey, model) : async () => ({ text: '', sources: [], queries: [] }));
+  const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, model) : async () => ({ text: '' }));
+  const news = new NewsCache();
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const path = (req.url ?? '').split('?')[0];
-    const aiTask = path.startsWith(GROUNDED_AI_PREFIX) ? path.slice(GROUNDED_AI_PREFIX.length) : null;
-    if (path !== SCOUT_REPORT_PATH && !(aiTask && (AI_TASKS as string[]).includes(aiTask))) return next();
+    const betting = path === BETTING_NEWS_PATH || path === BETTING_PLAN_PATH;
+    const aiTask = !betting && path.startsWith(GROUNDED_AI_PREFIX) ? path.slice(GROUNDED_AI_PREFIX.length) : null;
+    if (!betting && path !== SCOUT_REPORT_PATH && !(aiTask && (AI_TASKS as string[]).includes(aiTask))) return next();
 
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST');
@@ -135,7 +197,7 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
     }
     // Entrée de droite de X-Forwarded-For (ajoutée par le proxy de l'hébergeur), comme le garde
     const client = String(req.headers['x-forwarded-for'] ?? '').split(',').map(h => h.trim()).filter(Boolean).pop() || req.socket?.remoteAddress || 'inconnu';
-    if (!allow(client)) {
+    if (betting ? !allowBetting(client) : !allow(client)) {
       res.setHeader('Retry-After', String(Math.ceil((options.rateLimit?.windowMs ?? RATE_WINDOW_MS) / 1000)));
       return sendJson(res, 429, { error: 'Trop de rapports demandés. Réessayez dans quelques minutes.' });
     }
@@ -147,6 +209,13 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
     } catch (error) {
       if (error instanceof HttpError) return sendJson(res, error.status, { error: error.message });
       return sendJson(res, 400, { error: 'JSON invalide.' });
+    }
+
+    if (betting) {
+      const deadline = options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
+      const deps = { apiKey, model, loadIndex, news, log, generateGrounded: boundedCall(generateGrounded, deadline), generateJson: boundedCall(generateJson, deadline) };
+      const out = path === BETTING_NEWS_PATH ? await handleBettingNews(body, deps) : await handleBettingPlan(body, deps);
+      return sendJson(res, out.status, out.body);
     }
 
     const bounded = options.deadlineMs ? withDeadline(generate, Date.now() + options.deadlineMs) : generate;
