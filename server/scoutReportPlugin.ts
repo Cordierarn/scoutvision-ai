@@ -123,12 +123,20 @@ export function geminiGroundedGenerator(apiKey: string, model: string): Generate
 /** Appel Gemini en JSON strict (schéma imposé), sans outil */
 export function geminiJsonGenerator(apiKey: string, model: string): GenerateJson {
   return async (prompt, schema) => {
-    const { GoogleGenAI } = await import('@google/genai');
+    const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), GEMINI_TIMEOUT_MS); });
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), BETTING_GEMINI_TIMEOUT_MS); });
     try {
-      const response = await Promise.race([ai.models.generateContent({ model, contents: prompt, config: { responseMimeType: 'application/json', responseJsonSchema: schema } }), timeout]);
+      // Le plan relit des faits déjà calculés : réflexion réduite pour tenir le délai (sans le réglage si le modèle le refuse)
+      const call = (thinking: boolean) => ai.models.generateContent({
+        model, contents: prompt,
+        config: { responseMimeType: 'application/json', responseJsonSchema: schema, ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}) },
+      });
+      const response = await Promise.race([
+        call(true).catch(error => { if (/thinking/i.test(error instanceof Error ? error.message : String(error))) return call(false); throw error; }),
+        timeout,
+      ]);
       return { text: response.text ?? '', modelVersion: response.modelVersion };
     } finally {
       clearTimeout(timer);
