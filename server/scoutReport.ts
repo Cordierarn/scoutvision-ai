@@ -29,7 +29,7 @@ const DETAIL_LEVELS = ['brief', 'standard', 'detailed'] as const;
 const FOCUS_AREAS = ['attacking', 'defending', 'physical', 'mental'] as const;
 
 // Modèle par défaut si GEMINI_MODEL n'est pas définie dans l'environnement du serveur
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';   // tête de la chaîne de rédaction (server/geminiModels.ts)
 
 /** Modèle configuré côté serveur (GEMINI_MODEL), ou le modèle par défaut */
 export function resolveGeminiModel(configured: string | undefined): string {
@@ -215,7 +215,8 @@ export async function generateWithRetry(generate: GenerateText, prompt: string, 
       return typeof out === 'string' ? { text: out } : out;
     } catch (error) {
       const status = errorStatus(error);
-      if (attempt >= MAX_ATTEMPTS || status === undefined || !TRANSIENT_STATUSES.has(status) || dailyQuota(error)) throw error;
+      // chaîne de modèles épuisée (server/geminiModels.ts) : inutile de relancer
+      if (attempt >= MAX_ATTEMPTS || status === undefined || !TRANSIENT_STATUSES.has(status) || dailyQuota(error) || (error as Error)?.name === 'NoModelAvailable') throw error;
       deps.log?.(`[scout-report] Gemini ${status}, tentative ${attempt + 1}/${MAX_ATTEMPTS}`);
       await sleep(RETRY_BASE_MS * 2 ** (attempt - 1) + random() * RETRY_BASE_MS);
     }

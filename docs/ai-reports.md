@@ -40,14 +40,16 @@ from a date.
 | Variable | Use |
 |---|---|
 | `GEMINI_API_KEY` | Gemini key, read by the endpoint only. Without it, the endpoint answers 503 and the rest of the app works |
-| `GEMINI_MODEL` | Gemini model, default `gemini-3.5-flash` |
+| `GEMINI_MODEL` | Optional model put first in the writing chain (default chain below) |
+| `GEMINI_TEXT_MODELS` | Writing chain, comma-separated (default `gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash, gemini-2.5-flash-lite`) |
+| `GEMINI_SEARCH_MODELS` | Google Search chain of the betting assistant (default `gemini-2.5-flash, gemini-2.5-flash-lite`) |
 
 Both live in the server environment only (`.env.local` locally, git-ignored). Never prefix them
 with `VITE_`: the build stops if a `VITE_` variable looks like a secret.
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-# GEMINI_MODEL=gemini-3.5-flash   # optional, this is the default
+# GEMINI_MODEL=gemini-3.8-flash   # optional, put first in the writing chain
 ```
 
 The footer of the report shows the model that actually wrote it: the model version returned by
@@ -249,6 +251,19 @@ fault. Each answer carries the real model, the exact facts sent and an explicit 
 
 Validation without a key: unit tests with injected generators (`server/groundedAi.test.ts`) and
 browser runs with mocked responses explicitly labelled "MAQUETTE D'AUDIT".
+
+## Model chains (`server/geminiModels.ts`)
+
+Every Gemini call goes to the first available model of a chain. A model that answers 429 (daily quota:
+« PerDay » or « exceeded your current quota »; otherwise per-minute limit) or 404 (unknown model) is set
+aside (daily quota: until about 08:00 UTC, when free quotas reset; per-minute limit: 60 s; unknown model:
+6 h) and the call moves to the next model. When the whole chain is exhausted the error is
+`NoModelAvailable` (429, models named), shown as is in the panel, and never retried.
+
+Free tier limits read in Google AI Studio on 3 November 2026: about 20 requests per day for Flash models,
+500 for the recent Flash Lite models, and Google Search grounding at 0 for Gemini 3 and later, 1 500 per day
+for Gemini 2 and 2.5. Hence two chains: Google Search on the 2.5 models, writing on the 3.x models first.
+Gemini 3+ calls ask for a low thinking level; 2.x models get no thinking setting.
 
 ## Betting lab assistant (`/api/ai/betting-news`, `/api/ai/betting-plan`)
 

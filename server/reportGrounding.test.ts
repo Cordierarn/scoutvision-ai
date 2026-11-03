@@ -259,7 +259,7 @@ describe('génération contrôlée (fixtures A à D)', () => {
 describe('E. modèle configuré', () => {
   it('GEMINI_MODEL absente : modèle par défaut', () => {
     expect(resolveGeminiModel(undefined)).toBe(DEFAULT_GEMINI_MODEL);
-    expect(resolveGeminiModel('  ')).toBe('gemini-3.5-flash');
+    expect(resolveGeminiModel('  ')).toBe('gemini-3.8-flash');
     expect(resolveGeminiModel(' gemini-x ')).toBe('gemini-x');
   });
 

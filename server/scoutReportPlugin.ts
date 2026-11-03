@@ -15,6 +15,7 @@ import {
   BETTING_NEWS_PATH, BETTING_PLAN_PATH, GenerateGrounded, GenerateJson, LoadIndex, NewsCache, handleBettingNews, handleBettingPlan, indexLoader, parseGrounding,
 } from './bettingAi';
 import { ContextLoader, contextLoader } from './bettingContext';
+import { DEFAULT_SEARCH_MODELS, DEFAULT_TEXT_MODELS, ModelPool, modelChain, takesThinkingLevel, withModelFallback } from './geminiModels';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
 /** Chemins des tâches d'IA ancrée : /api/ai/compare, /api/ai/opposition, /api/ai/hunter */
@@ -74,73 +75,63 @@ export function readBody(req: IncomingMessage, limit: number): Promise<string> {
   });
 }
 
+/** Course entre un appel et un délai (le minuteur est toujours libéré) */
+async function timed<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), ms); });
+  try { return await Promise.race([call, timeout]); } finally { clearTimeout(timer); }
+}
+
+/** Niveau de réflexion réduit sur Gemini 3+, refait sans ce réglage si le modèle le refuse (400 qui cite « thinking ») */
+async function withLowThinking<T>(model: string, call: (thinkingConfig: Record<string, unknown> | undefined) => Promise<T>): Promise<T> {
+  if (!takesThinkingLevel(model)) return call(undefined);
+  const { ThinkingLevel } = await import('@google/genai');
+  return call({ thinkingLevel: ThinkingLevel.LOW }).catch(error => {
+    if (/thinking/i.test(error instanceof Error ? error.message : String(error))) return call(undefined);
+    throw error;
+  });
+}
+
 /**
- * Appel Gemini (SDK chargé à la demande, côté serveur uniquement), borné dans le temps.
- * Renvoie aussi le modèle qui a réellement répondu (modelVersion), qui peut différer du modèle demandé.
+ * Appel Gemini (SDK chargé à la demande, côté serveur uniquement), borné dans le temps, sur le premier
+ * modèle disponible de la chaîne. Renvoie le modèle qui a réellement répondu (modelVersion).
  */
-export function geminiGenerator(apiKey: string, model: string): GenerateText {
+export function geminiGenerator(apiKey: string, pool: ModelPool, log?: (message: string) => void): GenerateText {
   return async prompt => {
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('délai dépassé')), GEMINI_TIMEOUT_MS);
-    });
-    try {
-      const response = await Promise.race([ai.models.generateContent({ model, contents: prompt }), timeout]);
-      return { text: response.text ?? '', modelVersion: response.modelVersion };
-    } finally {
-      clearTimeout(timer);
-    }
+    return timed(withModelFallback(pool, async model => {
+      const response = await ai.models.generateContent({ model, contents: prompt });
+      return { text: response.text ?? '', modelVersion: response.modelVersion || model };
+    }, log), GEMINI_TIMEOUT_MS);
   };
 }
 
 /** Appel Gemini avec l'outil Google Search : texte, sources, requêtes et bloc de suggestions Google */
-export function geminiGroundedGenerator(apiKey: string, model: string): GenerateGrounded {
+export function geminiGroundedGenerator(apiKey: string, pool: ModelPool, log?: (message: string) => void): GenerateGrounded {
   return async prompt => {
-    const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
+    const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), BETTING_GEMINI_TIMEOUT_MS); });
-    try {
-      // Réflexion réduite : la recherche d'actualité n'a pas besoin d'un long raisonnement et doit rester rapide.
-      // Si le modèle refuse ce réglage (400 qui cite « thinking »), l'appel est refait sans lui.
-      const call = (thinking: boolean) => ai.models.generateContent({
-        model, contents: prompt,
-        config: { tools: [{ googleSearch: {} }], ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}) },
-      });
-      const response = await Promise.race([
-        call(true).catch(error => { if (/thinking/i.test(error instanceof Error ? error.message : String(error))) return call(false); throw error; }),
-        timeout,
-      ]);
-      return { text: response.text ?? '', modelVersion: response.modelVersion, ...parseGrounding(response.candidates?.[0]?.groundingMetadata) };
-    } finally {
-      clearTimeout(timer);
-    }
+    // Réflexion réduite : la recherche d'actualité doit rester rapide
+    return timed(withModelFallback(pool, model => withLowThinking(model, async thinkingConfig => {
+      const response = await ai.models.generateContent({ model, contents: prompt, config: { tools: [{ googleSearch: {} }], ...(thinkingConfig ? { thinkingConfig } : {}) } });
+      return { text: response.text ?? '', modelVersion: response.modelVersion || model, ...parseGrounding(response.candidates?.[0]?.groundingMetadata) };
+    }), log), BETTING_GEMINI_TIMEOUT_MS);
   };
 }
 
 /** Appel Gemini en JSON strict (schéma imposé), sans outil */
-export function geminiJsonGenerator(apiKey: string, model: string): GenerateJson {
+export function geminiJsonGenerator(apiKey: string, pool: ModelPool, log?: (message: string) => void): GenerateJson {
   return async (prompt, schema) => {
-    const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
+    const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), BETTING_GEMINI_TIMEOUT_MS); });
-    try {
-      // Le plan relit des faits déjà calculés : réflexion réduite pour tenir le délai (sans le réglage si le modèle le refuse)
-      const call = (thinking: boolean) => ai.models.generateContent({
-        model, contents: prompt,
-        config: { responseMimeType: 'application/json', responseJsonSchema: schema, ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}) },
+    // Le plan relit des faits déjà calculés : réflexion réduite pour tenir le délai
+    return timed(withModelFallback(pool, model => withLowThinking(model, async thinkingConfig => {
+      const response = await ai.models.generateContent({
+        model, contents: prompt, config: { responseMimeType: 'application/json', responseJsonSchema: schema, ...(thinkingConfig ? { thinkingConfig } : {}) },
       });
-      const response = await Promise.race([
-        call(true).catch(error => { if (/thinking/i.test(error instanceof Error ? error.message : String(error))) return call(false); throw error; }),
-        timeout,
-      ]);
-      return { text: response.text ?? '', modelVersion: response.modelVersion };
-    } finally {
-      clearTimeout(timer);
-    }
+      return { text: response.text ?? '', modelVersion: response.modelVersion || model };
+    }), log), BETTING_GEMINI_TIMEOUT_MS);
   };
 }
 
@@ -158,7 +149,9 @@ function boundedCall<A extends unknown[], R>(call: (...args: A) => Promise<R>, d
 
 export interface ScoutReportMiddlewareOptions {
   apiKey: string | undefined;
-  model?: string;                          // GEMINI_MODEL ; modèle par défaut si absente
+  model?: string;                          // GEMINI_MODEL : placé en tête de la chaîne de rédaction
+  textModels?: string;                     // GEMINI_TEXT_MODELS : chaîne de rédaction (virgules)
+  searchModels?: string;                   // GEMINI_SEARCH_MODELS : chaîne de recherche Google (virgules)
   generate?: GenerateText;                 // remplaçable dans les tests
   rateLimit?: { limit: number; windowMs: number };
   log?: (message: string) => void;
@@ -203,13 +196,16 @@ export function withDeadline(generate: GenerateText, deadline: number, now: () =
 export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   const { apiKey, log = message => console.warn(message) } = options;
   const model = resolveGeminiModel(options.model);
-  const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey, model) : async () => '');
+  // Chaînes de modèles partagées par toutes les requêtes : un modèle au quota épuisé est mis de côté
+  const textPool = new ModelPool(modelChain(options.textModels, DEFAULT_TEXT_MODELS, options.model));
+  const searchPool = new ModelPool(modelChain(options.searchModels, DEFAULT_SEARCH_MODELS));
+  const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey, textPool, log) : async () => '');
   const allow = createRateLimiter(options.rateLimit?.limit ?? RATE_LIMIT, options.rateLimit?.windowMs ?? RATE_WINDOW_MS);
   // Assistant du Labo paris : une recherche d'actualité par match puis un plan ; actualité en cache 90 min
   const allowBetting = createRateLimiter(options.bettingRateLimit?.limit ?? BETTING_RATE_LIMIT, options.bettingRateLimit?.windowMs ?? RATE_WINDOW_MS);
   const loadIndex = options.loadIndex ?? (options.dataDir ? indexLoader(options.dataDir) : () => null);
-  const generateGrounded = options.generateGrounded ?? (apiKey ? geminiGroundedGenerator(apiKey, model) : async () => ({ text: '', sources: [], queries: [] }));
-  const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, model) : async () => ({ text: '' }));
+  const generateGrounded = options.generateGrounded ?? (apiKey ? geminiGroundedGenerator(apiKey, searchPool, log) : async () => ({ text: '', sources: [], queries: [] }));
+  const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, textPool, log) : async () => ({ text: '' }));
   const news = new NewsCache();
   const loadContext = options.loadContext ?? (options.dataDir ? contextLoader(options.dataDir) : undefined);
 
