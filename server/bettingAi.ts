@@ -22,6 +22,7 @@ import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { NUMBER, factNumbers, supported } from './reportAudit';
 import { ContextLoader, MatchContext, regulars } from './bettingContext';
+import { NoModelAvailable } from './geminiModels';
 import { Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
 export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v2' } as const;
@@ -129,7 +130,7 @@ export async function withRetry<T>(call: () => Promise<T>, sleep: (ms: number) =
     } catch (error) {
       const status = errorStatus(error);
       const daily = /PerDay/.test(error instanceof Error ? error.message : String(error));
-      if (attempt >= MAX_ATTEMPTS || status === undefined || !TRANSIENT.has(status) || daily) throw error;
+      if (attempt >= MAX_ATTEMPTS || status === undefined || !TRANSIENT.has(status) || daily || error instanceof NoModelAvailable) throw error;
       await sleep(600 * 2 ** (attempt - 1) + Math.random() * 600);
     }
   }
@@ -251,6 +252,7 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
 /** Message d'échec explicite (privé) : délai, quota, accès à la recherche Google, refus du modèle */
 export function newsErrorMessage(error: unknown, detail: string): string {
   const status = errorStatus(error);
+  if (error instanceof NoModelAvailable) return `${error.message} Les quotas gratuits reviennent vers 9 h (heure de Paris) ; la facturation Google AI Studio les lève.`;
   const short = detail.replace(/\s+/g, ' ').slice(0, 160);
   if (error instanceof Error && /délai/.test(error.message)) return 'Recherche trop longue : Gemini n\'a pas répondu à temps. Réessayez ; l\'actualité déjà trouvée reste en cache.';
   if (status === 429) return `Quota Gemini atteint (429) : recherche Google ou modèle limité. Détail : ${short}`;
@@ -448,6 +450,7 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
 /** Message d'échec explicite du plan (privé) : délai, quota, refus du modèle, détail de l'API */
 export function planErrorMessage(error: unknown, detail: string): string {
   const status = errorStatus(error);
+  if (error instanceof NoModelAvailable) return `${error.message} Les quotas gratuits reviennent vers 9 h (heure de Paris) ; la facturation Google AI Studio les lève.`;
   const short = detail.replace(/\s+/g, ' ').slice(0, 160);
   if (error instanceof Error && /délai/.test(error.message)) return 'Plan trop long à générer : Gemini n\'a pas répondu à temps. Réessayez ; l\'actualité déjà trouvée reste en cache.';
   if (status === 429) return `Quota Gemini atteint (429). Détail : ${short}`;

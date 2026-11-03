@@ -34,7 +34,8 @@ function privateServer(env: Record<string, string>, auth: ReturnType<typeof load
       hsts: false,
       cdn: mode === 'dev' ? 'next' : 'proxy',
       revoked,
-      api: scoutReportMiddleware({ apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined, dataDir: path.resolve(__dirname, env.SCOUTVISION_DATA_DIR || 'public/data') }),
+      api: scoutReportMiddleware({ apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined,
+        textModels: env.GEMINI_TEXT_MODELS || undefined, searchModels: env.GEMINI_SEARCH_MODELS || undefined, dataDir: path.resolve(__dirname, env.SCOUTVISION_DATA_DIR || 'public/data') }),
     });
   };
   return {
