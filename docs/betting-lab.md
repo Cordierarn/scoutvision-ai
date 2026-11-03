@@ -44,8 +44,8 @@ Constats sur de vraies réponses (échantillons sous `.research/oddspapi/`, igno
   toutes compétitions, 100 % sur Premier League, Serie A, Championship ; les échecs sont des variantes
   de nom absorbées par une table d'alias apprise.
 
-Décisions prises : Big 5 seulement, un relevé par jour par tournoi puis historique complet de chaque match
-après coup. Plan OddsPapi payant « normal » (5 000 requêtes par mois), pré-match seulement : ni live ni
+Décisions prises : Big 5, puis Championship, Liga Portugal, Eredivisie, puis les trois coupes d'Europe (3 novembre) ; un
+relevé par jour par tournoi puis historique complet de chaque match après coup. Plan OddsPapi payant « normal » (5 000 requêtes par mois), pré-match seulement : ni live ni
 marchés joueurs. Les familles buteur et passeur sortent donc du périmètre ; les 80 marchés par match
 restants (résultat, buts, handicap asiatique, scores exacts, mi-temps/fin, première et dernière équipe à
 marquer, marge) sont ceux du Labo.
