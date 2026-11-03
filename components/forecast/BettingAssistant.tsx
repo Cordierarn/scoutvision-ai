@@ -17,7 +17,8 @@ import {
 import { PROFILE_LABELS, formatEuros, formatOdds, formatPct, stakeEuros } from './suggestionsLogic';
 
 type Phase = 'idle' | 'news' | 'plan' | 'done' | 'error';
-interface AssistantState { phase: Phase; done: number; total: number; plan: BettingPlan | null; failedNews: number; error: string | null; key: string }
+export interface NewsFailure { match: string; message: string }
+interface AssistantState { phase: Phase; done: number; total: number; plan: BettingPlan | null; newsErrors: NewsFailure[]; error: string | null; key: string }
 
 // Résultat conservé au changement d'onglet (même logique que l'onglet retenu de la page)
 let lastState: AssistantState | null = null;
@@ -60,12 +61,12 @@ const NewsBlock: React.FC<{ news: MatchNews | BettingPlan['matches'][number]['ne
 };
 
 /** Plan du jour et avis par match (présentation seule) */
-export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; failedNews?: number; stale?: boolean }> = ({ plan, bankroll, failedNews = 0, stale = false }) => (
+export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; newsErrors?: NewsFailure[]; stale?: boolean }> = ({ plan, bankroll, newsErrors = [], stale = false }) => (
     <div className="mt-4 space-y-4">
       {stale && <p className="text-2xs text-warn">Sélection ou profil modifiés depuis cette analyse : relancez-la pour les prendre en compte.</p>}
-      {(failedNews > 0 || plan.warnings.length > 0) && (
+      {(newsErrors.length > 0 || plan.warnings.length > 0) && (
         <ul className="list-none m-0 p-0 text-2xs text-warn space-y-0.5">
-          {failedNews > 0 && <li>Actualité indisponible pour {failedNews} match{failedNews > 1 ? 's' : ''}.</li>}
+          {newsErrors.map(e => <li key={e.match}>Actualité indisponible pour {e.match} : {e.message}</li>)}
           {plan.warnings.map(w => <li key={w}>{w}</li>)}
         </ul>
       )}
@@ -160,7 +161,7 @@ export const BettingAssistant: React.FC<{ index: SuggestionsIndex; profile: Sugg
   const [selected, setSelectedState] = useState<string[]>(() => (lastSelection ?? defaultSelection(index.matches, now)).filter(id => candidates.some(c => c.matchId === id)));
   const setSelected = (ids: string[]) => { lastSelection = ids; setSelectedState(ids); };
   const [refresh, setRefresh] = useState(false);
-  const [state, setStateRaw] = useState<AssistantState>(() => lastState ?? { phase: 'idle', done: 0, total: 0, plan: null, failedNews: 0, error: null, key: '' });
+  const [state, setStateRaw] = useState<AssistantState>(() => lastState ?? { phase: 'idle', done: 0, total: 0, plan: null, newsErrors: [], error: null, key: '' });
   const setState = (s: AssistantState) => { lastState = s; setStateRaw(s); };
   const running = state.phase === 'news' || state.phase === 'plan';
 
@@ -169,11 +170,13 @@ export const BettingAssistant: React.FC<{ index: SuggestionsIndex; profile: Sugg
   const run = async () => {
     const ids = [...selected];
     const key = `${ids.join(',')}|${profile}`;
-    let s: AssistantState = { phase: 'news', done: 0, total: ids.length, plan: null, failedNews: 0, error: null, key };
+    let s: AssistantState = { phase: 'news', done: 0, total: ids.length, plan: null, newsErrors: [], error: null, key };
     setState(s);
     const results = await mapLimited(ids, NEWS_CONCURRENCY, id => fetchMatchNews(id, refresh), done => { s = { ...s, done }; setState(s); });
-    const failedNews = results.filter(r => r.status === 'rejected').length;
-    s = { ...s, phase: 'plan', failedNews };
+    const names = new Map(candidates.map(m => [m.matchId, `${m.home} – ${m.away}`]));
+    const newsErrors = results.flatMap((r, i) => (r.status === 'rejected'
+      ? [{ match: names.get(ids[i]) ?? ids[i], message: r.reason instanceof Error ? r.reason.message : 'erreur inconnue' }] : []));
+    s = { ...s, phase: 'plan', newsErrors };
     setState(s);
     try {
       const plan = await fetchBettingPlan(ids, profile);
@@ -214,7 +217,7 @@ export const BettingAssistant: React.FC<{ index: SuggestionsIndex; profile: Sugg
               Forcer une nouvelle recherche d'actualité (compositions publiées environ 1 h avant le match)
             </label>
           </div>
-          <p className="text-2xs text-ink-4 mt-1">Environ 10 à 30 s. L'actualité reste en cache 90 min sur le serveur.</p>
+          <p className="text-2xs text-ink-4 mt-1">Environ 20 s à 1 min 30 : une recherche Google par match, puis le plan. L'actualité reste en cache 90 min sur le serveur.</p>
         </fieldset>
       )}
 
@@ -225,7 +228,7 @@ export const BettingAssistant: React.FC<{ index: SuggestionsIndex; profile: Sugg
       )}
       {state.phase === 'error' && <LoadError className="mt-3" message={state.error ?? 'La génération a échoué.'} onRetry={() => { void run(); }} />}
 
-      {plan && !running && <PlanView plan={plan} bankroll={bankroll} failedNews={state.failedNews} stale={!!stale} />}
+      {plan && !running && <PlanView plan={plan} bankroll={bankroll} newsErrors={state.newsErrors} stale={!!stale} />}
       <p className="text-2xs text-ink-4 mt-3 border-t border-line pt-2">{RESPONSIBLE_GAMBLING}</p>
     </Panel>
   );

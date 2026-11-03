@@ -7,8 +7,9 @@ import { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   BETTING_NEWS_PATH, BETTING_PLAN_PATH, BettingDeps, GenerateGrounded, GenerateJson, NEWS_REFRESH_MIN_MS, NewsCache, SuggestionsIndexFile,
-  auditText, buildNewsPrompt, buildPlanFacts, buildPlanPrompt, cleanNews, handleBettingNews, handleBettingPlan, matchFacts, parseGrounding, validatePlan,
+  auditText, buildNewsPrompt, buildPlanFacts, buildPlanPrompt, cleanNews, handleBettingNews, handleBettingPlan, matchFacts, newsErrorMessage, parseGrounding, validatePlan,
 } from './bettingAi';
+import type { MatchContext, TeamContext } from './bettingContext';
 import { scoutReportMiddleware } from './scoutReportPlugin';
 
 const KEY = 'AIzaTEST-secret-key-123';     // clé factice de test, jamais une vraie clé
@@ -47,6 +48,11 @@ function deps(over: Partial<BettingDeps> = {}): BettingDeps {
   };
 }
 
+const team = (name: string, players: string[]): TeamContext => ({ team: name, standings: [], seasonStakes: null, profiles: [], usualSystem: null,
+  keyPlayers: players.map(p => ({ name: p, position: 'ST', age: 25, matches: 5, starts: 5, minutesShare: 0.9, goals: 4, assists: 1, xG: 3.1, xA: 0.4, rating: 7.2, vaepPer90: 0.2, rapmNet: 0.15 })) });
+const CONTEXT: MatchContext = { model1x2: { home: 0.5, draw: 0.25, away: 0.25 }, market1x2NoVig: null, expectedGoals: { home: 1.6, away: 0.9 },
+  home: team('Club A', ['Buteur A']), away: team('Club B', ['Buteur B']) };
+
 describe('actualité ancrée', () => {
   it('lit les métadonnées d\'ancrage : sources https dédoublonnées, requêtes, bloc de suggestions', () => {
     const g = parseGrounding({
@@ -70,6 +76,19 @@ describe('actualité ancrée', () => {
     expect(prompt).toContain('Club A vs Club B');
     expect(prompt).toContain('no prediction, no odds, no betting advice');
     expect(prompt).not.toContain('1.85');
+  });
+
+  it('demande de vérifier les joueurs clés des deux équipes quand le contexte est connu', async () => {
+    expect(buildNewsPrompt(matchFacts(INDEX.matches[0], 'equilibre'), '2026-11-07', CONTEXT)).toContain('(Club A: Buteur A; Club B: Buteur B)');
+    let prompt = '';
+    await handleBettingNews({ matchId: 'm1' }, deps({ loadContext: () => CONTEXT, generateGrounded: async p => { prompt = p; return { text: '- rien', sources: [], queries: [] }; } }));
+    expect(prompt).toContain('Buteur B');
+  });
+
+  it('explique l\'échec : délai, quota, accès à la recherche Google', () => {
+    expect(newsErrorMessage(new Error('délai de la requête dépassé'), '')).toContain('Recherche trop longue');
+    expect(newsErrorMessage(Object.assign(new Error('quota'), { status: 429 }), 'quota')).toContain('Quota Gemini atteint (429)');
+    expect(newsErrorMessage(Object.assign(new Error('x'), { status: 400 }), 'Search Grounding is not supported')).toContain('Grounding with Google Search');
   });
 
   it('met l\'actualité en cache et limite l\'actualisation', async () => {
@@ -101,6 +120,14 @@ describe('actualité ancrée', () => {
 
 describe('plan du jour', () => {
   const facts = buildPlanFacts(INDEX, ['m1', 'm2', 'm3', 'inconnu'], 'equilibre', '2026-11-07');
+
+  it('transmet probabilités et espérances en pourcentages, et le contexte des équipes', () => {
+    const withContext = buildPlanFacts(INDEX, ['m1'], 'equilibre', '2026-11-07', () => CONTEXT);
+    expect(withContext.matches[0].suggestions[0]).toMatchObject({ probabilityPct: 60, expectedValuePct: 11 });
+    expect(withContext.matches[0].context?.home.keyPlayers[0].name).toBe('Buteur A');
+    expect(buildPlanPrompt(withContext, {})).toContain('"keyPlayers"');
+    expect(buildPlanPrompt(withContext, {})).toContain('write them like "78,7 %"');
+  });
 
   it('ne transmet que les matchs avec cotes, des références stables et le bilan des familles présentes', () => {
     expect(facts.matches.map(m => m.matchId)).toEqual(['m1', 'm2']);
@@ -176,6 +203,22 @@ describe('endpoints HTTP (serveur réel, Gemini simulé)', () => {
     await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
     return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
   }
+
+  it('réponse ouverte : espaces d\'attente puis JSON, erreur portée par le corps', async () => {
+    const middleware = scoutReportMiddleware({ apiKey: KEY, log: () => {}, loadIndex: () => INDEX, bettingKeepAlive: true,
+      generateGrounded: async () => { await new Promise(r => setTimeout(r, 50)); return { text: '- ok', sources: [], queries: [] }; }, generateJson: deps().generateJson });
+    server = createServer((req, res) => { void middleware(req, res, () => { res.statusCode = 404; res.end(); }); });
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
+    const ok = await fetch(base + BETTING_NEWS_PATH, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchId: 'm1' }) });
+    const text = await ok.text();
+    expect(ok.status).toBe(200);
+    expect(text.startsWith(' ')).toBe(true);
+    expect(JSON.parse(text).text).toBe('- ok');
+    const bad = await fetch(base + BETTING_NEWS_PATH, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchId: 'm3' }) });
+    expect(bad.status).toBe(200);
+    expect(JSON.parse(await bad.text())).toMatchObject({ status: 404, error: 'Match absent des suggestions du jour.' });
+  });
 
   it('actualité puis plan ; POST JSON obligatoire ; limite de débit propre à l\'assistant', async () => {
     const base = await start(deps().generateGrounded, deps().generateJson);

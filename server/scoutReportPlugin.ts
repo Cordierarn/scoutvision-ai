@@ -14,6 +14,7 @@ import { AI_TASKS, AiTask, handleGroundedAi } from './groundedAi';
 import {
   BETTING_NEWS_PATH, BETTING_PLAN_PATH, GenerateGrounded, GenerateJson, LoadIndex, NewsCache, handleBettingNews, handleBettingPlan, indexLoader, parseGrounding,
 } from './bettingAi';
+import { ContextLoader, contextLoader } from './bettingContext';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
 /** Chemins des tâches d'IA ancrée : /api/ai/compare, /api/ai/opposition, /api/ai/hunter */
@@ -25,6 +26,10 @@ const RATE_WINDOW_MS = 10 * 60 * 1000;
 const GEMINI_TIMEOUT_MS = 60 * 1000;
 // Assistant du Labo paris : jusqu'à 8 recherches d'actualité et un plan par génération
 const BETTING_RATE_LIMIT = 40;
+// Recherche Google + rédaction : jusqu'à 90 s par appel ; la réponse reste ouverte pendant ce temps (voir keepAlive)
+const BETTING_GEMINI_TIMEOUT_MS = 90 * 1000;
+const BETTING_DEADLINE_MS = 100 * 1000;
+const KEEPALIVE_MS = 5000;
 
 type Next = (err?: unknown) => void;
 
@@ -93,12 +98,21 @@ export function geminiGenerator(apiKey: string, model: string): GenerateText {
 /** Appel Gemini avec l'outil Google Search : texte, sources, requêtes et bloc de suggestions Google */
 export function geminiGroundedGenerator(apiKey: string, model: string): GenerateGrounded {
   return async prompt => {
-    const { GoogleGenAI } = await import('@google/genai');
+    const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), GEMINI_TIMEOUT_MS); });
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('délai dépassé')), BETTING_GEMINI_TIMEOUT_MS); });
     try {
-      const response = await Promise.race([ai.models.generateContent({ model, contents: prompt, config: { tools: [{ googleSearch: {} }] } }), timeout]);
+      // Réflexion réduite : la recherche d'actualité n'a pas besoin d'un long raisonnement et doit rester rapide.
+      // Si le modèle refuse ce réglage (400 qui cite « thinking »), l'appel est refait sans lui.
+      const call = (thinking: boolean) => ai.models.generateContent({
+        model, contents: prompt,
+        config: { tools: [{ googleSearch: {} }], ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}) },
+      });
+      const response = await Promise.race([
+        call(true).catch(error => { if (/thinking/i.test(error instanceof Error ? error.message : String(error))) return call(false); throw error; }),
+        timeout,
+      ]);
       return { text: response.text ?? '', modelVersion: response.modelVersion, ...parseGrounding(response.candidates?.[0]?.groundingMetadata) };
     } finally {
       clearTimeout(timer);
@@ -152,6 +166,14 @@ export interface ScoutReportMiddlewareOptions {
   generateGrounded?: GenerateGrounded;     // remplaçable dans les tests
   generateJson?: GenerateJson;             // remplaçable dans les tests
   bettingRateLimit?: { limit: number; windowMs: number };
+  loadContext?: ContextLoader;             // remplaçable dans les tests
+  /**
+   * Réponse ouverte pour l'assistant : en-têtes et un espace tout de suite, puis un espace toutes les 5 s
+   * jusqu'au JSON final (un JSON précédé d'espaces reste valide). Le routeur Heroku coupe une requête
+   * sans premier octet au bout de 30 s, puis sans octet pendant 55 s : la recherche peut ainsi durer
+   * jusqu'à 100 s. Le statut HTTP vaut alors 200 et une erreur est portée par le JSON (`error`, `status`).
+   */
+  bettingKeepAlive?: boolean;
 }
 
 export class DeadlineError extends Error {}
@@ -181,6 +203,7 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   const generateGrounded = options.generateGrounded ?? (apiKey ? geminiGroundedGenerator(apiKey, model) : async () => ({ text: '', sources: [], queries: [] }));
   const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, model) : async () => ({ text: '' }));
   const news = new NewsCache();
+  const loadContext = options.loadContext ?? (options.dataDir ? contextLoader(options.dataDir) : undefined);
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const path = (req.url ?? '').split('?')[0];
@@ -212,10 +235,26 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
     }
 
     if (betting) {
-      const deadline = options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
-      const deps = { apiKey, model, loadIndex, news, log, generateGrounded: boundedCall(generateGrounded, deadline), generateJson: boundedCall(generateJson, deadline) };
-      const out = path === BETTING_NEWS_PATH ? await handleBettingNews(body, deps) : await handleBettingPlan(body, deps);
-      return sendJson(res, out.status, out.body);
+      const keepAlive = !!options.bettingKeepAlive;
+      const deadline = keepAlive ? Date.now() + BETTING_DEADLINE_MS : options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
+      const deps = { apiKey, model, loadIndex, loadContext, news, log, generateGrounded: boundedCall(generateGrounded, deadline), generateJson: boundedCall(generateJson, deadline) };
+      let beat: ReturnType<typeof setInterval> | undefined;
+      if (keepAlive) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.flushHeaders();
+        res.write(' ');
+        beat = setInterval(() => res.write(' '), KEEPALIVE_MS);
+      }
+      try {
+        const out = path === BETTING_NEWS_PATH ? await handleBettingNews(body, deps) : await handleBettingPlan(body, deps);
+        if (!keepAlive) return sendJson(res, out.status, out.body);
+        res.end(JSON.stringify(out.status >= 400 ? { ...out.body, status: out.status } : out.body));
+      } finally {
+        clearInterval(beat);
+      }
+      return;
     }
 
     const bounded = options.deadlineMs ? withDeadline(generate, Date.now() + options.deadlineMs) : generate;

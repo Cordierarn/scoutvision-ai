@@ -41,7 +41,7 @@ describe('BettingAssistant (rendu statique)', () => {
   });
 
   it('affiche le plan : mise du moteur sur la bankroll, avis, actualité sourcée, avertissements', () => {
-    const html = renderToStaticMarkup(<PlanView plan={plan} bankroll={300} failedNews={1} />);
+    const html = renderToStaticMarkup(<PlanView plan={plan} bankroll={300} newsErrors={[{ match: 'Club G – Club H', message: 'Recherche trop longue.' }]} />);
     expect(html).toContain('9,00');                     // 300 × 3 %
     expect(html).toContain('À garder');
     expect(html).toContain('À éviter');
@@ -49,7 +49,7 @@ describe('BettingAssistant (rendu statique)', () => {
     expect(html).toContain('href="https://example.test/a"');
     expect(html).toContain('rel="noopener noreferrer"');
     expect(html).toContain('https://www.google.com/search?q=Club%20A%20Club%20B%20absents');
-    expect(html).toContain('Actualité indisponible pour 1 match.');
+    expect(html).toContain('Actualité indisponible pour Club G – Club H : Recherche trop longue.');
     expect(html).toContain('modele-test');
     expect(renderToStaticMarkup(<PlanView plan={{ ...plan, picks: [] }} bankroll={null} />)).toContain('passer son tour');
   });

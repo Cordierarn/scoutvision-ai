@@ -19,7 +19,9 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   } catch {
     throw new ScoutReportError('Serveur IA injoignable. Vérifiez votre connexion et réessayez.');
   }
-  const payload = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+  // Réponse ouverte en production : statut 200 et erreur éventuelle dans le JSON (`error`, `status`)
+  const payload = (await response.json().catch(() => null)) as (T & { error?: string; status?: number }) | null;
+  if (payload && typeof payload.error === 'string') throw new ScoutReportError(payload.error, typeof payload.status === 'number' ? payload.status : response.status);
   if (!response.ok || !payload) {
     throw new ScoutReportError(payload?.error ?? (response.status === 404
       ? 'Endpoint IA absent : lancez l\'application avec son serveur (npm run dev ou npm run preview).'
