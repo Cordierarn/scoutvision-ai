@@ -86,6 +86,8 @@ def cmd_status(args) -> int:
 
 def cmd_fixtures(args) -> int:
     client = OddsPapiClient()
+    from .catalogue import load as load_catalogue
+    load_catalogue(client=client)  # catalogue des marchés conservé dans l'archive (les suggestions n'ont alors plus besoin de la clé)
     start = dt.datetime.fromisoformat(args.start).replace(tzinfo=dt.timezone.utc)
     end = dt.datetime.fromisoformat(args.end).replace(tzinfo=dt.timezone.utc)
     raw = client.fixtures(start, end)

@@ -95,9 +95,12 @@ jobs:
           python3 -m betting.results_web --date "$(date -u +%F)" || true
 
       - name: Suggestions, journal, bilan, historique des soirées, export
+        env:
+          ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
         run: |
           cd scripts
-          if [ ! -f ../.research/betting/product/bilan.json ]; then python3 -m betting.product replay || echo "::warning::rejeu impossible (archive de cotes incomplète)"; fi
+          # rejeu de la saison recalculé le matin (archive de cotes complétée la veille) ou s'il manque
+          if [ ! -f ../.research/betting/product/bilan.json ] || [ "$(date -u +%H)" -lt 9 ]; then python3 -m betting.product replay || echo "::warning::rejeu impossible (archive de cotes incomplète)"; fi
           python3 -m betting.product suggest
           python3 -m betting.evening auto --date "$(date -u -d '-1 day' +%F)"
           python3 -m betting.evening settle --date "$(date -u -d '-1 day' +%F)"
