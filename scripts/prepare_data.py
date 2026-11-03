@@ -14,6 +14,8 @@ public/data/, chargés à la demande par l'application :
   public/data/networks/<saison>/<COMP>.json réseaux de passes agrégés par équipe (positions moyennes, liens)
   public/data/models/age_curves.json        courbes d'âge (évolution des percentiles par rôle)
   public/data/models/transfer.json          modèle de transfert : niveaux de championnat, contexte, validation
+  public/data/models/reliability.json       fiabilité des métriques par 90 (constante recalée, intervalle, validation)
+  public/data/small_samples/{saison}.json   joueurs sous le seuil de PitchAPI (4 matchs et 180 minutes minimum)
   public/data/market.json                   valeur Transfermarkt et contrat actuels de chaque joueur
   public/data/forecast.json                 pronostics des prochains matchs (pipeline PitchAPI)
 
@@ -53,6 +55,7 @@ import pandas as pd
 
 import market
 import models
+import reliability
 
 DATA_REPO = "Cordierarn/PitchApi-big-5"
 MARKET_RELEASE = "scoutvision-data"
@@ -913,6 +916,49 @@ def build_market_values(snapshot: pd.DataFrame, players: pd.DataFrame) -> dict:
             **columnar(df.reset_index(drop=True))}
 
 
+def write_reliability(out: Path, all_players: pd.DataFrame, halves: list[pd.DataFrame], ks: dict[str, list[float]],
+                      small_inputs: list[tuple], p90_metrics: list[tuple[str, str]], market_df: pd.DataFrame | None) -> None:
+    """Fiabilité des métriques par 90 (models/reliability.json) et joueurs sous le seuil des deux dernières saisons
+    (small_samples/{saison}.json) : voir scripts/reliability.py."""
+    if not halves:
+        print("Fiabilité : aucune table player_match, rien à publier")
+        return
+    params = reliability.calibrate(pd.concat(halves, ignore_index=True), p90_metrics,
+                                   {c: float(pd.Series(v).median()) for c, v in ks.items()})
+    gaps = reliability.percentile_agreement(all_players, [label for label, _ in p90_metrics])
+    errors = [abs(b["predicted"] - b["observed"]) for p in params.values() for b in p["validation"]]
+    summary = {"metrics": len(params), "meanAbsCalibrationError": round(sum(errors) / len(errors), 3) if errors else None,
+               "percentileGapVsPitchapi": round(sum(gaps.values()) / len(gaps), 2) if gaps else None}
+    write_json(out / "models" / "reliability.json", {
+        "method": "Bayésien empirique : fiabilité = minutes / (minutes + k), k recalé par métrique sur un test pair / impair "
+                  "(corrélation des deux moitiés de saison, à poste et compétition égaux) ; intervalle à 90 % = ± 1,645 × écart-type "
+                  "vrai du rôle × racine(1 − fiabilité). Métriques par 90 seulement.",
+        "reliableAt": 0.7, "summary": summary, "metrics": params,
+    })
+    print(f"Fiabilité : {summary['metrics']} métriques, écart prédit / observé {summary['meanAbsCalibrationError']}, "
+          f"percentiles recalculés à {summary['percentileGapVsPitchapi']} point(s) de PitchAPI en moyenne")
+
+    birth = None
+    if market_df is not None and "birth_date" in market_df:
+        birth = market_df.dropna(subset=["birth_date"]).drop_duplicates("player_id").set_index("player_id")["birth_date"]
+    seasons = sorted({s for _, s, *_ in small_inputs})[-2:]
+    for season in seasons:
+        frames = []
+        for comp, s, raw_season, tier, totals, priors, ids in small_inputs:
+            if s != season:
+                continue
+            rows = reliability.small_sample_rows(totals, priors, ids, params, p90_metrics, comp, s, tier)
+            if not rows.empty and birth is not None:
+                rows["Age"] = age_at_season_start(rows["Player ID"].map(birth), raw_season)
+            frames.append(rows)
+        small = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
+        if small.empty:
+            continue
+        small = reliability.add_small_sample_percentiles(small, all_players)
+        write_json(out / "small_samples" / f"{season}.json", reliability.small_samples_payload(small, season))
+        print(f"Petits temps de jeu {season} : {len(small)} joueurs")
+
+
 def write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # allow_nan=False : un NaN échoue ici au lieu de produire un JSON illisible par le navigateur
@@ -954,13 +1000,19 @@ def main(argv: list[str] | None = None) -> int:
 
     by_season: dict[str, dict[str, list[pd.DataFrame]]] = {}
     results: list[pd.DataFrame] = []
+    # Fiabilité des métriques par 90 : demi-saisons (calibration), constantes de PitchAPI, joueurs sous le seuil
+    p90_metrics = [(label, col) for label, col, kind in PLAYER_METRICS if kind == "p90"]
+    p90_cols = [col for _, col in p90_metrics]
+    rel_halves: list[pd.DataFrame] = []
+    rel_k: dict[str, list[float]] = {}
+    rel_small: list[tuple] = []
     competitions: dict[str, dict] = {}
 
     for (comp, raw_season), (tag, name, size) in sorted(selected.items()):
         season = app_season(raw_season)
         tables = read_tables(download(tag, name, size),
                              {"player_season", "team_season", "team_match", "shot", "match", "heatmap",
-                              "pass_network_node", "pass_network_edge", "lineup"})
+                              "pass_network_node", "pass_network_edge", "lineup", "player_match"})
         ps = tables.get("player_season")
         if ps is None or ps.empty:
             print(f"  ! {comp} {raw_season} : pas de player_season, ignoré")
@@ -977,6 +1029,15 @@ def main(argv: list[str] | None = None) -> int:
             if edges is not None and not edges.empty:
                 write_json(args.out / "networks" / season / f"{comp}.json", build_networks(nodes, edges))
         bucket["players"].append(players.assign(_app_season=season))
+
+        pm = tables.pop("player_match", None)
+        if pm is not None and not pm.empty:
+            for col, k in reliability.implied_constants(ps, p90_cols).items():
+                rel_k.setdefault(col, []).append(k)
+            rel_halves.append(reliability.player_halves(pm, p90_cols, comp, season))
+            rel_small.append((comp, season, raw_season, int(ps["league_tier"].iloc[0]), reliability.player_totals(pm, p90_cols),
+                              reliability.role_priors(ps, p90_cols), set(ps["player_id"])))
+            del pm
 
         ts = tables.get("team_season")
         if ts is not None and not ts.empty:
@@ -1055,6 +1116,7 @@ def main(argv: list[str] | None = None) -> int:
     curve_metrics = list(dict.fromkeys(metric_labels + ["Rating"] + COMPUTED_RATES))
     curves = models.age_curves(all_players, curve_metrics)
     write_json(args.out / "models" / "age_curves.json", curves)
+    write_reliability(args.out, all_players, rel_halves, rel_k, rel_small, p90_metrics, market)
     cups = {k for k, c in competitions.items() if c.get("type", "league") != "league"}
     presets = json.loads(ROLE_PRESETS.read_text(encoding="utf-8")) if ROLE_PRESETS.exists() else None
     transfer = models.transfer_model(all_players, curve_metrics, curves["curves"], cups,

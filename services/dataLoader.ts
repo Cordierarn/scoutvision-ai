@@ -9,10 +9,13 @@
  *   /data/heatmaps/<saison>/<COMP>.json cartes de chaleur des joueurs (chargées à la demande)
  *   /data/networks/<saison>/<COMP>.json réseaux de passes agrégés par équipe (chargés à la demande)
  *   /data/models/transfer.json         modèle de transfert (recrutement)
+ *   /data/models/reliability.json      fiabilité des métriques par 90 (constante recalée, intervalle)
+ *   /data/small_samples/{saison}.json  joueurs sous le seuil de PitchAPI (petits temps de jeu)
  *   /data/market.json                  valeur Transfermarkt et contrat actuels (recrutement)
  */
 
 import { PlayerData, TeamStats, ShotEvent } from '../types';
+import type { ReliabilityModel, SmallSamplesFile } from '../utils/reliability';
 
 // ============================================
 // TYPES
@@ -311,6 +314,8 @@ class DataLoader {
   private ageCurves: Promise<AgeCurves> | null = null;
   private transfer: Promise<TransferModel | null> | null = null;
   private market: Promise<MarketValues | null> | null = null;
+  private reliability: Promise<ReliabilityModel | null> | null = null;
+  private smallSamples = new Map<string, Promise<SmallSamplesFile | null>>();
   private forecast: Promise<ForecastFile> | null = null;
 
   /**
@@ -455,6 +460,30 @@ class DataLoader {
       this.transfer.catch(() => { this.transfer = null; });
     }
     return this.transfer;
+  }
+
+  /**
+   * Fiabilité des métriques par 90 (mise en cache) ; null si le pipeline ne l'a pas produite
+   */
+  loadReliability(): Promise<ReliabilityModel | null> {
+    if (!this.reliability) {
+      this.reliability = fetchOptionalJSON<ReliabilityModel>('/data/models/reliability.json');
+      this.reliability.catch(() => { this.reliability = null; });
+    }
+    return this.reliability;
+  }
+
+  /**
+   * Joueurs à faible temps de jeu d'une saison (mis en cache) ; null si le fichier n'existe pas
+   */
+  loadSmallSamples(season: string): Promise<SmallSamplesFile | null> {
+    let pending = this.smallSamples.get(season);
+    if (!pending) {
+      pending = fetchOptionalJSON<SmallSamplesFile>(`/data/small_samples/${encodeURIComponent(season)}.json`);
+      pending.catch(() => this.smallSamples.delete(season));
+      this.smallSamples.set(season, pending);
+    }
+    return pending;
   }
 
   /**
