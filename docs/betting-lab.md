@@ -231,12 +231,23 @@ espérance, mise, raisons, bilan du type), combiné, « Cotes Winamax non dispon
 cartes empilées sous 640 px avec cote et mise visibles ; espérance positive en `text-pos`, négative en
 encre neutre.
 
-### Workflow (`.github/workflows/betting-odds.yml`, livré non activé)
+### Cycle quotidien (`.github/workflows/betting-odds.yml`, actif à la demande du propriétaire)
 
-Rencontres, relevés à venir (`/historical-odds`, non décompté), historiques, vues, appariement, résultats,
-suggestions et export, puis publication de l'archive de cotes (release `betting-odds`) et de l'artefact
-des suggestions dans `scoutvision-data.tar.gz` lue par le serveur. Planification proposée en commentaire :
-toutes les 2 h de 9 h à 21 h UTC.
+- **Le soir** (10 h, 14 h, 17 h UTC) : rencontres, relevés des rencontres à venir (`/historical-odds`,
+  non décompté), historiques des matchs terminés, vues, appariement, suggestions et journal, export.
+- **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
+  (`betting/results_web.py`, scores finaux, mi-temps, premier et dernier but, sans clé), fusionnés aux
+  résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis
+  `betting.evening auto` enregistre les paris de la veille (dernière publication du profil Équilibré avant
+  chaque coup d'envoi, mise = fraction × 300 €) et `betting.evening settle` les règle ; `evening show`
+  donne le tableau soirée par soirée avec le cumul.
+- Publication : archive du Labo (odds, vues, journal, historique des soirées, phase 2, résultats) dans la
+  release privée `betting-odds` ; artefact des suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
+- Premier passage : l'archive de cotes se reconstitue par lots de 400 matchs par passage (non décomptés) ;
+  les artefacts de phase 2 (variante, calibration, ajustements) sont créés s'ils manquent.
+- Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement) et
+  `PITCHAPI_DATA_TOKEN`. Depuis l'environnement de développement, ESPN et les releases ne sont pas
+  accessibles : l'historique se règle en CI.
 
 ## Phases suivantes
 

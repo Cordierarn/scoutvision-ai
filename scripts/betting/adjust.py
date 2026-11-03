@@ -305,3 +305,23 @@ def save(adj: Adjustment, report: dict) -> None:
 def load() -> Adjustment:
     p = OUT / "adjustment.json"
     return Adjustment.from_json(json.loads(p.read_text(encoding="utf-8"))["adjustment"]) if p.exists() else Adjustment(beta={})
+
+
+def main(argv=None) -> int:
+    """Sélection hors échantillon des ajustements et enregistrement de `phase2/adjustment.json`."""
+    from .phase2 import CHOICE_SEASON, FIT_SEASON, frozen_variant, load_results, matches_with_predictions
+    from .results import half_share
+
+    fit = matches_with_predictions([FIT_SEASON]); check = matches_with_predictions([CHOICE_SEASON])
+    hs = half_share(load_results()); prior = hs[hs["season"] < CHOICE_SEASON]
+    comp_half = float(prior["first"].sum() / prior["total"].sum()) if prior["total"].sum() > 0 else 0.45
+    adj, report = select(fit, check, frozen_variant(), comp_half)
+    save(adj, report)
+    print("ajustements gardés :", adj.kept, "| base", report["base"], "| final", report["final"])
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
