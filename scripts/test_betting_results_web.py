@@ -59,6 +59,31 @@ class ParseTests(unittest.TestCase):
             self.assertEqual(len(results_web.save(df, p)), 2)
 
 
+class MergeTests(unittest.TestCase):
+    def test_web_results_get_team_ids_and_feed_features(self):
+        from betting import adjust, product
+        base = pd.DataFrame([{"match_id": "p1", "competition": "AAA", "season": "2026-27", "kickoff_utc": pd.Timestamp("2026-10-01 15:00", tz="UTC"), "home_team_id": "t1", "away_team_id": "t2",
+                              "home_team_name": "Club A", "away_team_name": "Club B", "ft_home": 1, "ft_away": 0, "ht_home": 0, "ht_away": 0, "first_goal": "home", "last_goal": "home",
+                              "goals_first_half": 0, "goals_total": 1, "extra_time": False, "awarded": False}])
+        df = pd.DataFrame(results_web.parse(payload(), "AAA"), columns=results_web.COLUMNS)
+        df.loc[0, "match_id"] = "w1"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "results_web.parquet"
+            df.to_parquet(path, index=False)
+            orig = (product._pitchapi_results, product.RESEARCH)
+            product._pitchapi_results = lambda: base
+            product.RESEARCH = Path(tmp)
+            try:
+                merged = product.load_results()
+            finally:
+                product._pitchapi_results, product.RESEARCH = orig
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged.iloc[1]["home_team_id"], "t1")          # retrouvé par le nom
+        self.assertEqual(merged.iloc[1]["away_team_id"], "t2")
+        feats = adjust.compute_features(merged, 120)                       # ne plante plus sur des identifiants absents
+        self.assertEqual(len(feats), 2)
+
+
 class EveningTests(unittest.TestCase):
     def test_settle_singles_and_combo_with_refund(self):
         with tempfile.TemporaryDirectory() as tmp:
