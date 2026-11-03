@@ -367,11 +367,20 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     js = {"published": int(len(journal)), "settled": int(len(settled)),
           "byProfile": {p: {"bets": int(len(g)), "hitRate": round(float((g["settled"] > 0).mean()), 4) if len(g) else None, "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None}
                         for p, g in settled.groupby("profile")}}
+    evenings_path = RESEARCH / "product" / "evenings.json"
+    evenings = []
+    if evenings_path.exists():
+        cumul = 0.0
+        for e in json.loads(evenings_path.read_text(encoding="utf-8")).get("evenings", []):
+            profit = e.get("profit")
+            cumul += profit or 0.0
+            evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
+                             "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled"))})
     payload = {"schemaVersion": "1.0.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
                "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in sg.PROFILES], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
                "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kellyFraction": sg.KELLY_FRACTION, "capPerBet": sg.CAP_PER_BET,
                          "capPerMatch": sg.CAP_PER_MATCH, "fixedStake": sg.FIXED_STAKE},
-               "matches": entries, "bilan": bilan, "journal": js}
+               "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:]}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = EXPORT_DIR / "index.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

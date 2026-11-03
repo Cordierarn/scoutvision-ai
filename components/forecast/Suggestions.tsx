@@ -39,6 +39,26 @@ export const SuggestionsControls: React.FC<{
           <div id={`${id}-bankroll-help`} className="text-2xs text-ink-4 mt-1">{bankroll === null ? 'Montant invalide : entre 1 et 1 000 000 €.' : 'Mémorisée dans ce navigateur.'}</div>
         </div>
       </div>
+      {index.evenings && index.evenings.length > 0 && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="sv-table">
+            <caption className="text-left sv-label pb-1">Soirées suivies (profil Équilibré, mises du moteur sur 300 €) : net et cumul réels</caption>
+            <thead><tr><th scope="col">Soirée</th><th scope="col" className="text-right">Paris</th><th scope="col" className="text-right">Gagnés</th><th scope="col" className="text-right">Misé</th><th scope="col" className="text-right">Net</th><th scope="col" className="text-right">Cumul</th></tr></thead>
+            <tbody>
+              {index.evenings.map(e => (
+                <tr key={e.date}>
+                  <td className="text-ink">{new Date(`${e.date}T12:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}{e.settled ? '' : <span className="text-ink-4"> · en attente</span>}</td>
+                  <td className="text-right num text-ink-2">{e.bets}</td>
+                  <td className="text-right num text-ink-2">{e.settled ? e.won : '–'}</td>
+                  <td className="text-right num text-ink-2">{formatEuros(e.stake)}</td>
+                  <td className={`text-right num ${e.profit !== null && e.profit > 0 ? 'text-pos' : 'text-ink-2'}`}>{e.profit === null ? '–' : `${e.profit >= 0 ? '+' : '−'}${formatEuros(Math.abs(e.profit))}`}</td>
+                  <td className={`text-right num ${e.cumulative > 0 ? 'text-pos' : 'text-ink'}`}>{`${e.cumulative >= 0 ? '+' : '−'}${formatEuros(Math.abs(e.cumulative))}`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {o && o.bets > 0 ? (
         <StatStrip className="mt-4 grid-cols-2 lg:grid-cols-4">
           <Stat label={`Bilan ${index.season} · ${PROFILE_LABELS[profile]}`} value={`${o.bets} paris`} sub="rejeu sur les matchs joués, cotes du dernier relevé avant coup d'envoi" />

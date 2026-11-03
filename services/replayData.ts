@@ -147,6 +147,7 @@ export interface SuggestionsIndex {
   matches: SuggestionMatch[];
   bilan: { start: number; profiles: Record<SuggestionProfile, BilanProfile> } | null;
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
+  evenings?: { date: string; bets: number; won: number; stake: number; profit: number | null; cumulative: number; settled: boolean }[];
 }
 
 export const replayData = {

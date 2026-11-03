@@ -48,6 +48,15 @@ describe('Suggestions (rendu statique)', () => {
     expect(controls).toContain('role="radiogroup"');
   });
 
+  it('affiche les soirées suivies avec net et cumul', () => {
+    const withEvenings = { ...index, evenings: [{ date: '2026-11-02', bets: 7, won: 6, stake: 61.37, profit: 25.25, cumulative: 25.25, settled: false }, { date: '2026-11-03', bets: 3, won: 0, stake: 15.75, profit: null, cumulative: 25.25, settled: false }] };
+    const html = renderToStaticMarkup(<SuggestionsControls index={withEvenings} profile="equilibre" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />);
+    expect(html).toContain('Soirées suivies');
+    expect(html).toContain('+25,25');
+    expect(html).toContain('en attente');
+    expect(html).toContain('61,37');
+  });
+
   it('indique un match sans cotes et un profil sans sélection admissible', () => {
     expect(renderToStaticMarkup(<SuggestionsBlock match={{ ...match, status: 'no_odds', profiles: undefined }} profile="sur" bankroll={300} open now={NOW} />)).toContain('Cotes Winamax non disponibles pour ce match.');
     expect(renderToStaticMarkup(<SuggestionsBlock match={undefined} profile="sur" bankroll={300} open now={NOW} />)).toContain('Cotes Winamax non disponibles');
