@@ -269,6 +269,8 @@ def _block(g: pd.DataFrame) -> dict:
 
 def summarise(tab: pd.DataFrame) -> dict:
     out = {"start": START_BANKROLL, "profiles": {}}
+    if tab.empty:
+        tab = pd.DataFrame(columns=["match_id", "competition", "kickoff_utc", "profile", "kind", "rank", "family", "odds", "p", "ev", "stake_fraction", "stake_mode", "settled", "realised"])
     for profile in sg.PROFILES:
         g = tab[tab["profile"] == profile]
         simple = g[g["kind"] == "simple"]

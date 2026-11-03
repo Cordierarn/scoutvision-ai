@@ -122,11 +122,12 @@ def scores_from_results(date: str) -> dict:
     return {m.match_id: {"ft": [int(m.ft_home), int(m.ft_away)], "ht": [int(m.ht_home), int(m.ht_away)], "first_goal": m.first_goal, "last_goal": m.last_goal} for m in r.itertuples()}
 
 
-def settle(date: str, scores: dict) -> dict:
+def settle(date: str, scores: dict) -> dict | None:
     data = load()
     ev = next((e for e in data["evenings"] if e["date"] == date), None)
     if ev is None:
-        raise SystemExit(f"Aucune soirée {date}.")
+        print(f"Aucune soirée {date} : rien à régler.")
+        return None
     pending = 0
     for b in ev["bets"]:
         if b["result"] is not None:
@@ -179,10 +180,11 @@ def main(argv=None) -> int:
     elif args.cmd == "settle":
         scores = json.loads(args.scores.read_text(encoding="utf-8")) if args.scores else scores_from_results(args.date)
         e = settle(args.date, scores)
-        for b in e["bets"]:
+        for b in (e["bets"] if e else []):
             lab = b.get("label") or " + ".join(l["label"] for l in b["combo"])
             print(f"  {b['match']:34s} {lab:58s} {b.get('odds', '') if 'odds' in b else '':>5} mise {b['stake']:6.2f} € → {b['result'] or 'en attente':14s} {('' if b['profit'] is None else f'{b['profit']:+.2f} €')}")
-        print(f"Soirée {args.date} : misé {e['stake']:.2f} €, gain net {e['profit']:+.2f} €, {e['won']} gagnés sur {len(e['bets'])}{'' if e['settled'] else ' (scores manquants)'}")
+        if e:
+            print(f"Soirée {args.date} : misé {e['stake']:.2f} €, gain net {e['profit']:+.2f} €, {e['won']} gagnés sur {len(e['bets'])}{'' if e['settled'] else ' (scores manquants)'}")
     print(show())
     return 0
 
