@@ -49,11 +49,14 @@ const NewsBlock: React.FC<{ news: MatchNews | BettingPlan['matches'][number]['ne
       )}
       {news.queries.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-2xs" aria-label="Recherches Google utilisées">
-          <span className="text-ink-4">Recherches Google :</span>
+          <span className="text-ink-4">{news.method === 'news-feed' ? 'Recherche Google News :' : 'Recherches Google :'}</span>
           {news.queries.map(q => (
             <a key={q} href={googleSearchUrl(q)} target="_blank" rel="noopener noreferrer" className="rounded-full border border-line px-2 py-0.5 text-ink-2 hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{q}</a>
           ))}
         </div>
+      )}
+      {news.method === 'news-feed' && (
+        <div className="text-2xs text-warn" title={news.fallbackReason}>Recherche Google de Gemini indisponible : actualité tirée des titres Google News des 4 derniers jours.</div>
       )}
       <div className="text-2xs text-ink-4">Recherche du {dateTime(news.fetchedAt)}</div>
     </div>

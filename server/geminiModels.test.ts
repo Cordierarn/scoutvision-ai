@@ -14,7 +14,7 @@ describe('chaînes de modèles Gemini', () => {
     expect(modelChain(undefined, ['a', 'b'])).toEqual(['a', 'b']);
     expect(modelChain(' x , y ,', ['a'])).toEqual(['x', 'y']);
     expect(modelChain(undefined, ['a', 'b'], 'b')).toEqual(['b', 'a']);
-    expect(DEFAULT_SEARCH_MODELS.every(m => m.startsWith('gemini-2.5'))).toBe(true);   // seuls modèles à recherche Google gratuite
+    expect(DEFAULT_SEARCH_MODELS.some(m => m.startsWith('gemini-2.5'))).toBe(false);   // 2.5 retiré pour les nouvelles clés
   });
 
   it('classe les erreurs : quota du jour, limite par minute, modèle absent, autre', () => {
@@ -22,6 +22,8 @@ describe('chaînes de modèles Gemini', () => {
     expect(unavailability(err(429, 'Quota exceeded for metric: GenerateRequestsPerDayPerProjectPerModel'))).toBe('daily');
     expect(unavailability(err(429, 'Resource has been exhausted (e.g. check quota).'))).toBe('rate');
     expect(unavailability(err(404, 'models/gemini-x is not found for API version v1beta'))).toBe('missing');
+    expect(unavailability(err(404, 'This model models/gemini-2.5-flash is no longer available to new users.'))).toBe('missing');
+    expect(unavailability(err(503, '{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}'))).toBe('rate');
     expect(unavailability(err(400, 'Invalid JSON payload'))).toBeNull();
     expect(unavailability(new Error('délai dépassé'))).toBeNull();
   });
@@ -58,7 +60,7 @@ describe('chaînes de modèles Gemini', () => {
     const failure = await withModelFallback(pool, async () => { throw DAILY; }).catch(e => e);
     expect(failure).toBeInstanceOf(NoModelAvailable);
     expect(failure.status).toBe(429);
-    expect(failure.message).toBe('Quota gratuit atteint ou modèle indisponible sur m1, m2.');
+    expect(failure.message).toBe('Quota gratuit atteint ou modèle indisponible sur m1, m2. Dernier refus de Google : {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details."}}');
     expect(newsErrorMessage(failure, '')).toContain('vers 9 h (heure de Paris)');
     const again = await withModelFallback(pool, async () => 'jamais').catch(e => e);
     expect(again.message).toContain('en pause');

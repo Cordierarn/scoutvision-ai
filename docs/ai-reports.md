@@ -255,14 +255,23 @@ browser runs with mocked responses explicitly labelled "MAQUETTE D'AUDIT".
 ## Model chains (`server/geminiModels.ts`)
 
 Every Gemini call goes to the first available model of a chain. A model that answers 429 (daily quota:
-« PerDay » or « exceeded your current quota »; otherwise per-minute limit) or 404 (unknown model) is set
-aside (daily quota: until about 08:00 UTC, when free quotas reset; per-minute limit: 60 s; unknown model:
-6 h) and the call moves to the next model. When the whole chain is exhausted the error is
-`NoModelAvailable` (429, models named), shown as is in the panel, and never retried.
+« PerDay » or « exceeded your current quota »; otherwise per-minute limit), 503 (overloaded, « high demand »)
+or 404 (unknown or retired model) is set aside (daily quota: until about 08:00 UTC, when free quotas reset;
+per-minute limit or overload: 60 s; unknown model: 6 h) and the call moves to the next model. When the whole
+chain is exhausted the error is `NoModelAvailable` (429), which names the models and quotes Google's last
+refusal, and is never retried.
 
-Free tier limits read in Google AI Studio on 3 November 2026: about 20 requests per day for Flash models,
-500 for the recent Flash Lite models, and Google Search grounding at 0 for Gemini 3 and later, 1 500 per day
-for Gemini 2 and 2.5. Hence two chains: Google Search on the 2.5 models, writing on the 3.x models first.
+Measured on 3 November 2026 with a free-tier key: Flash models allow about 20 requests per day, recent Flash
+Lite models 500; Gemini 2.5 is retired for new keys (404 « no longer available to new users »); Google Search
+grounding is at 0 for Gemini 3 and later (429 « exceeded your current quota »). Flash models were also
+often overloaded (503). Chains:
+
+- writing (reports, grounded AI functions, betting plan): `gemini-3.8-flash`, `gemini-3.6-flash`,
+  `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` (`GEMINI_MODEL` first when set; `GEMINI_TEXT_MODELS`);
+- Google Search grounding: `gemini-3.8-flash`, `gemini-3.5-flash-lite` (`GEMINI_SEARCH_MODELS`); works only
+  with billing enabled, otherwise the news falls back to Google News headlines (below);
+- headline extraction: `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, then the writing chain.
+
 Gemini 3+ calls ask for a low thinking level; 2.x models get no thinking setting.
 
 ## Betting lab assistant (`/api/ai/betting-news`, `/api/ai/betting-plan`)
@@ -304,6 +313,15 @@ after 30 s; with bytes flowing a search can take up to 100 s. An error is then c
 (`error`, `status`) with HTTP 200. The news call asks for a low thinking level (retried without it if the
 model refuses the setting). A failed search shows its reason per match in the panel: time-out, quota (429),
 or access to Grounding with Google Search refused (400, 403, 404) with the API detail.
+
+News fallback (`server/newsFeed.ts`): when Google Search grounding fails (quota, refused access, retired
+model, time-out), the server reads the public Google News RSS feed (`"home" "away" when:4d`, English and
+French editions, no key), keeps up to 15 headlines from the last 4 days without duplicates, and asks the
+headline-extraction chain to state only what the headlines say, attributed to a team and a source (a fact
+without names is reported as such). The entry carries `method: "news-feed"` and the reason of the failed
+search (`fallbackReason`); the panel says the news comes from Google News headlines. Checked on 3 November
+2026 against the real API with real headlines of the evening (about 20 s); the feed itself could not be
+fetched from the development sandbox (network policy) and is first exercised on Heroku.
 
 Server checks: references must exist in the published suggestions; picks exclude `eviter` and are capped
 at 5; a combo needs 2 or 3 `garder` selections from different matches; sentences that quote a number absent

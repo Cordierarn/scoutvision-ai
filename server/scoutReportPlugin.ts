@@ -15,7 +15,8 @@ import {
   BETTING_NEWS_PATH, BETTING_PLAN_PATH, GenerateGrounded, GenerateJson, LoadIndex, NewsCache, handleBettingNews, handleBettingPlan, indexLoader, parseGrounding,
 } from './bettingAi';
 import { ContextLoader, contextLoader } from './bettingContext';
-import { DEFAULT_SEARCH_MODELS, DEFAULT_TEXT_MODELS, ModelPool, modelChain, takesThinkingLevel, withModelFallback } from './geminiModels';
+import { FetchHeadlines, googleNewsFetcher } from './newsFeed';
+import { DEFAULT_SEARCH_MODELS, DEFAULT_TEXT_MODELS, EXTRACT_MODELS, ModelPool, modelChain, takesThinkingLevel, withModelFallback } from './geminiModels';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
 /** Chemins des tâches d'IA ancrée : /api/ai/compare, /api/ai/opposition, /api/ai/hunter */
@@ -168,6 +169,7 @@ export interface ScoutReportMiddlewareOptions {
   generateJson?: GenerateJson;             // remplaçable dans les tests
   bettingRateLimit?: { limit: number; windowMs: number };
   loadContext?: ContextLoader;             // remplaçable dans les tests
+  fetchHeadlines?: FetchHeadlines;         // secours Google News (remplaçable dans les tests)
   /**
    * Réponse ouverte pour l'assistant : en-têtes et un espace tout de suite, puis un espace toutes les 5 s
    * jusqu'au JSON final (un JSON précédé d'espaces reste valide). Le routeur Heroku coupe une requête
@@ -199,6 +201,8 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   // Chaînes de modèles partagées par toutes les requêtes : un modèle au quota épuisé est mis de côté
   const textPool = new ModelPool(modelChain(options.textModels, DEFAULT_TEXT_MODELS, options.model));
   const searchPool = new ModelPool(modelChain(options.searchModels, DEFAULT_SEARCH_MODELS));
+  // Extraction de l'actualité à partir des titres (tâche simple) : Flash Lite d'abord (500 requêtes par jour, moins saturés)
+  const extractPool = new ModelPool([...new Set([...EXTRACT_MODELS, ...textPool.models])]);
   const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey, textPool, log) : async () => '');
   const allow = createRateLimiter(options.rateLimit?.limit ?? RATE_LIMIT, options.rateLimit?.windowMs ?? RATE_WINDOW_MS);
   // Assistant du Labo paris : une recherche d'actualité par match puis un plan ; actualité en cache 90 min
@@ -208,6 +212,8 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, textPool, log) : async () => ({ text: '' }));
   const news = new NewsCache();
   const loadContext = options.loadContext ?? (options.dataDir ? contextLoader(options.dataDir) : undefined);
+  const fetchHeadlines = options.fetchHeadlines ?? googleNewsFetcher();
+  const extractText = options.generate ?? (apiKey ? geminiGenerator(apiKey, extractPool, log) : async () => '');
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const path = (req.url ?? '').split('?')[0];
@@ -241,7 +247,8 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
     if (betting) {
       const keepAlive = !!options.bettingKeepAlive;
       const deadline = keepAlive ? Date.now() + BETTING_DEADLINE_MS : options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
-      const deps = { apiKey, model, loadIndex, loadContext, news, log, generateGrounded: boundedCall(generateGrounded, deadline), generateJson: boundedCall(generateJson, deadline) };
+      const deps = { apiKey, model, loadIndex, loadContext, news, log, fetchHeadlines, generateText: boundedCall(extractText, deadline),
+        generateGrounded: boundedCall(generateGrounded, deadline), generateJson: boundedCall(generateJson, deadline) };
       let beat: ReturnType<typeof setInterval> | undefined;
       if (keepAlive) {
         res.statusCode = 200;
