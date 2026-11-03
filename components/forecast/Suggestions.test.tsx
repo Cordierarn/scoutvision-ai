@@ -48,13 +48,13 @@ describe('Suggestions (rendu statique)', () => {
     expect(controls).toContain('role="radiogroup"');
   });
 
-  it('affiche les soirées suivies avec net et cumul', () => {
-    const withEvenings = { ...index, evenings: [{ date: '2026-11-02', bets: 7, won: 6, stake: 61.37, profit: 25.25, cumulative: 25.25, settled: false }, { date: '2026-11-03', bets: 3, won: 0, stake: 15.75, profit: null, cumulative: 25.25, settled: false }] };
-    const html = renderToStaticMarkup(<SuggestionsControls index={withEvenings} profile="equilibre" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />);
-    expect(html).toContain('Soirées suivies');
-    expect(html).toContain('+25,25');
-    expect(html).toContain('en attente');
-    expect(html).toContain('61,37');
+  it('résume les soirées suivies et renvoie vers le suivi des paris', () => {
+    const withEvenings = { ...index, evenings: [{ date: '2026-11-07', bets: 4, won: 3, stake: 40, profit: 12.5, cumulative: 12.5, settled: true }, { date: '2026-11-08', bets: 2, won: 0, stake: 10, profit: null, cumulative: 12.5, settled: false }] };
+    const html = renderToStaticMarkup(<SuggestionsControls index={withEvenings} profile="equilibre" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} onShowHistory={() => {}} />);
+    expect(html).toContain('Soirées suivies : 2');
+    expect(html).toContain('+12,50');
+    expect(html).toContain('Voir le suivi des paris');
+    expect(renderToStaticMarkup(<SuggestionsControls index={index} profile="equilibre" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />)).not.toContain('Voir le suivi');
   });
 
   it('indique un match sans cotes et un profil sans sélection admissible', () => {

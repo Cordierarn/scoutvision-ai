@@ -184,5 +184,42 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(j4.iloc[0]["settled_at"], j3.iloc[0]["settled_at"])   # réglé une seule fois
 
 
+class HistoryTests(unittest.TestCase):
+    def row(self, mid, profile, rank, published, kick, settled=None, realised=None, label="Club A gagne"):
+        return {"suggestion_id": f"{mid}{profile}{rank}{published}", "published_at": published.isoformat(), "match_id": mid, "fixture_id": None, "competition": "AAA",
+                "kickoff_utc": kick.isoformat(), "profile": profile, "rank": rank, "kind": "simple", "market_id": 101, "outcome_id": 101, "family": "résultat",
+                "label": label, "odds": 1.8, "odds_at": published.isoformat(), "p": 0.6, "ev": 0.08, "stake_fraction": 0.02, "stake_mode": "kelly",
+                "settled": settled, "realised": realised, "settled_at": None}
+
+    def test_last_publication_before_kickoff_with_its_settlement(self):
+        later = KO + dt.timedelta(days=1)
+        journal = pd.DataFrame([
+            self.row("m1", "sur", 1, NOW - dt.timedelta(hours=3), KO, label="ancienne"),          # remplacée par la publication suivante
+            self.row("m1", "sur", 1, NOW, KO, settled=1.0, realised=0.8),
+            self.row("m1", "sur", 2, NOW, KO, settled=-2.0, realised=0.0, label="Club A -0"),     # remboursé
+            self.row("m1", "sur", 1, KO + dt.timedelta(minutes=5), KO, label="après coup d'envoi"),  # jamais jouable
+            self.row("m1", "grosse_cote", 1, NOW, KO, settled=0.0, realised=-1.0),
+            self.row("m2", "sur", 1, NOW, KO + dt.timedelta(hours=3)),                             # commencé, pas encore réglé
+            self.row("m3", "sur", 1, NOW, later),                                                  # pas encore commencé
+        ])
+        res = pd.DataFrame([{"match_id": "m1", "ft_home": 2, "ft_away": 1}])
+        names = {"m1": ("Club A", "Club B"), "m2": ("Club C", "Club D")}
+        days = product.history(journal, res, names, KO + dt.timedelta(hours=4))
+        self.assertEqual([d["date"] for d in days], ["2026-11-07"])
+        m1, m2 = days[0]["matches"]
+        self.assertEqual((m1["home"], m1["away"], m1["score"]), ("Club A", "Club B", [2, 1]))
+        self.assertEqual([(b["label"], b["status"], b["realised"]) for b in m1["profiles"]["sur"]], [("Club A gagne", "won", 0.8), ("Club A -0", "void", 0.0)])
+        self.assertEqual(m1["profiles"]["grosse_cote"][0]["status"], "lost")
+        self.assertEqual((m2["matchId"], m2["score"], m2["profiles"]["sur"][0]["status"]), ("m2", None, "pending"))
+        self.assertEqual(product.history(journal.iloc[0:0], res, names, KO), [])
+
+    def test_evening_details_are_readable(self):
+        ev = {"bets": [{"match": "m1", "match_id": "m1", "label": "Club A gagne", "odds": 1.8, "stake": 6.0, "result": "gagné", "profit": 4.8},
+                       {"match": "Combiné", "combo": [{"label": "x", "odds": 1.5}, {"label": "y", "odds": 2.0}], "stake": 2.0, "result": None, "profit": None}]}
+        single, combo = product.evening_details(ev, {"m1": ("Club A", "Club B")})
+        self.assertEqual((single["match"], single["status"], single["profit"]), ("Club A – Club B", "won", 4.8))
+        self.assertEqual((combo["label"], combo["legs"], combo["odds"], combo["status"]), ("x + y", 2, 3.0, "pending"))
+
+
 if __name__ == "__main__":
     unittest.main()

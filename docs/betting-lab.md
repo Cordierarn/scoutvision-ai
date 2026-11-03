@@ -158,7 +158,8 @@ puis borne basse de l'intervalle du rendement H−1.
 
 Décision du propriétaire : l'objectif devient un produit ; le gel de Pronostics est levé pour le seul
 onglet « Matchs à venir », qui peut employer le vocabulaire des paris. Les trois autres onglets restent
-gelés. La comparaison de phase 2 sert d'indicateur, pas de filtre.
+gelés. La comparaison de phase 2 sert d'indicateur, pas de filtre. Le 3 novembre 2026, à la demande du
+propriétaire, un onglet « Suivi des paris » s'y ajoute, avec le même vocabulaire (voir plus bas).
 
 ### Buts attendus ajustés (`scripts/betting/adjust.py`)
 
@@ -267,3 +268,16 @@ encre neutre.
 
 Règles de règlement Winamax à citer ici en phase 3 (buteur et CSC, joueur non entré, prolongations,
 handicaps asiatiques, match reporté, combinés).
+
+### Onglet « Suivi des paris » (`components/forecast/BetHistory.tsx`)
+
+Ce qui a été suggéré et ce que cela a donné, lu dans l'export (`history`, `evenings[].details`) :
+
+- **Soirées suivies** : profil Équilibré, mises du moteur sur 300 € ; chaque soirée se déplie pari par pari
+  (match, sélection, cote, mise, résultat, net), combinés compris ; gagnés et en attente comptés pari par pari.
+- **Suggestions publiées et résultats** : 14 derniers jours, matchs commencés ; pour chaque match et profil,
+  la dernière publication avant le coup d'envoi (`product.history`), réglée sur le score réel au passage du
+  matin (`won`, `lost`, `void`, `half_won`, `half_lost`, `pending`). Le navigateur ne calcule que la mise et
+  le net en euros sur la bankroll saisie (`betNet`, `historySummary`) ; réussite hors remboursements.
+- Les combinés ne sont pas journalisés : ils ne figurent que dans les soirées.
+

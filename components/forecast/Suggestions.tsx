@@ -8,56 +8,54 @@
 import React, { useId } from 'react';
 import type { BilanProfile, Suggestion, SuggestionMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
 import { InfoTip, Panel, Stat, StatStrip } from '../ui';
-import { PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatEuros, formatEv, formatOdds, formatPct, oddsAge, stakeEuros, stakeLabel } from './suggestionsLogic';
+import { PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, oddsAge, stakeEuros, stakeLabel } from './suggestionsLogic';
 
 const evClass = (ev: number) => (ev > 0 ? 'text-pos' : 'text-ink-2');
 
+/** Profil de suggestions et bankroll, partagés par les onglets Matchs à venir et Suivi des paris. */
+export const ProfileBankroll: React.FC<{
+  profile: SuggestionProfile; onProfile: (p: SuggestionProfile) => void;
+  bankrollInput: string; bankroll: number | null; onBankroll: (raw: string) => void;
+}> = ({ profile, onProfile, bankrollInput, bankroll, onBankroll }) => {
+  const id = useId();
+  return (
+    <div className="flex flex-wrap items-end gap-4">
+      <div>
+        <div className="sv-label mb-1 flex items-center gap-1">Profil <InfoTip text={PROFILE_ORDER.map(p => `${PROFILE_LABELS[p]} : ${PROFILE_HINTS[p]}`).join(' ')} align="start" /></div>
+        <div className="sv-seg" role="radiogroup" aria-label="Profil de suggestions">
+          {PROFILE_ORDER.map(p => (
+            <button key={p} type="button" role="radio" aria-checked={profile === p} onClick={() => onProfile(p)} className={`sv-seg-btn ${profile === p ? 'sv-seg-on' : ''}`}>{PROFILE_LABELS[p]}</button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label htmlFor={`${id}-bankroll`} className="sv-label mb-1 block">Bankroll (€)</label>
+        <input id={`${id}-bankroll`} type="text" inputMode="decimal" value={bankrollInput} onChange={e => onBankroll(e.target.value)}
+          aria-invalid={bankroll === null} aria-describedby={`${id}-bankroll-help`}
+          className={`h-8 w-32 rounded border bg-raised px-2 text-sm text-ink num ${bankroll === null ? 'border-warn' : 'border-line'}`} />
+        <div id={`${id}-bankroll-help`} className="text-2xs text-ink-4 mt-1">{bankroll === null ? 'Montant invalide : entre 1 et 1 000 000 €.' : 'Mémorisée dans ce navigateur.'}</div>
+      </div>
+    </div>
+  );
+};
+
 export const SuggestionsControls: React.FC<{
   index: SuggestionsIndex; profile: SuggestionProfile; onProfile: (p: SuggestionProfile) => void;
-  bankrollInput: string; bankroll: number | null; onBankroll: (raw: string) => void;
-}> = ({ index, profile, onProfile, bankrollInput, bankroll, onBankroll }) => {
-  const id = useId();
+  bankrollInput: string; bankroll: number | null; onBankroll: (raw: string) => void; onShowHistory?: () => void;
+}> = ({ index, profile, onProfile, bankrollInput, bankroll, onBankroll, onShowHistory }) => {
   const bilan = index.bilan?.profiles?.[profile];
   const o = bilan?.overall;
   const journal = index.journal?.byProfile?.[profile];
+  const evenings = index.evenings ?? [];
+  const last = evenings[evenings.length - 1];
   return (
     <Panel title="Suggestions de paris" subtitle={`Cotes ${index.bookmaker}, suggestions calculées le ${new Date(index.generatedAt).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}. Mises indicatives sur votre bankroll ; rien n'est placé automatiquement.`}>
-      <div className="flex flex-wrap items-end gap-4">
-        <div>
-          <div className="sv-label mb-1 flex items-center gap-1">Profil <InfoTip text={PROFILE_ORDER.map(p => `${PROFILE_LABELS[p]} : ${PROFILE_HINTS[p]}`).join(' ')} align="start" /></div>
-          <div className="sv-seg" role="radiogroup" aria-label="Profil de suggestions">
-            {PROFILE_ORDER.map(p => (
-              <button key={p} type="button" role="radio" aria-checked={profile === p} onClick={() => onProfile(p)} className={`sv-seg-btn ${profile === p ? 'sv-seg-on' : ''}`}>{PROFILE_LABELS[p]}</button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label htmlFor={`${id}-bankroll`} className="sv-label mb-1 block">Bankroll (€)</label>
-          <input id={`${id}-bankroll`} type="text" inputMode="decimal" value={bankrollInput} onChange={e => onBankroll(e.target.value)}
-            aria-invalid={bankroll === null} aria-describedby={`${id}-bankroll-help`}
-            className={`h-8 w-32 rounded border bg-raised px-2 text-sm text-ink num ${bankroll === null ? 'border-warn' : 'border-line'}`} />
-          <div id={`${id}-bankroll-help`} className="text-2xs text-ink-4 mt-1">{bankroll === null ? 'Montant invalide : entre 1 et 1 000 000 €.' : 'Mémorisée dans ce navigateur.'}</div>
-        </div>
-      </div>
-      {index.evenings && index.evenings.length > 0 && (
-        <div className="mt-4 overflow-x-auto">
-          <table className="sv-table">
-            <caption className="text-left sv-label pb-1">Soirées suivies (profil Équilibré, mises du moteur sur 300 €) : net et cumul réels</caption>
-            <thead><tr><th scope="col">Soirée</th><th scope="col" className="text-right">Paris</th><th scope="col" className="text-right">Gagnés</th><th scope="col" className="text-right">Misé</th><th scope="col" className="text-right">Net</th><th scope="col" className="text-right">Cumul</th></tr></thead>
-            <tbody>
-              {index.evenings.map(e => (
-                <tr key={e.date}>
-                  <td className="text-ink">{new Date(`${e.date}T12:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}{e.settled ? '' : <span className="text-ink-4"> · en attente</span>}</td>
-                  <td className="text-right num text-ink-2">{e.bets}</td>
-                  <td className="text-right num text-ink-2">{e.settled ? e.won : '–'}</td>
-                  <td className="text-right num text-ink-2">{formatEuros(e.stake)}</td>
-                  <td className={`text-right num ${e.profit !== null && e.profit > 0 ? 'text-pos' : 'text-ink-2'}`}>{e.profit === null ? '–' : `${e.profit >= 0 ? '+' : '−'}${formatEuros(Math.abs(e.profit))}`}</td>
-                  <td className={`text-right num ${e.cumulative > 0 ? 'text-pos' : 'text-ink'}`}>{`${e.cumulative >= 0 ? '+' : '−'}${formatEuros(Math.abs(e.cumulative))}`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <ProfileBankroll profile={profile} onProfile={onProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={onBankroll} />
+      {onShowHistory && (
+        <p className="text-xs text-ink-3 mt-3">
+          {last ? <>Soirées suivies : {evenings.length}, cumul <span className={`num ${last.cumulative > 0 ? 'text-pos' : last.cumulative < 0 ? 'text-neg' : 'text-ink'}`}>{formatSignedEuros(last.cumulative)}</span>. </> : 'Résultats des suggestions passées : '}
+          <button type="button" onClick={onShowHistory} className="text-accent underline underline-offset-2 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">Voir le suivi des paris</button>
+        </p>
       )}
       {o && o.bets > 0 ? (
         <StatStrip className="mt-4 grid-cols-2 lg:grid-cols-4">
