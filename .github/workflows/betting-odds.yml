@@ -116,6 +116,7 @@ jobs:
           python3 -m betting.product suggest
           python3 -m betting.evening auto --date "$(date -u -d '-1 day' +%F)"
           python3 -m betting.evening settle --date "$(date -u -d '-1 day' +%F)"
+          python3 -m betting.evening settle --pending   # combinés à cheval sur deux soirs, résultats tardifs
           python3 -m betting.product export
 
       - name: Publication de l'archive du Labo (release privée)

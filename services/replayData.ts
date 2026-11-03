@@ -147,8 +147,26 @@ export interface SuggestionsIndex {
   matches: SuggestionMatch[];
   bilan: { start: number; profiles: Record<SuggestionProfile, BilanProfile> } | null;
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
-  evenings?: { date: string; bets: number; won: number; stake: number; profit: number | null; cumulative: number; settled: boolean }[];
+  evenings?: EveningSummary[];
+  history?: HistoryDay[];
 }
+/** Statut d'un pari réglé sur le score réel (demi-gains et remboursements des handicaps asiatiques). */
+export type BetStatus = 'won' | 'lost' | 'void' | 'half_won' | 'half_lost' | 'pending';
+/** Pari d'une soirée suivie (profil Équilibré, mises sur 300 €) ; `legs` > 0 pour un combiné. */
+export interface EveningBet { match: string; label: string; legs: number; odds: number; stake: number; status: BetStatus; profit: number | null }
+export interface EveningSummary {
+  date: string; bets: number; won: number; stake: number; profit: number | null; cumulative: number; settled: boolean; details?: EveningBet[];
+}
+/** Suggestion publiée avant le coup d'envoi (dernière publication), avec son règlement ; `realised` pour 1 € misé. */
+export interface HistoryBet {
+  label: string; family: string; odds: number; p: number; ev: number; stakeFraction: number; stakeMode: 'kelly' | 'fixed';
+  status: BetStatus; realised: number | null;
+}
+export interface HistoryMatch {
+  matchId: string; competition: string; kickoff: string; home: string | null; away: string | null; score: [number, number] | null;
+  profiles: Partial<Record<SuggestionProfile, HistoryBet[]>>;
+}
+export interface HistoryDay { date: string; matches: HistoryMatch[] }
 
 export const replayData = {
   marketBenchmark: () => loadOptional<MarketBenchmark>('/data/forecast/market_benchmark.json'),

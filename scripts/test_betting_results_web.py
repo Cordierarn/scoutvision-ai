@@ -112,6 +112,27 @@ class EveningTests(unittest.TestCase):
             self.assertEqual(missing["profit"], 15.0)                 # déjà réglée : inchangée
             self.assertIn("2026-11-02", evening.show())
 
+    def test_pending_evenings_are_settled_with_later_scores(self):
+        import datetime as dt
+        with tempfile.TemporaryDirectory() as tmp:
+            evening.EVENINGS = Path(tmp) / "evenings.json"
+            under = {"market_type": "totals", "handicap": 2.5, "outcome": "Under"}
+            evening.add("2026-11-02", [{"match": "m1", "match_id": "m1", "label": "U2,5", "spec": under, "odds": 1.5, "stake": 10},
+                                       {"match": "combo", "combo": [{"key": "m1", "label": "U2,5", "spec": under, "odds": 1.5},
+                                                                    {"key": "m2", "label": "U2,5", "spec": under, "odds": 2.0}], "stake": 10}])
+            evening.add("2026-10-20", [{"match": "m0", "label": "U2,5", "spec": under, "odds": 1.5, "stake": 10}])   # trop ancienne : ignorée
+            scores = {"2026-11-02": {"m1": {"ft": [1, 0], "ht": [0, 0]}}, "2026-11-03": {"m2": {"ft": [0, 0], "ht": [0, 0]}}}
+            original = evening.scores_from_results
+            evening.scores_from_results = lambda d: scores.get(d, {})
+            try:
+                first = evening.settle_pending(dt.date(2026, 11, 2))      # le combiné attend le match du lendemain
+                self.assertEqual([b["result"] for b in first[0]["bets"]], ["gagné", None]); self.assertFalse(first[0]["settled"])
+                done = evening.settle_pending(dt.date(2026, 11, 3))
+            finally:
+                evening.scores_from_results = original
+            self.assertEqual(len(done), 1)
+            self.assertEqual([b["profit"] for b in done[0]["bets"]], [5.0, 20.0]); self.assertTrue(done[0]["settled"])
+
 
 if __name__ == "__main__":
     unittest.main()

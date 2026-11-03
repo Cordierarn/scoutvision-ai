@@ -9,6 +9,7 @@ Historique des soirées : les paris recommandés chaque soir, réglés sur les s
   python3 -m betting.evening settle --date 2026-11-02 [--scores scores.json]
                                                                        règle la soirée : scores fournis, sinon résultats
                                                                        PitchAPI + web (results_web) par identifiant de match
+  python3 -m betting.evening settle --pending                          règle toutes les soirées en attente des 7 derniers jours
   python3 -m betting.evening show                                      tableau des soirées et cumul
 
 Fichiers (hors Git) : `.research/betting/product/evenings.json`. Un pari enregistré n'est jamais modifié ;
@@ -146,6 +147,23 @@ def settle(date: str, scores: dict) -> dict | None:
     return ev
 
 
+def settle_pending(today: dt.date, days: int = 7) -> list[dict]:
+    """Règle les soirées encore en attente des `days` derniers jours (combiné sur plusieurs soirs, résultat
+    publié en retard) avec les scores de leur date jusqu'à aujourd'hui, par identifiant de match."""
+    done = []
+    for ev in [e for e in load()["evenings"] if not e.get("settled")]:
+        d0 = dt.date.fromisoformat(ev["date"])
+        if d0 > today or (today - d0).days > days:
+            continue
+        scores: dict = {}
+        for k in range((today - d0).days + 1):
+            scores.update(scores_from_results((d0 + dt.timedelta(days=k)).isoformat()))
+        e = settle(ev["date"], scores)
+        if e:
+            done.append(e)
+    return done
+
+
 def show() -> str:
     data = load()
     lines = [f"{'Soirée':10s} {'Paris':>5s} {'Gagnés':>6s} {'Misé':>9s} {'Gain net':>9s} {'Cumul':>9s}  État"]
@@ -162,7 +180,7 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add"); a.add_argument("--date", required=True); a.add_argument("--bets", type=Path, required=True)
     au = sub.add_parser("auto"); au.add_argument("--date", required=True); au.add_argument("--profile", default="equilibre"); au.add_argument("--bankroll", type=float, default=300.0)
-    s = sub.add_parser("settle"); s.add_argument("--date", required=True); s.add_argument("--scores", type=Path)
+    s = sub.add_parser("settle"); s.add_argument("--date"); s.add_argument("--scores", type=Path); s.add_argument("--pending", action="store_true")
     sub.add_parser("show")
     args = p.parse_args(argv)
     if args.cmd == "add":
@@ -177,7 +195,12 @@ def main(argv=None) -> int:
         else:
             e = add(args.date, bets)
             print(f"{len(e['bets'])} paris enregistrés pour {args.date} depuis le journal, misé {sum(b['stake'] for b in e['bets']):.2f} €")
+    elif args.cmd == "settle" and args.pending:
+        for e in settle_pending(dt.datetime.now(dt.timezone.utc).date()):
+            print(f"Soirée {e['date']} : gain net {e['profit']:+.2f} €, {e['won']} gagnés sur {len(e['bets'])}{'' if e['settled'] else ' (scores manquants)'}")
     elif args.cmd == "settle":
+        if not args.date:
+            p.error("settle : --date ou --pending")
         scores = json.loads(args.scores.read_text(encoding="utf-8")) if args.scores else scores_from_results(args.date)
         e = settle(args.date, scores)
         for b in (e["bets"] if e else []):

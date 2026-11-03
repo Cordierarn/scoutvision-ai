@@ -360,6 +360,67 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
     return journal
 
 
+HISTORY_DAYS = 14
+SETTLED_STATUS = {1.0: "won", 0.0: "lost", 0.5: "half_won", -0.5: "half_lost", -2.0: "void"}
+EVENING_STATUS = {"gagné": "won", "perdu": "lost", "remboursé": "void", "moitié gagnée": "half_won", "moitié perdue": "half_lost"}
+
+
+def match_names(results: pd.DataFrame) -> dict[str, tuple[str, str]]:
+    """Équipes de chaque match (résultats, puis rencontres à venir de forecast.json)."""
+    names = {m: (h, a) for m, h, a in zip(results["match_id"], results["home_team_name"], results["away_team_name"])}
+    forecast = ROOT / "public" / "data" / "forecast.json"
+    if forecast.exists():
+        for m in json.loads(forecast.read_text(encoding="utf-8")).get("matches", []):
+            names.setdefault(m["match_id"], (m["home"], m["away"]))
+    return names
+
+
+def history(journal: pd.DataFrame, results: pd.DataFrame, names: dict, now: dt.datetime, days: int = HISTORY_DAYS) -> list[dict]:
+    """Suggestions des matchs commencés ces `days` derniers jours, par jour (UTC) puis par match : pour chaque
+    profil, la dernière publication avant le coup d'envoi (celle qu'on pouvait jouer) et son règlement."""
+    if journal.empty:
+        return []
+    j = journal[journal["kind"] == "simple"].copy()
+    j["kick"] = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
+    j["pub"] = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
+    now = pd.Timestamp(now)
+    j = j[(j["pub"] < j["kick"]) & (j["kick"] <= now) & (j["kick"] >= now - pd.Timedelta(days=days))]
+    if j.empty:
+        return []
+    j = j[j["pub"] == j.groupby(["match_id", "profile"])["pub"].transform("max")].sort_values(["kick", "match_id", "profile", "rank"])
+    scores = results.drop_duplicates("match_id").set_index("match_id")
+    by_day: dict[str, list[dict]] = {}
+    for mid, g in j.groupby("match_id", sort=False):
+        kick = g["kick"].iloc[0]
+        home, away = names.get(mid, (None, None))
+        score = [int(scores.at[mid, "ft_home"]), int(scores.at[mid, "ft_away"])] if mid in scores.index else None
+        profiles = {}
+        for prof, gp in g.groupby("profile", sort=False):
+            profiles[prof] = [{"label": r.label, "family": r.family, "odds": round(float(r.odds), 2), "p": round(float(r.p), 4), "ev": round(float(r.ev), 4),
+                               "stakeFraction": round(float(r.stake_fraction), 5), "stakeMode": r.stake_mode,
+                               "status": "pending" if pd.isna(r.settled) else SETTLED_STATUS.get(float(r.settled), "pending"),
+                               "realised": None if pd.isna(r.realised) else round(float(r.realised), 4)} for r in gp.itertuples(index=False)]
+        by_day.setdefault(kick.strftime("%Y-%m-%d"), []).append({"matchId": mid, "competition": g["competition"].iloc[0], "kickoff": kick.isoformat(),
+                                                                "home": home, "away": away, "score": score, "profiles": profiles})
+    return [{"date": d, "matches": ms} for d, ms in sorted(by_day.items(), reverse=True)]
+
+
+def evening_details(evening: dict, names: dict) -> list[dict]:
+    """Paris d'une soirée suivie, lisibles : match, sélection, cote, mise, statut, gain net."""
+    out = []
+    for b in evening.get("bets", []):
+        mid = b.get("match_id")
+        match = " – ".join(names[mid]) if mid in names else b.get("match")
+        if "combo" in b:
+            odds = float(np.prod([float(leg["odds"]) for leg in b["combo"]]))
+            label, legs = " + ".join(leg["label"] for leg in b["combo"]), len(b["combo"])
+        else:
+            odds, label, legs = float(b["odds"]), b["label"], 0
+        out.append({"match": match, "label": label, "legs": legs, "odds": round(odds, 2), "stake": round(float(b["stake"]), 2),
+                    "status": EVENING_STATUS.get(b.get("result"), "pending"), "profit": b.get("profit")})
+    return out
+
+
 def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     bilan = json.loads(BILAN.read_text(encoding="utf-8")) if BILAN.exists() else None
     journal = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
@@ -367,6 +428,8 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     js = {"published": int(len(journal)), "settled": int(len(settled)),
           "byProfile": {p: {"bets": int(len(g)), "hitRate": round(float((g["settled"] > 0).mean()), 4) if len(g) else None, "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None}
                         for p, g in settled.groupby("profile")}}
+    results = load_results()
+    names = match_names(results)
     evenings_path = RESEARCH / "product" / "evenings.json"
     evenings = []
     if evenings_path.exists():
@@ -375,12 +438,13 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
             profit = e.get("profit")
             cumul += profit or 0.0
             evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
-                             "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled"))})
+                             "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")), "details": evening_details(e, names)})
     payload = {"schemaVersion": "1.0.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
                "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in sg.PROFILES], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
                "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kellyFraction": sg.KELLY_FRACTION, "capPerBet": sg.CAP_PER_BET,
                          "capPerMatch": sg.CAP_PER_MATCH, "fixedStake": sg.FIXED_STAKE},
-               "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:]}
+               "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:],
+               "history": history(journal, results, names, generated_at)}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = EXPORT_DIR / "index.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

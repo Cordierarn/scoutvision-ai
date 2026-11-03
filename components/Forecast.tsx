@@ -15,6 +15,7 @@ import { SERIES } from '../theme/charts';
 import SeasonSimulator from './forecast/SeasonSimulator';
 import MethodPanel from './forecast/MethodPanel';
 import { SuggestionsBlock, SuggestionsControls } from './forecast/Suggestions';
+import BetHistory from './forecast/BetHistory';
 import { BANKROLL_KEY, DEFAULT_PROFILE, PROFILE_KEY, PROFILE_ORDER, parseBankroll } from './forecast/suggestionsLogic';
 import { MARKET_RESULT, formatGoals, freshness, pctFr, poolLabel, roundToHundred } from './forecast/forecastLogic';
 
@@ -203,18 +204,20 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
 };
 
 // Onglet retrouvé au retour sur la page
-let lastTab: 'matches' | 'simulator' | 'market' | 'method' = 'matches';
+type ForecastTab = 'matches' | 'history' | 'simulator' | 'market' | 'method';
+let lastTab: ForecastTab = 'matches';
 
 const Forecast: React.FC = () => {
   const [file, setFile] = useState<ForecastFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [tab, setTabState] = useState<'matches' | 'simulator' | 'market' | 'method'>(lastTab);
+  const [tab, setTabState] = useState<ForecastTab>(lastTab);
   const setTab = (t: typeof tab) => { lastTab = t; setTabState(t); };
   const [competition, setCompetition] = useState<string>('');
   const [horizon, setHorizon] = useState<number>(14);
   // Suggestions de paris (Labo paris) : artefact optionnel, profil et bankroll mémorisés dans ce navigateur
   const [suggestions, setSuggestions] = useState<SuggestionsIndex | null | undefined>(undefined);
+  const [suggestionsFailed, setSuggestionsFailed] = useState(false);
   const [profile, setProfileState] = useState<SuggestionProfile>(() => {
     try { const v = localStorage.getItem(PROFILE_KEY) as SuggestionProfile | null; return v && PROFILE_ORDER.includes(v) ? v : DEFAULT_PROFILE; } catch { return DEFAULT_PROFILE; }
   });
@@ -222,7 +225,10 @@ const Forecast: React.FC = () => {
   const bankroll = parseBankroll(bankrollInput);
   const setProfile = (p: SuggestionProfile) => { setProfileState(p); try { localStorage.setItem(PROFILE_KEY, p); } catch { /* stockage indisponible */ } };
   const setBankroll = (raw: string) => { setBankrollInput(raw); try { localStorage.setItem(BANKROLL_KEY, raw); } catch { /* stockage indisponible */ } };
-  useEffect(() => { replayData.suggestions().then(setSuggestions).catch(() => setSuggestions(null)); }, [attempt]);
+  useEffect(() => {
+    setSuggestionsFailed(false);
+    replayData.suggestions().then(setSuggestions).catch(() => { setSuggestions(null); setSuggestionsFailed(true); });
+  }, [attempt]);
   const suggestionByMatch = useMemo(() => new Map((suggestions?.matches ?? []).map(m => [m.matchId, m])), [suggestions]);
   const now = useMemo(() => new Date(), [suggestions]);
 
@@ -264,6 +270,7 @@ const Forecast: React.FC = () => {
 
       <div className="sv-tabs" role="tablist" aria-label="Sections des pronostics">
         <button role="tab" aria-selected={tab === 'matches'} onClick={() => setTab('matches')} className={`sv-tab ${tab === 'matches' ? 'sv-tab-on' : ''}`}>Matchs à venir</button>
+        <button role="tab" aria-selected={tab === 'history'} onClick={() => setTab('history')} className={`sv-tab ${tab === 'history' ? 'sv-tab-on' : ''}`}>Suivi des paris</button>
         <button role="tab" aria-selected={tab === 'simulator'} onClick={() => setTab('simulator')} className={`sv-tab ${tab === 'simulator' ? 'sv-tab-on' : ''}`}>Simulateur de saison</button>
         <button role="tab" aria-selected={tab === 'market'} onClick={() => setTab('market')} className={`sv-tab ${tab === 'market' ? 'sv-tab-on' : ''}`}>Modèle vs marché</button>
         <button role="tab" aria-selected={tab === 'method'} onClick={() => setTab('method')} className={`sv-tab ${tab === 'method' ? 'sv-tab-on' : ''}`}>Méthode &amp; fiabilité</button>
@@ -299,7 +306,7 @@ const Forecast: React.FC = () => {
 
               {suggestions && (
                 <div className="mb-4">
-                  <SuggestionsControls index={suggestions} profile={profile} onProfile={setProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={setBankroll} />
+                  <SuggestionsControls index={suggestions} profile={profile} onProfile={setProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={setBankroll} onShowHistory={() => setTab('history')} />
                 </div>
               )}
               <div className="flex items-center gap-4 mb-3 flex-wrap">
@@ -328,6 +335,11 @@ const Forecast: React.FC = () => {
             </>
           )}
         </>
+      )}
+
+      {tab === 'history' && (
+        <BetHistory index={suggestions} failed={suggestionsFailed} onRetry={() => setAttempt(a => a + 1)}
+          profile={profile} onProfile={setProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={setBankroll} />
       )}
 
       {tab === 'simulator' && <SeasonSimulator />}
