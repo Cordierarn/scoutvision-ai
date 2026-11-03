@@ -23,7 +23,8 @@ import path from 'node:path';
 import { NUMBER, factNumbers, supported } from './reportAudit';
 import { ContextLoader, MatchContext, regulars } from './bettingContext';
 import { NoModelAvailable } from './geminiModels';
-import { Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
+import { FetchHeadlines, buildHeadlinesPrompt } from './newsFeed';
+import { GenerateText, Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
 export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v2' } as const;
 export const BETTING_NEWS_PATH = '/api/ai/betting-news';
@@ -157,9 +158,13 @@ export function parseGrounding(metadata: unknown): Omit<GroundedGeneration, 'tex
 // 1. ACTUALITÉ D'AVANT-MATCH (ancrée Google Search)
 // ============================================
 
+const playersToCheck = (m: { home: string; away: string }, context?: MatchContext | null) => (context
+  ? [[m.home, regulars(context.home)], [m.away, regulars(context.away)]].filter(([, names]) => names.length)
+    .map(([team, names]) => `${team}: ${(names as string[]).join(', ')}`).join('; ')
+  : '');
+
 export function buildNewsPrompt(m: MatchFacts, today: string, context?: MatchContext | null): string {
-  const check = context ? [[m.home, regulars(context.home)], [m.away, regulars(context.away)]].filter(([, names]) => names.length)
-    .map(([team, names]) => `${team}: ${(names as string[]).join(', ')}`).join('; ') : '';
+  const check = playersToCheck(m, context);
   return `Today is ${today}. Football match: ${m.home} vs ${m.away} (${m.competition}), kickoff ${m.kickoff} (UTC).
 Search the web (several searches if needed, in English and in the clubs' languages) for the latest pre-match team news about this exact match, published in the last 4 days:
 - confirmed absences (injuries, suspensions) and doubtful players, for both teams;${check ? `
@@ -171,7 +176,11 @@ If the news found is older than 4 days or concerns another match, ignore it. If 
 Answer in French with at most 8 short bullet points ("- "), most important first.`;
 }
 
-export interface NewsEntry { matchId: string; text: string; sources: Source[]; queries: string[]; searchHtml?: string; fetchedAt: string; model: string }
+/** `method` : recherche Google de Gemini, ou secours par les titres Google News (`fallbackReason` dit pourquoi) */
+export interface NewsEntry {
+  matchId: string; text: string; sources: Source[]; queries: string[]; searchHtml?: string; fetchedAt: string; model: string;
+  method?: 'google-search' | 'news-feed'; fallbackReason?: string;
+}
 
 /** Cache de l'actualité par match (mémoire du processus) */
 export class NewsCache {
@@ -204,6 +213,9 @@ export interface BettingDeps {
   generateJson: GenerateJson;
   news: NewsCache;
   loadContext?: ContextLoader;
+  /** Secours de la recherche d'actualité : titres Google News + modèle texte */
+  fetchHeadlines?: FetchHeadlines;
+  generateText?: GenerateText;
   now?: () => Date;
   log?: (message: string) => void;
   sleep?: (ms: number) => Promise<void>;
@@ -237,16 +249,46 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
     if (!g.text.trim()) return { status: 502, body: { error: 'Gemini n\'a renvoyé aucun texte pour ce match (réponse vide). Réessayez.' } };
     const entry: NewsEntry = {
       matchId: m.matchId, text: cleanNews(g.text), sources: g.sources, queries: g.queries, ...(g.searchHtml ? { searchHtml: g.searchHtml } : {}),
-      fetchedAt: now.toISOString(), model: g.modelVersion?.trim() || resolveGeminiModel(deps.model),
+      fetchedAt: now.toISOString(), model: g.modelVersion?.trim() || resolveGeminiModel(deps.model), method: 'google-search',
     };
     deps.news.set(entry);
     deps.log?.(`[betting-news] ${m.matchId} : ${entry.sources.length} source(s), ${entry.queries.length} requête(s)`);
     return { status: 200, body: { ...entry, cached: false, promptVersion: BETTING_PROMPT_VERSIONS.news } };
   } catch (error) {
     const detail = redact(error instanceof Error ? error.message : String(error), deps.apiKey);
-    deps.log?.(`[betting-news] échec : ${detail}`);
-    return { status: 502, body: { error: newsErrorMessage(error, detail) } };
+    const reason = newsErrorMessage(error, detail);
+    deps.log?.(`[betting-news] recherche Google indisponible : ${detail}`);
+    if (!deps.fetchHeadlines || !deps.generateText) return { status: 502, body: { error: reason } };
+    // Secours : titres Google News des 4 derniers jours, lus par un modèle texte
+    try {
+      const entry = await newsFromHeadlines(m, now, context, reason, deps);
+      deps.news.set(entry);
+      deps.log?.(`[betting-news] ${m.matchId} : secours Google News, ${entry.sources.length} titre(s)`);
+      return { status: 200, body: { ...entry, cached: false, promptVersion: BETTING_PROMPT_VERSIONS.news } };
+    } catch (fallback) {
+      const why = redact(fallback instanceof Error ? fallback.message : String(fallback), deps.apiKey).replace(/\s+/g, ' ').slice(0, 200);
+      deps.log?.(`[betting-news] secours Google News en échec : ${why}`);
+      return { status: 502, body: { error: `${reason} Secours par les titres Google News en échec : ${why}` } };
+    }
   }
+}
+
+const MAX_HEADLINE_SOURCES = 8;
+
+async function newsFromHeadlines(m: IndexMatch, now: Date, context: MatchContext | null, reason: string, deps: BettingDeps): Promise<NewsEntry> {
+  const { items, queries } = await deps.fetchHeadlines!(m.home, m.away, now);
+  let text = 'Aucune information fiable trouvée.';
+  let model = '';
+  if (items.length) {
+    const prompt = buildHeadlinesPrompt(m.home, m.away, m.competition, m.kickoff ?? m.date, today(now), items, playersToCheck(m, context));
+    const g = await withRetry(async () => { const out = await deps.generateText!(prompt); return typeof out === 'string' ? { text: out } : out; }, deps.sleep);
+    if (g.text.trim()) text = cleanNews(g.text);
+    model = g.modelVersion?.trim() ?? '';
+  }
+  return {
+    matchId: m.matchId, text, queries, fetchedAt: now.toISOString(), model: model || resolveGeminiModel(deps.model), method: 'news-feed', fallbackReason: reason,
+    sources: items.slice(0, MAX_HEADLINE_SOURCES).map(h => ({ title: `${h.source ? `${h.source} : ` : ''}${h.title}`.slice(0, 160), uri: h.link })),
+  };
 }
 
 /** Message d'échec explicite (privé) : délai, quota, accès à la recherche Google, refus du modèle */

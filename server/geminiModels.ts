@@ -3,19 +3,21 @@
  * « indisponible » (404), l'appel passe au modèle suivant, et le modèle épuisé est mis de côté
  * jusqu'à sa remise à zéro probable.
  *
- * Niveau gratuit de l'API Gemini (relevé du 3 novembre 2026 dans Google AI Studio) : 20 requêtes par
- * jour pour les modèles Flash, 500 pour les Flash Lite récents, et recherche Google (« ancrage de
- * recherche ») à 0 pour Gemini 3 et suivants, 1 500 par jour pour Gemini 2 et 2.5. La recherche
- * d'actualité passe donc par les modèles 2.5, la rédaction par les modèles 3.x.
+ * Constaté le 3 novembre 2026 avec une clé du niveau gratuit : 20 requêtes par jour pour les modèles
+ * Flash, 500 pour les Flash Lite récents ; Gemini 2.5 retiré pour les nouvelles clés (404 « no longer
+ * available to new users ») ; recherche Google (ancrage) à 0 pour Gemini 3 et suivants (429). Sans
+ * facturation, la recherche d'actualité passe donc par le secours Google News (server/newsFeed.ts).
  * Chaînes remplaçables par GEMINI_SEARCH_MODELS et GEMINI_TEXT_MODELS (listes séparées par des virgules).
  */
 
 import { errorStatus } from './scoutReport';
 
-/** Recherche Google (ancrage) : seuls les modèles 2.5 y ont droit au niveau gratuit */
-export const DEFAULT_SEARCH_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
-/** Rédaction (rapports, plan du jour) : du plus capable au plus disponible */
-export const DEFAULT_TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+/** Recherche Google (ancrage) : réservée aux clés avec facturation ; sinon refus immédiat et secours Google News */
+export const DEFAULT_SEARCH_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+/** Rédaction (rapports, plan du jour) : du plus capable au plus disponible (Flash Lite : 500 requêtes par jour) */
+export const DEFAULT_TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+/** Extraction de l'actualité à partir des titres (secours Google News) : modèles légers d'abord */
+export const EXTRACT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 
 /** Liste de modèles lue dans une variable (« a, b ,c »), sinon la liste par défaut ; `first` passe devant */
 export function modelChain(configured: string | undefined, defaults: string[], first?: string): string[] {
@@ -27,13 +29,15 @@ export type Unavailability = 'daily' | 'rate' | 'missing';
 
 /**
  * Indisponibilité d'un modèle d'après l'erreur : quota du jour (429 « PerDay » ou « exceeded your
- * current quota »), limite par minute (autre 429), modèle inconnu ou non servi (404). Null sinon :
+ * current quota »), limite par minute (autre 429) ou surcharge (503), modèle inconnu ou retiré (404). Null sinon :
  * l'erreur est remontée telle quelle (requête invalide, clé refusée, délai…).
  */
 export function unavailability(error: unknown): Unavailability | null {
   const status = errorStatus(error);
   const message = error instanceof Error ? error.message : String(error);
   if (status === 429) return /PerDay|per day|exceeded your current quota|RESOURCE_EXHAUSTED.*day/i.test(message) ? 'daily' : 'rate';
+  // modèle surchargé (« high demand », UNAVAILABLE) : un autre modèle répond souvent tout de suite
+  if (status === 503 || /"status":\s*"UNAVAILABLE"|high demand|overloaded/i.test(message)) return 'rate';
   if (status === 404 || /models\/[^ ]+ is not found|is not supported for generateContent/i.test(message)) return 'missing';
   return null;
 }
@@ -59,8 +63,11 @@ export class ModelPool {
 export class NoModelAvailable extends Error {
   status = 429;
   constructor(public readonly tried: string[], public readonly cause?: unknown) {
+    const last = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+    // motif réel du dernier refus (clé éventuelle masquée), pour savoir s'il s'agit d'un quota ou d'un modèle retiré
+    const detail = last.replace(/([?&]key=)[^&\s"]+/gi, '$1[masqué]').replace(/\s+/g, ' ').slice(0, 220);
     super(tried.length
-      ? `Quota gratuit atteint ou modèle indisponible sur ${tried.join(', ')}.`
+      ? `Quota gratuit atteint ou modèle indisponible sur ${tried.join(', ')}.${detail ? ` Dernier refus de Google : ${detail}` : ''}`
       : 'Tous les modèles de la chaîne sont en pause (quota du jour atteint) jusqu\'à leur remise à zéro.');
     this.name = 'NoModelAvailable';
   }
@@ -79,7 +86,8 @@ export async function withModelFallback<T>(pool: ModelPool, call: (model: string
       pool.setAside(model, kind);
       tried.push(model);
       last = error;
-      log?.(`[gemini] ${model} indisponible (${kind === 'daily' ? 'quota du jour' : kind === 'rate' ? 'limite par minute' : 'modèle absent'}), modèle suivant`);
+      const why = (error instanceof Error ? error.message : String(error)).replace(/([?&]key=)[^&\s"]+/gi, '$1[masqué]').replace(/\s+/g, ' ').slice(0, 200);
+      log?.(`[gemini] ${model} indisponible (${kind === 'daily' ? 'quota du jour' : kind === 'rate' ? 'limite par minute ou surcharge' : 'modèle absent'}), modèle suivant : ${why}`);
     }
   }
   throw new NoModelAvailable(tried, last);
