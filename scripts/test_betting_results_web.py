@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from betting import evening, results_web
+from betting import COMPETITIONS, TOURNAMENTS, evening, results_web
 
 
 def payload():
@@ -30,6 +30,14 @@ def payload():
                         {"scoringPlay": False, "team": {"id": "10"}, "clock": {"value": 5300}}]}]},
         {"id": "2", "date": "2026-11-02T20:00Z", "competitions": [{"status": {"type": {"completed": False}}, "competitors": [
             {"homeAway": "home", "score": "0", "team": {"id": "30", "displayName": "Club C"}}, {"homeAway": "away", "score": "0", "team": {"id": "40", "displayName": "Club D"}}]}]}]}
+
+
+class ScopeTests(unittest.TestCase):
+    def test_every_competition_has_odds_and_results_sources(self):
+        # une compétition sans tournoi OddsPapi n'a jamais de cotes, une sans ligue ESPN n'est jamais réglée
+        self.assertEqual(set(COMPETITIONS), set(TOURNAMENTS))
+        self.assertEqual(set(results_web.ESPN), set(COMPETITIONS))
+        self.assertTrue({"UCL", "UEL", "UECL"} <= set(COMPETITIONS))
 
 
 class ParseTests(unittest.TestCase):
