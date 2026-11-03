@@ -250,6 +250,47 @@ fault. Each answer carries the real model, the exact facts sent and an explicit 
 Validation without a key: unit tests with injected generators (`server/groundedAi.test.ts`) and
 browser runs with mocked responses explicitly labelled "MAQUETTE D'AUDIT".
 
+## Betting lab assistant (`/api/ai/betting-news`, `/api/ai/betting-plan`)
+
+Panel « Assistant IA du jour » in Pronostics › Matchs à venir (`components/forecast/BettingAssistant.tsx`,
+server `server/bettingAi.ts`). It reads the betting suggestions already published by the pipeline
+(`forecast/suggestions/index.json` in the server data folder); the browser only sends match ids and the
+profile.
+
+Design, from the research done on 3 November 2026:
+
+- LLM forecasters do not beat the betting market on probabilities: in the 2026 World Cup benchmarks
+  (WC2026-Agents, LLM-SoccerArena, WorldCupArena), betting returns ranged from −18 % to +10 %, fading the
+  market lost money for every model, and the edge over closing odds was essentially zero. Over the
+  2026-27 replay, the Winamax odds were also better calibrated than our engine in every bet family.
+  So the model never computes a probability, odds, expected value or stake.
+- What an agent adds is recent team news the statistical engine cannot see: absences, doubts, probable
+  rotation, line-ups published about an hour before kickoff. Search access alone does not guarantee
+  better forecasts, so the news is used only to keep, temper or drop the engine's own suggestions.
+- Two calls instead of one: (1) one call per match with the Google Search tool, returning news bullets,
+  cited sources (`groundingChunks`) and the queries run (`webSearchQueries`); (2) one JSON call with a
+  response schema (`responseJsonSchema`), without tools, that sets a verdict per suggestion (`garder`,
+  `prudence`, `eviter`) and a short plan. Combining Google Search and a JSON schema in a single call has
+  reported issues on Gemini 3.5 and 3.6 Flash (empty grounding chunks, truncated JSON).
+
+Server checks: references must exist in the published suggestions; picks exclude `eviter` and are capped
+at 5; a combo needs 2 or 3 `garder` selections from different matches; sentences that quote a number absent
+from the engine facts and the news are removed and counted in `warnings`; stakes are the engine's fractions,
+converted to euros in the browser. News is cached 90 minutes per match (refresh at most every 15 minutes);
+own rate limit of 40 requests per 10 minutes. Each request stays under the 25 s Heroku deadline (one Gemini
+call per request); the browser runs up to 3 news requests in parallel, then asks for the plan.
+
+Search suggestions: the queries run by the model are shown as links to the Google results page next to the
+sources. The `searchEntryPoint.renderedContent` HTML is not injected: the app's Content-Security-Policy
+(`base-uri 'none'`, no third-party frames) would break its links. Check Google's display requirements for
+Search Suggestions before opening the app beyond private use.
+
+Cost: Google Search grounding is billed per search query on Gemini 3 models after a monthly free tier
+(check the current Gemini API pricing page); an analysis of 6 matches runs about 6 to 20 queries.
+
+Responsible gambling: the panel always shows the French helpline message (18+, Joueurs Info Service
+09 74 75 13 13).
+
 ## Limitations
 
 - The direction of a metric (more is better or worse) can only be checked for the metrics the

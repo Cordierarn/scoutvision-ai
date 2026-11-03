@@ -59,6 +59,7 @@ const handler = createPrivateServer({
     apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined,
     // Routeur Heroku : 30 s au plus avant la première réponse ; le serveur répond avant (25 s)
     deadlineMs: Number(env.SCOUTVISION_AI_DEADLINE_MS) || (onHeroku ? 25_000 : undefined),
+    dataDir,
   }),
   httpsRedirect: flag('SCOUTVISION_HTTPS_REDIRECT', trustProxy),
   dataReady: () => dataInstalled(dataDir),
