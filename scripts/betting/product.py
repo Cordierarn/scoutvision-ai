@@ -54,8 +54,14 @@ def load_results() -> pd.DataFrame:
         return base
     from .results_web import as_results
     web = as_results(pd.read_parquet(web_path))
-    web = web[~web["match_id"].isin(base["match_id"])]
-    return pd.concat([base, web], ignore_index=True) if len(web) else base
+    web = web[~web["match_id"].isin(base["match_id"])].copy()
+    if web.empty:
+        return base
+    # identifiants d'équipe PitchAPI retrouvés par le nom (sinon le nom lui-même, jamais une valeur nulle)
+    ids = {**dict(zip(base["away_team_name"], base["away_team_id"])), **dict(zip(base["home_team_name"], base["home_team_id"]))}
+    web["home_team_id"] = [ids.get(n, n) for n in web["home_team_name"]]
+    web["away_team_id"] = [ids.get(n, n) for n in web["away_team_name"]]
+    return pd.concat([base, web], ignore_index=True)
 
 
 def excluded_families() -> set[tuple[str, str]]:
