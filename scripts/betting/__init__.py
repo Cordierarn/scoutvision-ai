@@ -2,7 +2,7 @@
 Labo paris (scripts/betting) : cotes Winamax FR via OddsPapi, archive horodatée, appariement avec les
 matchs PitchAPI, puis (phases suivantes) simulation, probabilités par marché, sélection et suivi.
 
-Périmètre : Big 5, Championship, Liga Portugal, Eredivisie ; bookmaker `winamax.fr` ; plan OddsPapi « normal ».
+Périmètre : Big 5, Championship, Liga Portugal, Eredivisie, Ligue des champions, Ligue Europa, Ligue Conférence ; bookmaker `winamax.fr` ; plan OddsPapi « normal ».
 Tout ce qui est téléchargé vit sous `.research/betting/` (ignoré par Git). La clé API est lue dans
 l'environnement (`ODDSPAPI_API_KEY`, ou `.env.local` à la racine du dépôt) et n'est jamais écrite.
 """

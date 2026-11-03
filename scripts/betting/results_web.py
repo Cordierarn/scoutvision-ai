@@ -24,7 +24,8 @@ import pandas as pd
 from . import COMPETITIONS, RESEARCH, ROOT
 from .matching import similarity
 
-ESPN = {"ENG": "eng.1", "ENG2": "eng.2", "ESP": "esp.1", "ITA": "ita.1", "FRA": "fra.1", "GER": "ger.1", "POR": "por.1", "NED": "ned.1"}
+ESPN = {"ENG": "eng.1", "ENG2": "eng.2", "ESP": "esp.1", "ITA": "ita.1", "FRA": "fra.1", "GER": "ger.1", "POR": "por.1", "NED": "ned.1",
+        "UCL": "uefa.champions", "UEL": "uefa.europa", "UECL": "uefa.europa.conf"}
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard"
 OUT = RESEARCH / "results_web.parquet"
 COLUMNS = ["source_id", "competition", "date", "kickoff_utc", "home_name", "away_name", "ft_home", "ft_away", "ht_home", "ht_away", "first_goal", "last_goal", "completed", "match_id"]
