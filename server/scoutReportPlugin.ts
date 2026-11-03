@@ -12,10 +12,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { MAX_BODY_BYTES, GenerateText, createRateLimiter, handleScoutReport, resolveGeminiModel } from './scoutReport';
 import { AI_TASKS, AiTask, handleGroundedAi } from './groundedAi';
 import {
-  BETTING_NEWS_PATH, BETTING_PLAN_PATH, GenerateGrounded, GenerateJson, LoadIndex, NewsCache, handleBettingNews, handleBettingPlan, indexLoader, parseGrounding,
+  BETTING_NEWS_PATH, BETTING_PLAN_PATH, GenerateGrounded, GenerateJson, LoadIndex, NewsCache, ReadArticles, handleBettingNews, handleBettingPlan, indexLoader, parseGrounding,
 } from './bettingAi';
 import { ContextLoader, contextLoader } from './bettingContext';
-import { FetchHeadlines, googleNewsFetcher } from './newsFeed';
+import { FetchHeadlines, newsFeedFetcher } from './newsFeed';
 import { DEFAULT_SEARCH_MODELS, DEFAULT_TEXT_MODELS, EXTRACT_MODELS, ModelPool, modelChain, takesThinkingLevel, withModelFallback } from './geminiModels';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
@@ -121,6 +121,20 @@ export function geminiGroundedGenerator(apiKey: string, pool: ModelPool, log?: (
   };
 }
 
+/** Lecture d'articles par Gemini (outil URL context, disponible au niveau gratuit) : texte et adresses lues */
+export function geminiArticlesReader(apiKey: string, pool: ModelPool, log?: (message: string) => void): ReadArticles {
+  return async prompt => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    return timed(withModelFallback(pool, model => withLowThinking(model, async thinkingConfig => {
+      const response = await ai.models.generateContent({ model, contents: prompt, config: { tools: [{ urlContext: {} }], ...(thinkingConfig ? { thinkingConfig } : {}) } });
+      const read = (response.candidates?.[0]?.urlContextMetadata?.urlMetadata ?? [])
+        .filter(u => u.urlRetrievalStatus === 'URL_RETRIEVAL_STATUS_SUCCESS' && typeof u.retrievedUrl === 'string').map(u => u.retrievedUrl as string);
+      return { text: response.text ?? '', modelVersion: response.modelVersion || model, read };
+    }), log), BETTING_GEMINI_TIMEOUT_MS);
+  };
+}
+
 /** Appel Gemini en JSON strict (schéma imposé), sans outil */
 export function geminiJsonGenerator(apiKey: string, pool: ModelPool, log?: (message: string) => void): GenerateJson {
   return async (prompt, schema) => {
@@ -170,6 +184,7 @@ export interface ScoutReportMiddlewareOptions {
   bettingRateLimit?: { limit: number; windowMs: number };
   loadContext?: ContextLoader;             // remplaçable dans les tests
   fetchHeadlines?: FetchHeadlines;         // secours Google News (remplaçable dans les tests)
+  readArticles?: ReadArticles;             // lecture d'articles (remplaçable dans les tests)
   /**
    * Réponse ouverte pour l'assistant : en-têtes et un espace tout de suite, puis un espace toutes les 5 s
    * jusqu'au JSON final (un JSON précédé d'espaces reste valide). Le routeur Heroku coupe une requête
@@ -212,7 +227,8 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
   const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, textPool, log) : async () => ({ text: '' }));
   const news = new NewsCache();
   const loadContext = options.loadContext ?? (options.dataDir ? contextLoader(options.dataDir) : undefined);
-  const fetchHeadlines = options.fetchHeadlines ?? googleNewsFetcher();
+  const fetchHeadlines = options.fetchHeadlines ?? newsFeedFetcher();
+  const readArticles = options.readArticles ?? (apiKey ? geminiArticlesReader(apiKey, extractPool, log) : undefined);
   const extractText = options.generate ?? (apiKey ? geminiGenerator(apiKey, extractPool, log) : async () => '');
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
@@ -248,6 +264,7 @@ export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
       const keepAlive = !!options.bettingKeepAlive;
       const deadline = keepAlive ? Date.now() + BETTING_DEADLINE_MS : options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
       const deps = { apiKey, model, loadIndex, loadContext, news, log, fetchHeadlines, generateText: boundedCall(extractText, deadline),
+        readArticles: readArticles ? boundedCall(readArticles, deadline) : undefined,
         generateGrounded: boundedCall(generateGrounded, deadline), generateJson: boundedCall(generateJson, deadline) };
       let beat: ReturnType<typeof setInterval> | undefined;
       if (keepAlive) {

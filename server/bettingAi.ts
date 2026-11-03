@@ -23,7 +23,7 @@ import path from 'node:path';
 import { NUMBER, factNumbers, supported } from './reportAudit';
 import { ContextLoader, MatchContext, regulars } from './bettingContext';
 import { NoModelAvailable } from './geminiModels';
-import { FetchHeadlines, buildHeadlinesPrompt } from './newsFeed';
+import { FetchHeadlines, Headline, articlesToRead, buildArticlesPrompt, buildHeadlinesPrompt } from './newsFeed';
 import { GenerateText, Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
 export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v2' } as const;
@@ -180,7 +180,12 @@ Answer in French with at most 8 short bullet points ("- "), most important first
 export interface NewsEntry {
   matchId: string; text: string; sources: Source[]; queries: string[]; searchHtml?: string; fetchedAt: string; model: string;
   method?: 'google-search' | 'news-feed'; fallbackReason?: string;
+  articlesRead?: number;   // secours : articles effectivement lus par Gemini (outil URL context)
 }
+
+/** Lecture d'articles par Gemini (outil URL context) : texte et adresses effectivement lues */
+export interface ArticlesGeneration extends Generation { read: string[] }
+export type ReadArticles = (prompt: string) => Promise<ArticlesGeneration>;
 
 /** Cache de l'actualité par match (mémoire du processus) */
 export class NewsCache {
@@ -216,6 +221,7 @@ export interface BettingDeps {
   /** Secours de la recherche d'actualité : titres Google News + modèle texte */
   fetchHeadlines?: FetchHeadlines;
   generateText?: GenerateText;
+  readArticles?: ReadArticles;
   now?: () => Date;
   log?: (message: string) => void;
   sleep?: (ms: number) => Promise<void>;
@@ -277,17 +283,36 @@ const MAX_HEADLINE_SOURCES = 8;
 
 async function newsFromHeadlines(m: IndexMatch, now: Date, context: MatchContext | null, reason: string, deps: BettingDeps): Promise<NewsEntry> {
   const { items, queries } = await deps.fetchHeadlines!(m.home, m.away, now);
+  const kickoff = m.kickoff ?? m.date;
+  const check = playersToCheck(m, context);
   let text = 'Aucune information fiable trouvée.';
   let model = '';
-  if (items.length) {
-    const prompt = buildHeadlinesPrompt(m.home, m.away, m.competition, m.kickoff ?? m.date, today(now), items, playersToCheck(m, context));
+  let read: string[] = [];
+  const articles = articlesToRead(items);
+  // 1. lecture des articles les plus pertinents (outil URL context) ; un lien illisible n'empêche pas les autres
+  if (articles.length && deps.readArticles) {
+    try {
+      const g = await withRetry(() => deps.readArticles!(buildArticlesPrompt(m.home, m.away, m.competition, kickoff, today(now), articles, items, check)), deps.sleep);
+      if (g.text.trim() && g.read.length) { text = cleanNews(g.text); model = g.modelVersion?.trim() ?? ''; read = g.read; }
+      else deps.log?.(`[betting-news] ${m.matchId} : aucun article lisible (${articles.length} lien(s)), titres seuls`);
+    } catch (error) {
+      deps.log?.(`[betting-news] ${m.matchId} : lecture des articles en échec, titres seuls : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey).slice(0, 160)}`);
+    }
+  }
+  // 2. sinon, extraction à partir des seuls titres
+  if (!read.length && items.length) {
+    const prompt = buildHeadlinesPrompt(m.home, m.away, m.competition, kickoff, today(now), items, check);
     const g = await withRetry(async () => { const out = await deps.generateText!(prompt); return typeof out === 'string' ? { text: out } : out; }, deps.sleep);
     if (g.text.trim()) text = cleanNews(g.text);
     model = g.modelVersion?.trim() ?? '';
   }
+  // sources : articles lus d'abord, puis les autres titres
+  const isRead = (h: Headline) => read.some(u => u === h.link || u.startsWith(h.link) || h.link.startsWith(u));
+  const ordered = [...items.filter(isRead), ...items.filter(h => !isRead(h))];
   return {
     matchId: m.matchId, text, queries, fetchedAt: now.toISOString(), model: model || resolveGeminiModel(deps.model), method: 'news-feed', fallbackReason: reason,
-    sources: items.slice(0, MAX_HEADLINE_SOURCES).map(h => ({ title: `${h.source ? `${h.source} : ` : ''}${h.title}`.slice(0, 160), uri: h.link })),
+    articlesRead: read.length,
+    sources: ordered.slice(0, MAX_HEADLINE_SOURCES).map(h => ({ title: `${isRead(h) ? '[lu] ' : ''}${h.source ? `${h.source} : ` : ''}${h.title}`.slice(0, 160), uri: h.link })),
   };
 }
 

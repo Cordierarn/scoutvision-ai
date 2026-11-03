@@ -15,9 +15,10 @@ import { errorStatus } from './scoutReport';
 /** Recherche Google (ancrage) : réservée aux clés avec facturation ; sinon refus immédiat et secours Google News */
 export const DEFAULT_SEARCH_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
 /** Rédaction (rapports, plan du jour) : du plus capable au plus disponible (Flash Lite : 500 requêtes par jour) */
-export const DEFAULT_TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+export const DEFAULT_TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
 /** Extraction de l'actualité à partir des titres (secours Google News) : modèles légers d'abord */
-export const EXTRACT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+// alias « latest » en tête : constaté servi alors que l'identifiant versionné répondait 503 (3 novembre 2026)
+export const EXTRACT_MODELS = ['gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 
 /** Liste de modèles lue dans une variable (« a, b ,c »), sinon la liste par défaut ; `first` passe devant */
 export function modelChain(configured: string | undefined, defaults: string[], first?: string): string[] {
