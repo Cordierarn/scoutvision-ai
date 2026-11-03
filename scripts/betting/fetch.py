@@ -132,7 +132,7 @@ def cmd_history(args) -> int:
         todo = todo[todo["start_time"] >= pd.Timestamp(args.since, tz="UTC")]
     todo = todo.sort_values("start_time", ascending=False)
     budget = min(args.max_requests, client.quota.remaining)
-    print(f"{len(todo)} matchs terminés à archiver, {budget} requêtes autorisées pour cette exécution")
+    print(f"{len(todo)} matchs terminés à archiver, {budget} requêtes autorisées pour cette exécution (environ 6,5 s par match)", flush=True)
     added, fetched, missing = 0, 0, 0
     for f in todo.head(budget).itertuples(index=False):
         try:
@@ -141,6 +141,8 @@ def cmd_history(args) -> int:
             print(str(exc))
             break
         fetched += 1
+        if fetched % 25 == 0:
+            print(f"  {fetched} matchs archivés…", flush=True)
         if payload is None:
             missing += 1
             continue
@@ -158,12 +160,15 @@ def cmd_upcoming(args) -> int:
     now = pd.Timestamp.now(tz="UTC")
     todo = fx[(fx["status_id"] == 0) & (fx["start_time"] >= now) & (fx["start_time"] <= now + pd.Timedelta(days=args.days))].sort_values("start_time")
     added, fetched = 0, 0
+    print(f"{len(todo)} rencontres à venir sous {args.days} jours (environ 6,5 s par rencontre)", flush=True)
     for f in todo.head(args.max_requests).itertuples(index=False):
         try:
             payload = client.historical_odds(f.fixture_id, [BOOKMAKER])
         except QuotaExceeded as exc:
             print(str(exc)); break
         fetched += 1
+        if fetched % 25 == 0:
+            print(f"  {fetched} rencontres relevées…", flush=True)
         if payload is None:
             continue
         added += archive.write_snapshots(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
