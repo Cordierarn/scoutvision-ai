@@ -61,15 +61,16 @@ jobs:
         # update-data.yml (lundi et vendredi) ; betting-odds.tar.gz : archive de cotes, journal, historique des soirées
         run: |
           mkdir -p .research/betting
-          seed="$(gh api "repos/$DATA_REPO/releases/tags/betting-odds" -q '.assets[] | select(.name == "betting-seed.tar.gz") | .id' 2>/dev/null || true)"
-          if [ -z "$seed" ]; then echo "::error::betting-seed.tar.gz absent de la release betting-odds : lancer d'abord le workflow « Mise à jour des données ScoutVision »."; exit 1; fi
-          gh api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$seed" > betting-seed.tar.gz
-          tar -xzf betting-seed.tar.gz
-          id="$(gh api "repos/$DATA_REPO/releases/tags/betting-odds" -q '.assets[] | select(.name == "betting-odds.tar.gz") | .id' 2>/dev/null || true)"
-          if [ -n "$id" ]; then
-            gh api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$id" > betting-odds.tar.gz
-            tar -xzf betting-odds.tar.gz -C .research/betting
-            echo "archive restaurée"
+          if ! gh release view betting-odds -R "$DATA_REPO" >/dev/null 2>&1; then
+            echo "::error::Release betting-odds absente du dépôt de données : lancer d'abord le workflow « Mise à jour des données ScoutVision », qui publie l'amorce betting-seed.tar.gz."; exit 1
+          fi
+          if ! gh release download betting-odds -R "$DATA_REPO" -p betting-seed.tar.gz -D "$RUNNER_TEMP" --clobber; then
+            echo "::error::betting-seed.tar.gz absent de la release betting-odds : lancer d'abord le workflow « Mise à jour des données ScoutVision »."; exit 1
+          fi
+          tar -xzf "$RUNNER_TEMP/betting-seed.tar.gz"
+          if gh release download betting-odds -R "$DATA_REPO" -p betting-odds.tar.gz -D "$RUNNER_TEMP" --clobber 2>/dev/null; then
+            tar -xzf "$RUNNER_TEMP/betting-odds.tar.gz" -C .research/betting
+            echo "archive de cotes restaurée"
           else
             echo "aucune archive de cotes : premier passage"
           fi
@@ -112,9 +113,8 @@ jobs:
 
       - name: Publication des suggestions dans l'archive de données du serveur
         run: |
-          id="$(gh api "repos/$DATA_REPO/releases/tags/scoutvision-data" -q '.assets[] | select(.name == "scoutvision-data.tar.gz") | .id')"
-          gh api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$id" > scoutvision-data.tar.gz
-          mkdir -p data-release && tar -xzf scoutvision-data.tar.gz -C data-release
+          gh release download scoutvision-data -R "$DATA_REPO" -p scoutvision-data.tar.gz -D "$RUNNER_TEMP" --clobber
+          mkdir -p data-release && tar -xzf "$RUNNER_TEMP/scoutvision-data.tar.gz" -C data-release
           mkdir -p data-release/forecast/suggestions && cp public/data/forecast/suggestions/index.json data-release/forecast/suggestions/index.json
-          tar -czf scoutvision-data.tar.gz -C data-release .
-          gh release upload scoutvision-data scoutvision-data.tar.gz --repo "$DATA_REPO" --clobber
+          tar -czf "$RUNNER_TEMP/scoutvision-data.tar.gz" -C data-release .
+          gh release upload scoutvision-data "$RUNNER_TEMP/scoutvision-data.tar.gz" --repo "$DATA_REPO" --clobber
