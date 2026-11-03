@@ -130,6 +130,7 @@ Details: [recruitment model](docs/recruitment-model.md#out-of-sample-validation)
 ## Methodology
 
 - **Shrunk per-90 metrics**: PitchAPI per-90 values, pulled towards the role average at low minutes.
+- **Reliability and small samples**: share of signal of each per-90 value (odd/even split-half calibration), 90 % intervals, and players below the 40 % minutes threshold in the Gem Hunter.
 - **Percentiles** by role (GK, CB, FB, WB, DM, CM, AM, W, ST) and competition level.
 - **Tactical role indices**: weighted means of percentiles, eliminatory thresholds, explainable.
 - **RAPM**: regularized plus-minus in xG/90 over two seasons, with league reliability.

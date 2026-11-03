@@ -23,6 +23,34 @@ Every index and projection below is a scouting aid. None of them is a verdict on
 - Only players with at least 40% of their team's minutes are included (PitchAPI `player_season`
   threshold).
 
+## Reliability of per-90 metrics and small samples (`scripts/reliability.py`)
+
+PitchAPI shrinks each per-90 value with one constant per metric, the same for every competition
+and season: `shrunk = (raw × minutes + prior × k) / (minutes + k)`, prior = role average. This is
+empirical Bayes, so the share of signal in a value observed over m minutes is `R = m / (m + k)`.
+
+- **Calibration.** Each player season is split into odd and even matches (`player_match`). The
+  correlation between the two halves, within the same role and competition, is the observed reliability
+  of half a season. k is fitted per metric so that m / (m + k) reproduces it, by weighted least squares
+  over minute bins. On 174 competition-seasons the mean absolute gap between predicted and observed
+  reliability is about 0.02. PitchAPI's own constants are close overall, but off by 0.1 to 0.2 on some
+  metrics, in both directions; the recalibrated k is used.
+- **Minutes needed.** The time to reach R = 0.7 ranges from about 300 minutes (crosses, passes)
+  to about 2 100 for xG per 90 (23 full matches) and more than a season for goals or assists per 90.
+- **Interval.** The true spread between players of a role is the covariance of the two halves. A value
+  carries a 90 % interval of ± 1.645 × true SD × √(1 − R).
+- **Player card.** Under the percentiles, the panel lists the radar's per-90 metrics by reliability
+  level, from the player's minutes. Each row tooltip gives the reliability, the interval and the full
+  matches needed. Rates (%, PAdj) are not modelled: they need a binomial model on attempts.
+- **Small samples** (Gem Hunter › Petits temps de jeu). Players below PitchAPI's threshold (40 % of
+  their team's minutes) are rebuilt from `player_match`, from 4 matches and 180 minutes, for the two
+  latest seasons. Each per-90 value is shrunk like PitchAPI's (role prior, PitchAPI's k), so it is
+  comparable with the base. Its percentile, and the percentiles of its interval bounds, are computed
+  among qualified players of the same season, tier and role, the grouping of the app's percentiles.
+  These recomputed percentiles sit about 2 to 3 points from PitchAPI's on qualified players. Only the
+  per-90 metrics of each position's comparison list are published (`small_samples/{season}.json`).
+  The « Prudent » sort ranks players by the lower bound of the interval.
+
 ## Similar players
 
 - Score between a reference and a candidate: for each metric of the position's fixed list

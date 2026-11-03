@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import SmallSamples from './prospects/SmallSamples';
 import { PlayerData, TeamStats, extractSeason, getPlayerSeasonId, getPlayerSeasonTag, getSeasonLabel } from '../types';
 import {
   RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, ROLE_CORE_WEIGHT, roleIndex, roleIndexBreakdown,
@@ -73,7 +74,12 @@ const contractLabel = (c?: string) => (c ? c.slice(0, 7).split('-').reverse().jo
 // Postes d'un rôle : « DM, CM »
 const positionsText = (preset: RolePreset) => preset.positions.map(positionLabel).join(', ');
 
+// Vue retenue au retour sur la page : joueurs de la base ou petits temps de jeu
+let lastHunterView: 'base' | 'small' = 'base';
+
 const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPlayer, selectedId }) => {
+  const [view, setViewState] = useState<'base' | 'small'>(lastHunterView);
+  const setView = (v: 'base' | 'small') => { lastHunterView = v; setViewState(v); };
   // Réglages reçus par un lien de partage : appliqués une fois, avant la mémoire de la page
   const [shared] = useState(() => consumeSharedFilters('hunter'));
   // ---------- Rôles : officiels (rolePresets.json) et personnalisés (navigateur) ----------
@@ -734,8 +740,12 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
             <span className="w-1.5 h-1.5 rounded-full bg-ink-3" aria-hidden /> Saison en cours
           </span>
         )}
-        <span className="hidden md:inline text-2xs text-ink-4">Profil recherché → contraintes → joueurs correspondants → pourquoi ils ressortent → fiche</span>
-        {rows.length > 0 && (
+        <div className="sv-seg" role="radiogroup" aria-label="Joueurs étudiés">
+          <button type="button" role="radio" aria-checked={view === 'base'} onClick={() => setView('base')} className={`sv-seg-btn ${view === 'base' ? 'sv-seg-on' : ''}`}>Base de joueurs</button>
+          <button type="button" role="radio" aria-checked={view === 'small'} onClick={() => setView('small')} className={`sv-seg-btn ${view === 'small' ? 'sv-seg-on' : ''}`}>Petits temps de jeu</button>
+        </div>
+        {view === 'base' && <span className="hidden xl:inline text-2xs text-ink-4">Profil recherché → contraintes → joueurs correspondants → pourquoi ils ressortent → fiche</span>}
+        {view === 'base' && rows.length > 0 && (
           <button onClick={() => exportProspects(rows, roleName, thresholdKeys)} className="sv-btn sv-btn-secondary ml-auto"
             data-tip="Rang, rôle et indice du rôle inclus" data-tip-pos="left">
             <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Exporter</span> ({rows.length})
@@ -743,7 +753,9 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
         )}
       </div>
 
-      <div className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0">
+      {view === 'small' && <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto"><SmallSamples /></div>}
+
+      <div className={`${view === 'small' ? 'hidden' : 'flex'} flex-col lg:flex-row lg:flex-1 lg:min-h-0`}>
         {/* Profil recherché */}
         <aside className="lg:w-[22rem] shrink-0 p-4 sm:px-5 lg:pr-4 lg:border-r border-b lg:border-b-0 border-line space-y-4 lg:overflow-y-auto">
           {profile}

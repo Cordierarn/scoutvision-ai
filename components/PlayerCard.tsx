@@ -25,6 +25,8 @@ import { isSeasonInProgress, MIN_NETWORK_MATCHES, MIN_RAPM_MINUTES, PIPELINE_PER
 import { BRAND, CONTEXT, INK, polarGridProps } from '../theme/charts';
 import ShotPitch, { ShotLegend } from './ShotPitch';
 import { formatEuro } from '../utils/format';
+import ReliabilitySummary from './ReliabilitySummary';
+import { playerMetricReliability, reliabilityText } from '../utils/reliability';
 
 // Libellé d'axe du radar : « par 90 » abrégé en « /90 » comme dans les tableaux, pour tenir sur deux lignes sans être coupé
 const radarAxisLabel = (label: string) => label.replace(/ par 90$/, ' /90');
@@ -259,6 +261,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
         return `${count} joueurs au total`;
     }
   }, [cohort, comparisonMode, player]);
+
+  // Fiabilité des métriques par 90 (modèle du pipeline) : facultative, la fiche s'en passe si le fichier manque
+  const reliabilityModel = useAsyncData(() => dataLoader.loadReliability().catch(() => null), []).data;
+  const playerMinutes = typeof player['Minutes played'] === 'number' ? player['Minutes played'] as number : undefined;
 
   const chartData = useMemo(() => {
     return activeMetrics.map(key => {
@@ -613,10 +619,15 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
             {chartData.map(d => (
               <PercentileRow key={d.fullSubject} label={d.subject} value={formatRaw(d.rawValue)} percentile={d.A}
                 className="px-1.5 outline-none" active={focusMetric === d.fullSubject} {...focusEvents(d.fullSubject)}
-                title={`${metricLabel(d.fullSubject)} : ${formatRaw(d.rawValue)}, rang ${d.rank} sur ${d.cohortSize}`} />
+                title={(() => {
+                  const rel = playerMetricReliability(reliabilityModel, d.fullSubject, playerMinutes, player.Position, typeof d.rawValue === 'number' ? d.rawValue : undefined);
+                  return `${metricLabel(d.fullSubject)} : ${formatRaw(d.rawValue)}, rang ${d.rank} sur ${d.cohortSize}${rel ? `\n${reliabilityText(rel)}` : ''}`;
+                })()} />
             ))}
           </div>
           <PercentileLegend className="mt-3 pt-3 border-t border-line" />
+          <ReliabilitySummary className="mt-3 pt-3 border-t border-line" model={reliabilityModel} minutes={playerMinutes} role={player.Position}
+            metrics={chartData.map(d => ({ key: d.fullSubject, label: d.subject, value: typeof d.rawValue === 'number' ? d.rawValue : undefined }))} />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 mt-3 pt-3 border-t border-line">
             {[{ title: 'Forces', icon: <TrendingUp className="w-3 h-3 text-accent" />, items: strengths, none: 'Aucune métrique au 70e percentile ou plus.' },
