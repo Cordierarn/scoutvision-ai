@@ -7,7 +7,7 @@ import { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   BETTING_NEWS_PATH, BETTING_PLAN_PATH, BettingDeps, GenerateGrounded, GenerateJson, NEWS_REFRESH_MIN_MS, NewsCache, SuggestionsIndexFile,
-  auditText, buildNewsPrompt, buildPlanFacts, buildPlanPrompt, cleanNews, handleBettingNews, handleBettingPlan, matchFacts, newsErrorMessage, parseGrounding, validatePlan,
+  auditText, buildNewsPrompt, buildPlanFacts, buildPlanPrompt, cleanNews, handleBettingNews, handleBettingPlan, matchFacts, newsErrorMessage, parseGrounding, planErrorMessage, validatePlan,
 } from './bettingAi';
 import type { MatchContext, TeamContext } from './bettingContext';
 import { scoutReportMiddleware } from './scoutReportPlugin';
@@ -190,6 +190,12 @@ describe('plan du jour', () => {
     expect((await handleBettingPlan({ matchIds: ['m3'] }, deps())).status).toBe(404);
     expect((await handleBettingPlan({ matchIds: ['m1'], profile: 'sur' }, deps())).status).toBe(422);   // aucun pari Sûr publié
     expect((await handleBettingPlan({ matchIds: ['m1'] }, deps({ generateJson: async () => ({ text: 'pas du json' }) }))).status).toBe(502);
+    const late = await handleBettingPlan({ matchIds: ['m1'] }, deps({ generateJson: async () => { throw new Error('délai dépassé'); } }));
+    expect(late.body.error).toContain('Plan trop long à générer');
+    expect(planErrorMessage(Object.assign(new Error('x'), { status: 400 }), 'Invalid JSON schema')).toBe('Gemini a refusé la génération du plan (400). Détail : Invalid JSON schema');
+    const leak = await handleBettingPlan({ matchIds: ['m1'] }, deps({ generateJson: async () => { throw Object.assign(new Error(`503 overloaded key=${KEY}`), { status: 503 }); } }));
+    expect(String(leak.body.error)).toContain('(503)');
+    expect(String(leak.body.error)).not.toContain(KEY);
   });
 });
 

@@ -310,7 +310,7 @@ Each match also carries "context", the ScoutVision statistics of both teams (sea
 Use this context to judge how much a reported absence matters (a regular with a large share of minutes, goals or impact weighs much more than a squad player), whether a team may rotate (low "seasonStakes", bigger match soon), and whether a suggestion fits both teams' profiles. Cite the statistic you rely on, with its value as written in the facts. Probabilities and expected values are in percent: write them like "78,7 %".
 
 **FACTS (JSON) — engine output and team context:**
-${JSON.stringify(facts, null, 1)}
+${JSON.stringify(facts)}
 
 **PRE-MATCH NEWS (web search, per matchId):**
 ${facts.matches.map(m => `[${m.matchId}] ${m.home} – ${m.away}\n${news[m.matchId] ?? 'Actualité non recherchée.'}`).join('\n\n')}`;
@@ -439,7 +439,18 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
       },
     };
   } catch (error) {
-    deps.log?.(`[betting-plan] échec : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey)}`);
-    return { status: 502, body: { error: 'Le service de génération est indisponible pour le moment. Réessayez dans quelques instants.' } };
+    const detail = redact(error instanceof Error ? error.message : String(error), deps.apiKey);
+    deps.log?.(`[betting-plan] échec : ${detail}`);
+    return { status: 502, body: { error: planErrorMessage(error, detail) } };
   }
+}
+
+/** Message d'échec explicite du plan (privé) : délai, quota, refus du modèle, détail de l'API */
+export function planErrorMessage(error: unknown, detail: string): string {
+  const status = errorStatus(error);
+  const short = detail.replace(/\s+/g, ' ').slice(0, 160);
+  if (error instanceof Error && /délai/.test(error.message)) return 'Plan trop long à générer : Gemini n\'a pas répondu à temps. Réessayez ; l\'actualité déjà trouvée reste en cache.';
+  if (status === 429) return `Quota Gemini atteint (429). Détail : ${short}`;
+  if (status && status >= 400 && status < 500) return `Gemini a refusé la génération du plan (${status}). Détail : ${short}`;
+  return `Génération du plan indisponible${status ? ` (${status})` : ''}. Détail : ${short}`;
 }
