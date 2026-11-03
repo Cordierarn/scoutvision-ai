@@ -31,6 +31,8 @@ jobs:
     timeout-minutes: 110
     env:
       DATA_REPO: Cordierarn/PitchApi-big-5
+      # Fine-grained PAT limité à PitchApi-big-5 (releases privées) ; aussi lu par scripts/pull_data.sh
+      GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,32 +49,30 @@ jobs:
           pip install --quiet numpy pandas pyarrow scipy requests
           npm ci --ignore-scripts
 
+      - name: Vérification du secret
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::Le secret PITCHAPI_DATA_TOKEN n'est pas défini (Settings > Secrets and variables > Actions)."; exit 1; fi
+
       - name: Données ScoutVision (prévisions du pipeline et résultats)
-        env:
-          PITCHAPI_DATA_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
         run: npm run data:pull
 
-      - name: Archive précédente du Labo (release privée betting-odds)
-        env:
-          GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
+      - name: Amorce et archive précédente du Labo (release privée betting-odds)
+        # betting-seed.tar.gz : prévisions figées, résultats détaillés, variante, calibration, ajustements, publiés par
+        # update-data.yml (lundi et vendredi) ; betting-odds.tar.gz : archive de cotes, journal, historique des soirées
         run: |
           mkdir -p .research/betting
+          seed="$(gh api "repos/$DATA_REPO/releases/tags/betting-odds" -q '.assets[] | select(.name == "betting-seed.tar.gz") | .id' 2>/dev/null || true)"
+          if [ -z "$seed" ]; then echo "::error::betting-seed.tar.gz absent de la release betting-odds : lancer d'abord le workflow « Mise à jour des données ScoutVision »."; exit 1; fi
+          gh api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$seed" > betting-seed.tar.gz
+          tar -xzf betting-seed.tar.gz
           id="$(gh api "repos/$DATA_REPO/releases/tags/betting-odds" -q '.assets[] | select(.name == "betting-odds.tar.gz") | .id' 2>/dev/null || true)"
           if [ -n "$id" ]; then
             gh api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$id" > betting-odds.tar.gz
             tar -xzf betting-odds.tar.gz -C .research/betting
             echo "archive restaurée"
           else
-            echo "aucune archive : premier passage"
+            echo "aucune archive de cotes : premier passage"
           fi
-
-      - name: Résultats détaillés PitchAPI et artefacts de phase 2 (créés au premier passage)
-        run: |
-          cd scripts
-          python3 -m betting.results
-          if [ ! -f ../.research/betting/phase2/variant.json ]; then python3 -m betting.phase2 variant; fi
-          if [ ! -f ../.research/betting/phase2/calibration.json ]; then python3 -m betting.phase2 calibrate; fi
-          if [ ! -f ../.research/betting/phase2/adjustment.json ]; then python3 -m betting.adjust; fi
 
       - name: Cotes Winamax (rencontres, relevés à venir, historiques, vues, appariement)
         env:
@@ -103,18 +103,14 @@ jobs:
           python3 -m betting.product export
 
       - name: Publication de l'archive du Labo (release privée)
-        env:
-          GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
         run: |
           cd .research/betting
-          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product phase2 fixtures.parquet matches.parquet match_failures.parquet aliases.json quota.json results.parquet results_web.parquet markets_catalogue.json 2>/dev/null)
+          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json quota.json results_web.parquet markets_catalogue.json 2>/dev/null)
           cd ../..
           gh release view betting-odds --repo "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds --repo "$DATA_REPO" --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (cotes Winamax FR via OddsPapi, journal, historique des soirées), mise à jour par betting-odds.yml" --prerelease
           gh release upload betting-odds betting-odds.tar.gz --repo "$DATA_REPO" --clobber
 
       - name: Publication des suggestions dans l'archive de données du serveur
-        env:
-          GH_TOKEN: ${{ secrets.PITCHAPI_DATA_TOKEN }}
         run: |
           id="$(gh api "repos/$DATA_REPO/releases/tags/scoutvision-data" -q '.assets[] | select(.name == "scoutvision-data.tar.gz") | .id')"
           gh api -H "Accept: application/octet-stream" "repos/$DATA_REPO/releases/assets/$id" > scoutvision-data.tar.gz
