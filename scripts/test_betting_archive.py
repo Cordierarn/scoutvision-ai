@@ -65,6 +65,10 @@ class FlattenTests(unittest.TestCase):
         self.assertEqual(len(df), 1)
         self.assertEqual(df.iloc[0]["source"], "live")
         self.assertEqual(df.iloc[0]["created_at"], pd.Timestamp("2026-11-01T12:00:00Z"))
+        # relevé des matchs à venir : le prix est attesté à l'heure de l'appel, pas à son dernier changement
+        seen = archive.flatten_live(live, dt.datetime(2026, 11, 1, 12, 5, tzinfo=dt.timezone.utc), stamp="observed")
+        self.assertEqual(seen.iloc[0]["created_at"], pd.Timestamp("2026-11-01T12:05:00Z"))
+        self.assertEqual(seen.iloc[0]["price"], 2.3)
 
 
 class IdempotenceTests(unittest.TestCase):
