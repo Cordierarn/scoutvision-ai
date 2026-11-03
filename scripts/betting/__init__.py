@@ -16,9 +16,10 @@ BOOKMAKER = "winamax.fr"
 SPORT_ID = 10  # football chez OddsPapi
 
 # Tournois OddsPapi des compétitions ScoutVision (identifiants lus dans /v4/fixtures, phases 0 et 1)
-TOURNAMENTS: dict[str, int] = {"ENG": 17, "ESP": 8, "GER": 35, "ITA": 23, "FRA": 34, "ENG2": 18, "POR": 238, "NED": 37}
+TOURNAMENTS: dict[str, int] = {"ENG": 17, "ESP": 8, "GER": 35, "ITA": 23, "FRA": 34, "ENG2": 18, "POR": 238, "NED": 37,
+                               "UCL": 7, "UEL": 679, "UECL": 34480}
 BIG5 = ("ENG", "ESP", "GER", "ITA", "FRA")
-COMPETITIONS = tuple(TOURNAMENTS)  # périmètre de l'archive : Big 5, Championship, Liga Portugal, Eredivisie
+COMPETITIONS = tuple(TOURNAMENTS)  # périmètre de l'archive : Big 5, Championship, Liga Portugal, Eredivisie, coupes d'Europe
 
 ROOT = Path(__file__).resolve().parents[2]
 RESEARCH = ROOT / ".research" / "betting"
