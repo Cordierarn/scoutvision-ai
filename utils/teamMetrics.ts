@@ -134,10 +134,15 @@ export function styleReliability(matches: number | null | undefined, style: stri
 
 /**
  * Variance expliquée par les deux axes de la carte : ACP sur les 6 indicateurs centrés-réduits
- * de toutes les équipes-saisons (2 328 au moment de la mesure). Le pipeline ne l'exporte pas :
- * valeurs mesurées sur les données, contrôlées par teamMetrics.test.ts quand elles sont présentes.
+ * de toutes les équipes-saisons. Le pipeline l'exporte (index.models.stylePca) ; cette valeur
+ * ne sert qu'aux données préparées avant cet export. Contrôlée par teamMetrics.test.ts.
  */
-export const STYLE_PCA_VARIANCE = { pc1: 0.639, pc2: 0.242 } as const;   // données PitchAPI du 30/10/2026, 2 328 équipes-saisons
+export const STYLE_PCA_VARIANCE = { pc1: 0.61, pc2: 0.249 } as const;   // données PitchAPI du 04/11/2026, 4 277 équipes-saisons (75 compétitions)
+
+/** Part de variance des deux axes : celle du pipeline si l'index la donne, sinon la valeur mesurée ci-dessus */
+export function stylePcaVariance(fromIndex: { pc1: number; pc2: number } | null | undefined): { pc1: number; pc2: number } {
+  return fromIndex && Number.isFinite(fromIndex.pc1) && Number.isFinite(fromIndex.pc2) ? fromIndex : STYLE_PCA_VARIANCE;
+}
 
 export interface StylePoint {
   team: TeamStats;

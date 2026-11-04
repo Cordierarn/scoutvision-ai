@@ -208,5 +208,22 @@ class SeasonSimulationTest(unittest.TestCase):
         self.assertAlmostEqual(sum(r["pBottom3"] for r in rows), 3.0)
 
 
+class TeamStylesTests(unittest.TestCase):
+    def test_pca_variance_of_the_style_map_is_exported(self):
+        rng = np.random.default_rng(3)
+        base = rng.normal(size=(300, 1))
+        cols = [c for _, c, _ in models.STYLE_FEATURES]
+        x = np.hstack([base + 0.3 * rng.normal(size=(300, 1)) for _ in cols])        # un facteur commun
+        teams = pd.DataFrame(x, columns=cols)
+        teams.loc[0, cols[0]] = np.nan                                                 # équipe sans analytics
+        out, styles, pca = models.team_styles(teams)
+        self.assertEqual(pca["teamSeasons"], 299)
+        self.assertGreater(pca["pc1"], 0.8)                                            # le facteur commun domine
+        self.assertLessEqual(pca["pc1"] + pca["pc2"], 1.0)
+        self.assertGreaterEqual(pca["pc1"], pca["pc2"])
+        self.assertTrue(pd.isna(out.loc[0, "Style"]))
+        self.assertEqual(sum(s["teams"] for s in styles), 299)
+
+
 if __name__ == "__main__":
     unittest.main()

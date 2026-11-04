@@ -745,37 +745,49 @@ const realSeason = (s: string) => {
   return d.rows.map(r => Object.fromEntries(d.columns.map((c, i) => [c, r[i]])) as unknown as PlayerData);
 };
 
-describe('données réelles : formation et poste recherché', () => {
-  it.skipIf(!existsSync(lineupsDir('2025-26')))('2025-26 : les 48 écarts de poste de l\'audit, 15 suivent la formation, aucun piston ni milieu', () => {
-    const rows = realSeason('2025-26');
-    const asOf = new Date('2026-10-20');
-    const counts = new Map<string, number>();
-    let total = 0;
-    const known: string[] = [];
-    readdirSync(lineupsDir('2025-26')).forEach(f => {
-      const comp = f.replace('.json', '');
-      if (['UCL', 'UEL', 'UECL'].includes(comp)) return;
-      const file = JSON.parse(readFileSync(`${lineupsDir('2025-26')}/${f}`, 'utf8')) as Record<string, TeamLineups>;
-      const leagueAll = rows.filter(p => p.Competition === comp);
-      Object.entries(file).forEach(([teamId, lu]) => {
-        const teamRows = leagueAll.filter(p => p['Team ID'] === teamId);
-        const formation = orderFormations(lu)[0];
-        const sp = formation ? formationPositions(formation) : null;
-        if (!teamRows.length || !sp) return;
-        const eleven = placeEleven(formation.slots);
-        const before = slotDepth(eleven, teamRows);
-        const after = slotNeeds(eleven, teamRows, [], { curves: null, transfer: null }, null, asOf, sp);
-        before.forEach((b, i) => {
-          const slotPos = sp.get(b.placed.slot.slot)!;
-          if (!isOutOfPosition(b.position, slotPos)) return;
-          total++;
-          const moved = after[i].position === slotPos;
-          const key = `${b.position}→${slotPos}:${moved ? 'formation' : 'inchangé'}`;
-          counts.set(key, (counts.get(key) ?? 0) + 1);
-          if (moved) known.push(`${teamRows[0].Team}:${b.position}→${slotPos}`);
-        });
+// Championnats de l'audit du 20/10/2026 (avant l'ajout des tiers 4 et 5 de PitchAPI)
+const AUDIT_LEAGUES = new Set(['ENG', 'ESP', 'ITA', 'GER', 'FRA', 'ENG2', 'NED', 'POR', 'BEL', 'TUR', 'SCO', 'AUT', 'SUI', 'DEN', 'GRE',
+  'NOR', 'SWE', 'CZE', 'POL', 'CRO', 'SRB', 'ESP2', 'ITA2', 'GER2', 'FRA2', 'BRA', 'ARG', 'USA', 'MEX', 'KSA', 'JPN', 'KOR']);
+
+/** Écarts de poste (joueur hors de son poste dans l'onze de la formation) avant et après prise en compte de la formation */
+const positionGaps = (leagues: (comp: string) => boolean) => {
+  const rows = realSeason('2025-26');
+  const asOf = new Date('2026-10-20');
+  const counts = new Map<string, number>();
+  let total = 0;
+  const known: string[] = [];
+  readdirSync(lineupsDir('2025-26')).forEach(f => {
+    const comp = f.replace('.json', '');
+    if (['UCL', 'UEL', 'UECL'].includes(comp) || !leagues(comp)) return;
+    const file = JSON.parse(readFileSync(`${lineupsDir('2025-26')}/${f}`, 'utf8')) as Record<string, TeamLineups>;
+    // Poste « GK » d'un joueur de champ (groupe DEF/MID/FWD) : erreur de la source, corrigée dans
+    // l'agrégation de PitchApi-big-5 (docs/qualite.md, section 41) ; écartée en attendant sa republication
+    const leagueAll = rows.filter(p => p.Competition === comp && (p.Position === 'GK') === (p['Position group'] === 'GK'));
+    Object.entries(file).forEach(([teamId, lu]) => {
+      const teamRows = leagueAll.filter(p => p['Team ID'] === teamId);
+      const formation = orderFormations(lu)[0];
+      const sp = formation ? formationPositions(formation) : null;
+      if (!teamRows.length || !sp) return;
+      const eleven = placeEleven(formation.slots);
+      const before = slotDepth(eleven, teamRows);
+      const after = slotNeeds(eleven, teamRows, [], { curves: null, transfer: null }, null, asOf, sp);
+      before.forEach((b, i) => {
+        const slotPos = sp.get(b.placed.slot.slot)!;
+        if (!isOutOfPosition(b.position, slotPos)) return;
+        total++;
+        const moved = after[i].position === slotPos;
+        const key = `${b.position}→${slotPos}:${moved ? 'formation' : 'inchangé'}`;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+        if (moved) known.push(`${teamRows[0].Team}:${b.position}→${slotPos}`);
       });
     });
+  });
+  return { total, counts, known };
+};
+
+describe('données réelles : formation et poste recherché', () => {
+  it.skipIf(!existsSync(lineupsDir('2025-26')))('2025-26, championnats de l\'audit : les 48 écarts de poste, 15 suivent la formation, aucun piston ni milieu', () => {
+    const { total, counts, known } = positionGaps(c => AUDIT_LEAGUES.has(c));
     expect(total).toBe(48);
     const moved = [...counts].filter(([k]) => k.endsWith('formation'));
     const kept = [...counts].filter(([k]) => k.endsWith('inchangé'));
@@ -787,6 +799,14 @@ describe('données réelles : formation et poste recherché', () => {
     expect(known).toContain('Sunderland:FB→W');
     expect(known).toContain('FC Dallas:W→FB');
   }, 60_000);
+
+  it.skipIf(!existsSync(lineupsDir('2025-26')))('2025-26, toutes les ligues : jamais de gardien dans le champ ni de joueur de champ dans les cages', () => {
+    // Les bascules entre lignes de champ dépendent des effectifs (règles de l'audit ci-dessus) ;
+    // le passage par le poste de gardien, lui, est toujours une erreur.
+    const { total, counts } = positionGaps(() => true);
+    expect(total).toBeGreaterThanOrEqual(48);
+    [...counts].filter(([k]) => k.endsWith('formation')).forEach(([k]) => expect(k.split(':')[0]).not.toMatch(/GK/));
+  }, 120_000);
 
   it.skipIf(!existsSync(`${lineupsDir('2026-27')}/SRB.json`))('Crvena Zvezda 2026-27 : 3-2-4-1 insuffisamment renseignée, besoins sur 4-1-4-1', () => {
     const rows = realSeason('2026-27');

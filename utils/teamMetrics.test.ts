@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { TeamStats } from '../types';
 import { percentileRank, teamRank } from './recruitment';
 import {
-  STYLE_METRICS, STYLE_MIN_MATCHES, STYLE_PCA_VARIANCE, styleMapPopulation, STYLE_TREND_MATCHES, TEAM_METRICS, styleReliability, teamCohort, teamMetric, teamMetricRank,
+  STYLE_METRICS, STYLE_MIN_MATCHES, STYLE_PCA_VARIANCE, styleMapPopulation, stylePcaVariance, STYLE_TREND_MATCHES, TEAM_METRICS, styleReliability, teamCohort, teamMetric, teamMetricRank,
   teamMetricRanks, teamTotals, teamValue,
 } from './teamMetrics';
 
@@ -133,8 +133,19 @@ describe.skipIf(!existsSync(TEAMS_DIR))('variance expliquée de la carte des sty
       for (let a = 0; a < k; a++) for (let b = 0; b < k; b++) c[a][b] -= lambda * v[a] * v[b];
     }
     const total = k;
-    expect(Math.abs(eig[0] / total - STYLE_PCA_VARIANCE.pc1)).toBeLessThan(0.005);
-    expect(Math.abs(eig[1] / total - STYLE_PCA_VARIANCE.pc2)).toBeLessThan(0.005);
+    // Valeur affichée : celle exportée par le pipeline (index.models.stylePca), sinon la constante mesurée
+    const index = existsSync('public/data/index.json') ? JSON.parse(readFileSync('public/data/index.json', 'utf8')) : null;
+    const shown = stylePcaVariance(index?.models?.stylePca);
+    expect(Math.abs(eig[0] / total - shown.pc1)).toBeLessThan(0.005);
+    expect(Math.abs(eig[1] / total - shown.pc2)).toBeLessThan(0.005);
+  });
+});
+
+describe('part de variance affichée sous la carte des styles', () => {
+  it("celle de l'index quand le pipeline l'exporte, sinon la valeur mesurée", () => {
+    expect(stylePcaVariance({ pc1: 0.6, pc2: 0.25 })).toEqual({ pc1: 0.6, pc2: 0.25 });
+    expect(stylePcaVariance(undefined)).toBe(STYLE_PCA_VARIANCE);
+    expect(stylePcaVariance({ pc1: Number.NaN, pc2: 0.2 })).toBe(STYLE_PCA_VARIANCE);
   });
 });
 

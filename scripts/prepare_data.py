@@ -51,6 +51,7 @@ import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 import market
@@ -887,13 +888,31 @@ def fetch_market() -> Path | None:
     return download(MARKET_RELEASE, "market_value.parquet", asset["size"])
 
 
+# Transfermarkt n'affiche pas de valeur sous 10 k€ : une valeur plus petite vient d'une unité mal lue
+# (« 150 Tsd. € » lu 150 €), elle est traitée comme absente plutôt que d'entrer dans l'app et le modèle.
+MIN_MARKET_VALUE = 10_000
+
+
+def sanitize_market(market: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """Valeurs implausibles (sous MIN_MARKET_VALUE) remplacées par NaN ; renvoie aussi le masque des lignes écartées."""
+    market = market.copy()
+    bad = market["market_value_eur"].notna() & (market["market_value_eur"] < MIN_MARKET_VALUE)
+    market.loc[bad, "market_value_eur"] = np.nan
+    return market, bad
+
+
 def read_market(path: Path | None) -> pd.DataFrame | None:
     if path is None:
         return None
     market = pd.read_parquet(path)
     market = market.dropna(subset=["player_id"])
     market["_season"] = market["season"].map(app_season)
+    market, bad = sanitize_market(market)
     print(f"Valeurs Transfermarkt : {len(market)} lignes ({path})")
+    if bad.any():
+        leagues = market.loc[bad, "league_key"].value_counts().index[:8] if "league_key" in market else []
+        print(f"  {int(bad.sum())} valeur(s) sous {MIN_MARKET_VALUE} € ignorées (unité mal lue par market-values)"
+              + (f" : surtout {', '.join(leagues)}" if len(leagues) else ""))
     return market
 
 
@@ -1094,8 +1113,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Styles de jeu des équipes (ACP + k-means), reportés sur les joueurs
     styles_meta: list[dict] = []
+    style_pca: dict = {}
     if not all_teams.empty:
-        team_style, styles_meta = models.team_styles(all_teams)
+        team_style, styles_meta, style_pca = models.team_styles(all_teams)
         all_teams = pd.concat([all_teams, team_style], axis=1)
         style_map = all_teams.set_index(["team_id", "competition", "_app_season"])["Style"]
         style_map = style_map[~style_map.index.duplicated()]
@@ -1173,6 +1193,7 @@ def main(argv: list[str] | None = None) -> int:
         "models": {
             "valuation": valuation_meta,
             "styles": styles_meta,
+            "stylePca": style_pca,
             "ageCurvePairs": curves["pairs"],
         },
     })
