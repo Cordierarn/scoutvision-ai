@@ -48,6 +48,7 @@ export interface TeamStyleInfo {
 export interface ModelsInfo {
   valuation?: { players: number; r2_cv: number; median_error_factor: number; folds: number };
   styles?: TeamStyleInfo[];
+  stylePca?: { pc1: number; pc2: number; teamSeasons: number };   // part de variance des axes de la carte des styles
   ageCurvePairs?: number;
 }
 

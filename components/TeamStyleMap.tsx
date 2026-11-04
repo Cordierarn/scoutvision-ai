@@ -12,7 +12,7 @@ import { TeamStats } from '../types';
 import { useElementWidth } from './Pitch';
 import { dataLoader } from '../services/dataLoader';
 import { styleLabel } from '../utils/labels';
-import { STYLE_MIN_MATCHES, STYLE_PCA_VARIANCE, STYLE_TREND_MATCHES, styleMapPopulation, styleReliability, teamValue } from '../utils/teamMetrics';
+import { STYLE_MIN_MATCHES, STYLE_TREND_MATCHES, styleMapPopulation, stylePcaVariance, styleReliability, teamValue } from '../utils/teamMetrics';
 
 const PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const PCT0 = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 0 });
@@ -52,7 +52,9 @@ const seasonTag = (season: string) => season.replace(/^20(\d{2})-(\d{2})$/, '$1-
  */
 const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?: boolean }> = ({ team, teams, allSeasons = false }) => {
   const style = team.Style as string | undefined;
-  const profile = dataLoader.getCachedIndex()?.models?.styles?.find(s => s.name === style)?.profile;
+  const models = dataLoader.getCachedIndex()?.models;
+  const profile = models?.styles?.find(s => s.name === style)?.profile;
+  const pca = stylePcaVariance(models?.stylePca);
   const matches = teamValue(team, 'Matches');
   const reliability = styleReliability(matches, style);
   const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
@@ -82,7 +84,7 @@ const TeamStyleMap: React.FC<{ team: TeamStats; teams: TeamStats[]; allSeasons?:
         </p>
       )}
       <p className="text-xs text-ink-3 mb-1">
-        Axe horizontal : contrôle du jeu (PC1, {PCT.format(STYLE_PCA_VARIANCE.pc1)} de la variance) ; axe vertical : pressing et verticalité (PC2, {PCT.format(STYLE_PCA_VARIANCE.pc2)}) ; total : {PCT0.format(STYLE_PCA_VARIANCE.pc1 + STYLE_PCA_VARIANCE.pc2)}.
+        Axe horizontal : contrôle du jeu (PC1, {PCT.format(pca.pc1)} de la variance) ; axe vertical : pressing et verticalité (PC2, {PCT.format(pca.pc2)}) ; total : {PCT0.format(pca.pc1 + pca.pc2)}.
       </p>
       <p className="text-xs text-ink-3 mb-4">
         Six styles issus d'un k-means sur la possession, le territoire, le pressing (PPDA), la hauteur de ligne, le jeu direct et la construction, ajusté sur toutes les équipes-saisons de toutes les compétitions. Un style décrit une saison ; il change pour près d'un club sur deux d'une saison à l'autre.

@@ -68,8 +68,9 @@ def _style_name(z: dict[str, float]) -> str:
     return "Balanced"
 
 
-def team_styles(teams: pd.DataFrame, k: int = 6) -> tuple[pd.DataFrame, list[dict]]:
-    """Style de chaque équipe-saison et coordonnées sur les deux premiers axes de l'ACP.
+def team_styles(teams: pd.DataFrame, k: int = 6) -> tuple[pd.DataFrame, list[dict], dict]:
+    """Style de chaque équipe-saison, coordonnées sur les deux premiers axes de l'ACP et part de
+    variance de ces deux axes (affichée sous la carte des styles).
 
     Ajusté sur toutes les équipes-saisons à la fois : un même style garde le même nom
     d'une saison et d'une compétition à l'autre. Les indicateurs sont centrés-réduits
@@ -90,7 +91,9 @@ def team_styles(teams: pd.DataFrame, k: int = 6) -> tuple[pd.DataFrame, list[dic
             names[i] = f"{n} ({seen[n]})"
 
     # ACP (SVD) : deux axes pour la carte des styles
-    _, _, vt = np.linalg.svd(x, full_matrices=False)
+    _, sv, vt = np.linalg.svd(x, full_matrices=False)
+    explained = sv ** 2 / (sv ** 2).sum()
+    pca = {"pc1": round(float(explained[0]), 3), "pc2": round(float(explained[1]), 3), "teamSeasons": int(ok.sum())}
     coords = x @ vt[:2].T
     # Orientation lisible : axe 1 croît avec la possession, axe 2 avec le pressing
     for a, feat in enumerate(("possession", "pressing")):
@@ -105,7 +108,7 @@ def team_styles(teams: pd.DataFrame, k: int = 6) -> tuple[pd.DataFrame, list[dic
     styles = [{"name": names[j], "teams": int((labels == j).sum()),
                "profile": {n: round(float(v), 2) for (n, _, _), v in zip(STYLE_FEATURES, centers[j])}}
               for j in range(k)]
-    return out, styles
+    return out, styles, pca
 
 
 # ============================================

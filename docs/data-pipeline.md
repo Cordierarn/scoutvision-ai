@@ -68,7 +68,12 @@ presets and scripts of `main` decide what is published.
    `python -m pitchapi_big5 market-values`) lives in the `scoutvision-data`
    release; `prepare_data.py` reads it automatically. To refresh it:
    `gh release upload scoutvision-data data/external/transfermarkt/market_value.parquet --clobber`
-   (from PitchApi-big-5).
+   (from PitchApi-big-5). Values under €10k are treated as missing: Transfermarkt never shows
+   one, so they come from a misread unit (`150 Tsd. €` read as €150). The log of
+   *Préparation des données* counts them per league.
+4. The *Publication* step keeps the betting lab suggestions (`forecast/suggestions/`) of the
+   archive already online: `betting-odds.yml` adds them, and a data update would otherwise
+   remove them until the lab's next run.
 
 ### Optional: trigger right after the PitchAPI update
 

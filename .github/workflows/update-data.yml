@@ -69,7 +69,7 @@ jobs:
           cd scripts
           python3 -m backtest.build --download-odds
           python3 -m backtest.run_models --phase all
-          python3 -m backtest.market_benchmark || echo "benchmark marché non calculé (cotes indisponibles) : replays sans référence marché"
+          python3 -m backtest.market_benchmark --odds-dir ../.cache/pitchapi/football-data || echo "benchmark marché non calculé (cotes indisponibles) : replays sans référence marché"
           python3 -m backtest.season_replay
           python3 -m backtest.export_replays
 
@@ -87,7 +87,13 @@ jobs:
           gh release upload betting-odds "$RUNNER_TEMP/betting-seed.tar.gz" -R "$DATA_REPO" --clobber
 
       - name: Publication dans la release privée
+        # Les suggestions du Labo paris (forecast/suggestions) sont ajoutées à l'archive par betting-odds.yml :
+        # on reprend celles de l'archive en ligne pour ne pas les effacer jusqu'au prochain passage du Labo.
         run: |
+          if gh release download "$DATA_RELEASE" -R "$DATA_REPO" -p scoutvision-data.tar.gz -D "$RUNNER_TEMP/previous" --clobber 2>/dev/null; then
+            tar -xzf "$RUNNER_TEMP/previous/scoutvision-data.tar.gz" -C public/data --wildcards "*forecast/suggestions/*" 2>/dev/null \
+              && echo "Suggestions du Labo paris reprises de l'archive en ligne" || echo "Pas de suggestions du Labo paris dans l'archive en ligne"
+          fi
           tar -czf "$RUNNER_TEMP/scoutvision-data.tar.gz" -C public/data .
           if ! gh release view "$DATA_RELEASE" -R "$DATA_REPO" >/dev/null 2>&1; then
             gh release create "$DATA_RELEASE" -R "$DATA_REPO" --latest=false \
