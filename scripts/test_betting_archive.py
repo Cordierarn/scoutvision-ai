@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from betting import archive
+from betting import archive, fetch
 
 KO = "2026-11-01T15:00:00.000Z"
 
@@ -131,3 +131,20 @@ class ViewsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaleFixturesTests(unittest.TestCase):
+    def test_fixtures_without_a_recent_winamax_snapshot_in_the_window_are_selected(self):
+        now = pd.Timestamp("2026-11-05T14:52:00Z")
+        fx = pd.DataFrame([
+            {"fixture_id": "fresh", "competition": "ENG", "season": "2026-27", "status_id": 0, "start_time": now + pd.Timedelta(hours=30)},
+            {"fixture_id": "stale", "competition": "ESP", "season": "2026-27", "status_id": 0, "start_time": now + pd.Timedelta(hours=72)},
+            {"fixture_id": "never", "competition": "FRA", "season": "2026-27", "status_id": 0, "start_time": now + pd.Timedelta(days=5)},
+            {"fixture_id": "far", "competition": "FRA", "season": "2026-27", "status_id": 0, "start_time": now + pd.Timedelta(days=9)},
+            {"fixture_id": "played", "competition": "ENG", "season": "2026-27", "status_id": 2, "start_time": now - pd.Timedelta(hours=3)},
+        ])
+        last = pd.Series({"fresh": now - pd.Timedelta(minutes=1), "stale": now - pd.Timedelta(hours=49.5), "far": now - pd.Timedelta(days=3)})
+        todo = fetch.stale_fixtures(fx, last, now, days=7, hours=2)
+        self.assertEqual(list(todo["fixture_id"]), ["stale", "never"])        # triées par coup d'envoi ; hors fenêtre et jouées ignorées
+        self.assertTrue(fetch.stale_fixtures(fx, last, now, days=7, hours=60).query("fixture_id == 'stale'").empty)
+        self.assertEqual(list(fetch.stale_fixtures(fx, pd.Series(dtype="datetime64[ns, UTC]"), now, 7, 2)["fixture_id"]), ["fresh", "stale", "never"])

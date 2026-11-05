@@ -125,6 +125,8 @@ def evaluate_candidates(sims: Simulated, outcomes: list[dict], kickoff: dt.datet
                       group=dedupe_group(spec), label=describe(spec, o.get("home", "Domicile"), o.get("away", "Extérieur")))
         if odds < MIN_ODDS:
             c.excluded = "cote_minimale"
+        elif o.get("withdrawn"):
+            c.excluded = "marche_retire"
         elif o["odds_at"] is None or (now - o["odds_at"]) > MAX_AGE or o["odds_at"] >= kickoff:
             c.excluded = "cote_ancienne"
         elif (spec.family, competition) in excluded_families:

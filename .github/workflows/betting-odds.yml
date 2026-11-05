@@ -92,7 +92,7 @@ jobs:
             python3 -m betting.fetch fixtures --from "$(date -u -d '-1 day' +%F)" --to "$(date -u -d '+9 days' +%F)"
           fi
           # cotes courantes des matchs à venir : un appel par tournoi (quelques secondes)
-          python3 -m betting.fetch upcoming --days 7
+          python3 -m betting.fetch upcoming --days 7 --refresh-stale 2 --max-requests 60
           # historique des matchs terminés : environ 6,5 s par match (limite d'OddsPapi), donc le matin seulement ;
           # les suggestions de l'après-midi n'en ont pas besoin
           if [ "$FULL" = 1 ]; then python3 -m betting.fetch history --max-requests 400; fi

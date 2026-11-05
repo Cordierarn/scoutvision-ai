@@ -16,7 +16,7 @@ Règles d'exclusion (code → sens) :
                           quand la limite est inconnue ;
 - favori_surperformant  : favori coté sous 1,55 dont l'équipe a nettement dépassé ses xG (OPD) sur ses
                           derniers matchs ;
-- cote_minimale, cote_ancienne, famille_mal_calibree, probabilite_indisponible : règles antérieures,
+- cote_minimale, cote_ancienne, marche_retire, famille_mal_calibree, probabilite_indisponible : règles antérieures,
   conservées (suggest.evaluate_candidates).
 
 Avertissements (n'empêchent pas le pari, abaissent le plafond de mise) :
@@ -61,6 +61,7 @@ BLOCK_LABELS = {
     "favori_surperformant": "favori qui vient de dépasser nettement ses xG",
     "cote_minimale": "cote sous le minimum",
     "cote_ancienne": "cote trop ancienne",
+    "marche_retire": "issue absente du dernier relevé Winamax (marché retiré ou ligne déplacée)",
     "famille_mal_calibree": "famille mal calibrée dans cette compétition",
     "probabilite_indisponible": "probabilité du modèle indisponible",
 }

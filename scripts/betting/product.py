@@ -85,6 +85,9 @@ def competition_half(results: pd.DataFrame, season: str) -> dict[str, float]:
     return out
 
 
+WITHDRAWN_TOLERANCE = pd.Timedelta(minutes=5)     # un passage de relevé dure quelques secondes par rencontre
+
+
 def outcomes_from_snapshots(snaps: pd.DataFrame, cat, before: pd.Timestamp, home: str, away: str) -> list[dict]:
     """Dernier relevé Winamax strictement antérieur à `before` pour chaque issue d'un match, en dicts pour
     `suggest` (les bookmakers de référence restent dans `snaps` pour le coupe-circuit)."""
@@ -92,6 +95,7 @@ def outcomes_from_snapshots(snaps: pd.DataFrame, cat, before: pd.Timestamp, home
     if s.empty:
         return []
     last = s.groupby(["market_id", "outcome_id", "player_id"], dropna=False).last().reset_index()
+    latest_pull = s["created_at"].max()                 # une issue absente du dernier passage n'est plus proposée par Winamax
     out = []
     for r in last.itertuples(index=False):
         market = cat.get(int(r.market_id))
@@ -101,7 +105,7 @@ def outcomes_from_snapshots(snaps: pd.DataFrame, cat, before: pd.Timestamp, home
         if spec is None:
             continue
         out.append({"market_id": int(r.market_id), "outcome_id": int(r.outcome_id), "spec": spec, "odds": float(r.price), "odds_at": r.created_at.to_pydatetime(),
-                    "home": home, "away": away})
+                    "home": home, "away": away, "withdrawn": bool(r.created_at < latest_pull - WITHDRAWN_TOLERANCE)})
     return out
 
 
@@ -403,7 +407,14 @@ def upcoming_suggestions(now: dt.datetime | None = None, days: int = UPCOMING_DA
         if not outcomes or m.get("xgHome") is None or m.get("xgAway") is None:
             out.append(entry); continue
         latest = max(o["odds_at"] for o in outcomes)
-        entry.update({"status": "ok", "fixtureId": str(fixture_id), "kickoff": kickoff.isoformat(), "oddsAt": latest.isoformat(), "oddsStale": (pd.Timestamp(now) - pd.Timestamp(latest)) > sg.MAX_AGE})
+        stale = (pd.Timestamp(now) - pd.Timestamp(latest)) > sg.MAX_AGE
+        entry.update({"fixtureId": str(fixture_id), "kickoff": kickoff.isoformat(), "oddsAt": latest.isoformat(), "oddsStale": bool(stale)})
+        if stale:
+            # cotes non rafraîchies depuis plus de MAX_AGE : rien n'est évalué (une cote périmée n'est pas une cote) ; le
+            # relevé match par match de `fetch upcoming --refresh-stale` les rattrape au passage suivant
+            entry["status"] = "no_odds"
+            out.append(entry); continue
+        entry["status"] = "ok"
         hid, aid = teams.get(m["home"]), teams.get(m["away"])
         feats = adjust.features_as_of(results, hid, aid, m["competition"], pd.Timestamp(now), adj.half_life) if hid and aid else None
         xh, xa = adjust.adjusted_xg({"expected_goals_home": m["xgHome"], "expected_goals_away": m["xgAway"]}, feats, adj)
