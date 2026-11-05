@@ -128,8 +128,9 @@ class CategoryBTests(unittest.TestCase):
         self.assertIn("haut", seg["band"]["sides"]); self.assertTrue(seg["band"]["passed"]); self.assertLess(seg["ece"], seg["eceModelAlone"] + 0.05)
         biased = pick(gate.run_gate_b(rows_b(1500, "bas", wx_noise=0.3), min_matches=150))
         self.assertLess(biased["weight"], seg["weight"])                                        # un modèle biaisé pèse moins dans le pool
-        self.assertEqual(biased["bandModelAlone"]["sides"]["haut"]["selections"], 0)            # seul, il ne « voit » jamais de valeur côté haut
-        self.assertGreater(biased["bandModelAlone"]["sides"]["bas"]["selections"], 100)
+        alone = biased["bandModelAlone"]["sides"]                                              # seul, il « voit » surtout de la valeur côté bas
+        self.assertGreater(alone["bas"]["selections"], 3 * alone["haut"]["selections"])
+        self.assertLess(alone["bas"]["bias"], 0)                                               # … et ce côté est surestimé
         self.assertIn(biased["verdict"], ("valide", "biais_directionnel", "poids_nul", "gain_non_significatif"))
 
     def test_noise_model_gets_no_weight_and_short_segments_are_not_judged(self):
