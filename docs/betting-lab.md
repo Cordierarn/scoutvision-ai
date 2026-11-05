@@ -344,7 +344,7 @@ le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est ar
 10 h, 14 h et 17 h UTC) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
 les ligues principales (étape 2).
 
-## Étape 2 du moteur quantitatif : porte de validation par segment (5 novembre 2026)
+## Étape 2 du moteur quantitatif : porte de validation par segment, catégorie A (5 novembre 2026)
 
 Question posée : la simulation apporte-t-elle, quelque part, une information que la clôture Pinnacle n'a
 pas déjà ? Si non, le poids w du modèle dans la probabilité de référence reste 0 et le coupe-circuit ne
@@ -446,6 +446,93 @@ des « issues évaluées » sans rien analyser. Deux corrections :
 - à l'export, une rencontre dont le dernier relevé Winamax a plus de 2 h n'est plus évaluée (statut sans
   cotes, `oddsStale`), et une issue absente du dernier passage est exclue comme `marche_retire` (ligne
   déplacée ou marché retiré) au lieu de compter comme une cote périmée.
+
+## Lots 1 et 2 : loi des buts et porte de validation universelle (5 novembre 2026)
+
+### Lot 1 : le diagnostic contredit l'hypothèse de surdispersion
+
+Hypothèse de départ : la simulation de Poisson sous-estime les gros scores et fabrique le signal « Moins ». Mesure
+sur 2025-26 (2 906 matchs, buts attendus figés avant le match, variante Dixon-Coles figée) : P(≥ 4 buts) prédite
+29,7 % contre 29,8 % observée ; variance des totaux observés 2,63 pour une moyenne de 2,77, soit un rapport
+variance / moyenne de 0,85 à 0,98 selon la ligue (1,23 en Ligue 1 seulement) : les totaux sont **sous-dispersés**.
+Une binomiale négative, même à fragilité gamma partagée entre les deux équipes (α de 0,02 à 0,18), dégrade toutes
+les vraisemblances hors échantillon ; la littérature récente dit la même chose ([Sarmanov / Dixon-Coles à marginales
+négatives binomiales, JRSS-C 2025](https://www.ebsco.com/articles/mathematics/48178df0-c5e3-5d06-ac05-8b88421e1443/extending-the-dixon-and-coles-model-an-application-to-women-s-football-data),
+[comparaisons Poisson / Dixon-Coles / binomiale négative](https://penaltyblog.readthedocs.io/en/latest/models/overview.html),
+[Weibull count et copule, Boshnakov et al. 2017](https://econpapers.repec.org/RePEc:eee:intfor:v:33:y:2017:i:2:p:458-466)).
+
+Les deux défauts réels, mesurés sur 2024-25 et 2025-26 :
+
+- **les buts attendus sont trop étalés** : pente des buts réels sur les buts attendus 0,84 (2024-25) et 0,76
+  (2025-26) ; les matchs annoncés à 2,16 buts en font 2,39, ceux annoncés à 3,51 en font 3,41. C'est exactement le
+  mécanisme du « Moins » : le modèle croit voir des matchs fermés qui ne le sont pas ;
+- **la distribution est trop plate** : trop de 0 et 1 but prédits (24,7 % contre 22,7 % observés), pas assez de 3 et
+  4 (36,2 % contre 40,0 %).
+
+Correction retenue (`simulate.py`, variante `compoisson`, choisie par `phase2.choose_variant` sur la vraisemblance
+du score exact : ajustée sur 2024-25, choisie sur 2025-26, figée) : rétrécissement du total attendu vers la moyenne
+de la saison d'ajustement à supériorité constante (`shrink` 0,85), marginales de Conway-Maxwell-Poisson
+(`nu` 1,15, sous-dispersion), Dixon-Coles (`rho` −0,02).
+
+| Log-loss hors échantillon (2025-26) | Dixon-Coles (avant) | Binomiale négative | compoisson (retenue) |
+| --- | --- | --- | --- |
+| score exact | 2,8833 | 2,8841 | **2,8775** |
+| 1N2 | 1,0013 | 1,0020 | **1,0000** |
+| plus/moins 1,5 · 2,5 · 3,5 · 4,5 | 0,5287 · 0,6829 · 0,5976 · 0,3872 | 0,5291 · 0,6829 · 0,5976 · 0,3872 | **0,5272 · 0,6813 · 0,5970 · 0,3861** |
+| les deux équipes marquent | 0,6848 | 0,6852 | **0,6830** |
+| totaux 0 · 1 · 2 · 3 · 4 prédits (observés 6,2 · 16,5 · 23,8 · 23,7 · 16,2 %) | 7,3 · 17,4 · 24,2 · 21,4 · 14,8 | 7,0 · 18,1 · 23,9 · 21,4 · 14,7 | **6,2 · 17,0 · 24,9 · 22,6 · 15,3** |
+
+Toutes les métriques s'améliorent, modestement : la loi des buts n'était pas le cœur du problème.
+
+**Le biais « Moins » face à Winamax ne vient pas de la loi des buts.** Sur les 705 matchs joués de 2026-27 avec
+clôture Winamax, parmi les issues plus/moins (demi-lignes) que le modèle seul jugerait rentables (espérance ≥ 4 %) :
+
+| Modèle seul | Sélections « Moins » / « Plus » | Réussite des « Moins » (probabilité modèle) | Rendement |
+| --- | --- | --- | --- |
+| Dixon-Coles (avant) | 301 / 38 | 29,6 % (47,1 %) | −36 % |
+| compoisson (après) | 300 / 25 | 36,3 % (55,8 %) | −34 % |
+
+Quand le modèle s'écarte de Winamax, Winamax a raison. Seul le pool avec la probabilité dé-viguée du marché (lot 2)
+peut arrêter ces sélections ; une meilleure loi des buts ne le pouvait pas.
+
+### Lot 2 : porte de validation universelle (`gate.py` v2)
+
+Trois catégories (A : référence sharp, clôture Pinnacle de football-data ; B : référence Winamax dé-viguée par Shin
+sur le dernier relevé complet avant le coup d'envoi, archive 2026-27, 60 % chronologiques pour choisir w et 40 %
+pour juger ; C : fréquence de base de la saison de validation) et trois portes hors échantillon : gain de log-loss du
+pool avec w > 0 et IC 90 % positif, porte de calibration par bande (aucun côté « haut » ni « bas » des sélections
+que prendrait le coupe-circuit à la cote Winamax ne doit être significativement surestimé), marge de calibration
+(ECE à 10 classes) enregistrée dans `pool_weights.json` et ajoutée au seuil d'espérance du coupe-circuit
+(`EV_min = EV_base + ECE`, `circuit.ev_threshold`). Le produit lit poids, marge et référence par segment
+(`sharp.PoolWeights`) ; pour un segment B validé, la référence du coupe-circuit devient le marché Winamax complet.
+
+Verdicts réels (5 novembre 2026) :
+
+| Catégorie | Segment (toutes compétitions) | Validation / test | w | Gain hors échantillon | ECE pool | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | résultat (1N2) | 2 891 / 1 450 | 0,00 | — | 0,013 | poids nul |
+| A | plus/moins 2,5 | 2 875 / 1 442 | 0,00 | — | 0,020 | poids nul |
+| B | plus/moins (toutes lignes) | 422 / 282 | 0,00 | — | 0,016 | poids nul |
+| B | plus/moins équipe | 422 / 282 | 0,00 | — | 0,024 | poids nul |
+| B | BTTS / clean sheet | 422 / 282 | 0,00 | — | 0,025 | poids nul |
+| B | gagne sans encaisser | 422 / 282 | 0,00 | — | 0,007 | poids nul |
+| C | score exact | 2 897 / 2 906 | 1,00 | +0,115 [+0,101 ; +0,129] | 0,000 | valide (hors produit) |
+| C | marge de victoire | 2 897 / 2 906 | 1,00 | +0,101 [+0,088 ; +0,114] | 0,004 | valide (hors produit) |
+| C | nombre de buts | 2 897 / 2 906 | 1,00 | +0,020 [+0,013 ; +0,027] | 0,001 | valide (hors produit) |
+
+Par compétition, aucun segment B n'atteint 150 matchs par partie (de 33 à 91 en validation) : non jugés. Les
+segments A par compétition restent à poids nul ou à gain négatif (ENG, ENG2, FRA), comme à l'étape 2.
+
+Ce que dit la porte de bande, modèle seul, sur la partie test de 2026-27 : plus/moins 382 sélections « bas »
+contre 19 « haut », réussite 44,5 % pour une probabilité annoncée de 59,0 % ; plus/moins équipe 223 contre 54 ;
+BTTS 28 « oui » réussis à 7 % pour 23 % annoncés. Le modèle seul est surestimé sur tous les côtés qu'il choisit ;
+avec w = 0 le pool ne sélectionne rien. **Aucun segment validé** : le produit reste à w = 0 et à la référence
+sharp. La catégorie C confirme seulement que la simulation bat la fréquence de base, ce qui ne suffit pas à battre
+un bookmaker.
+
+Relecture prévue : fin 2025-26 pour la catégorie A (GER, NED), et chaque semaine pour la catégorie B à mesure que
+l'archive 2026-27 grandit (150 matchs par partie et par compétition vers février 2027). La porte tourne dans
+`betting-odds.yml` avant les suggestions, `update-data.yml` la recalcule sans la catégorie B (archive absente).
 
 ## Phases suivantes
 

@@ -8,7 +8,8 @@ figées ; le LLM ne fait que commenter le verdict.
 
 Règles d'exclusion (code → sens) :
 - reference_absente     : aucun marché complet chez Pinnacle ni Betfair Exchange pour cette issue ;
-- ev_insuffisant        : EV < 2,5 % (handicap asiatique, plus/moins) ou < 4 % (autres marchés) ;
+- ev_insuffisant        : EV < 2,5 % (handicap asiatique, plus/moins) ou < 4 % (autres marchés), seuil relevé de l'erreur de
+                          calibration hors échantillon du segment (ECE, porte de validation) : EV_min = EV_base + ECE ;
 - winner_curse          : EV > 20 %, ou écart p_ref − p_sharp > 15 points : plus probablement une donnée
                           non observée qu'une erreur du marché (« anomalie suspecte ») ;
 - sharp_contraire       : la probabilité sharp de la sélection a baissé depuis le relevé de référence avec
@@ -86,6 +87,7 @@ class Assessment:
     sharp_at: str | None = None
     sharp_overround: float | None = None
     move: dict | None = None
+    ev_min: float | None = None          # seuil d'espérance exigé (base de la famille + marge de calibration du segment)
 
     @property
     def verdict(self) -> str:
@@ -120,16 +122,18 @@ def stake_cap(odds: float, dependency: bool) -> float:
     return cap * (DEPENDENCY_CAP_FACTOR if dependency else 1.0)
 
 
-def ev_threshold(family: str) -> float:
-    return EV_MIN_LOW_MARGIN if family in LOW_MARGIN_FAMILIES else EV_MIN
+def ev_threshold(family: str, margin: float = 0.0) -> float:
+    """Seuil d'espérance : base de la famille + marge de calibration du segment (ECE hors échantillon, porte de validation)."""
+    return (EV_MIN_LOW_MARGIN if family in LOW_MARGIN_FAMILIES else EV_MIN) + max(0.0, float(margin))
 
 
 def assess(p_model: float, odds: float, family: str, spec: mk.Spec, reference: Reference | None, outcome_id: int, w: float,
            move: SharpMove | None = None, overperforming: dict[str, bool] | None = None, dependency: dict[str, str | None] | None = None,
-           hours_to_kickoff: float | None = None) -> Assessment:
+           hours_to_kickoff: float | None = None, ev_margin: float = 0.0) -> Assessment:
     """Verdict et mise d'une sélection déjà admissible par les règles antérieures.
 
-    `overperforming` : {"home": bool, "away": bool} (OPD) ; `dependency` : {"home": nom du hub ou None, "away": …}.
+    `overperforming` : {"home": bool, "away": bool} (OPD) ; `dependency` : {"home": nom du hub ou None, "away": …} ;
+    `ev_margin` : marge de calibration du segment (ECE), ajoutée au seuil d'espérance.
     """
     p_sharp = reference.probability(outcome_id) if reference is not None else None
     if p_sharp is None:
@@ -138,8 +142,8 @@ def assess(p_model: float, odds: float, family: str, spec: mk.Spec, reference: R
     p_ref = pool(p_model, p_sharp, w)
     ev = p_ref * odds - 1.0
     a = Assessment(p_model, p_sharp, p_ref, w, ev, p_ref - p_sharp, sharp_bookmaker=reference.bookmaker, sharp_at=reference.at.isoformat(),
-                   sharp_overround=reference.overround)
-    if ev < ev_threshold(family):
+                   sharp_overround=reference.overround, ev_min=round(ev_threshold(family, ev_margin), 4))
+    if ev < a.ev_min:
         a.blocks.append("ev_insuffisant")
     if ev > EV_MAX or (p_ref - p_sharp) > EDGE_MAX:
         a.blocks.append("winner_curse")

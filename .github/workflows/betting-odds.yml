@@ -124,6 +124,8 @@ jobs:
           cd scripts
           # rejeu de la saison recalculé le matin (archive de cotes complétée la veille) ou s'il manque
           if [ ! -f ../.research/betting/product/bilan.json ] || [ "$(date -u +%H)" -lt 9 ]; then python3 -m betting.product replay || echo "::warning::rejeu impossible (archive de cotes incomplète)"; fi
+          # porte de validation universelle : la catégorie B (référence Winamax dé-viguée) a besoin de l'archive de cotes, présente ici seulement
+          python3 -m betting.gate --write || echo "::warning::porte de validation non recalculée (poids et marges de l'amorce conservés)"
           python3 -m betting.product suggest
           python3 -m betting.evening auto --date "$(date -u -d '-1 day' +%F)"
           python3 -m betting.evening settle --date "$(date -u -d '-1 day' +%F)"

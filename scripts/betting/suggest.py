@@ -275,16 +275,18 @@ def stake_for(c: Candidate) -> tuple[float, str]:
 
 
 def apply_circuit(candidates: list[Candidate], reference_of, weight_of, move_of=None, overperforming: dict[str, bool] | None = None,
-                  dependency: dict[str, str | None] | None = None, hours_to_kickoff: float | None = None) -> list[Candidate]:
+                  dependency: dict[str, str | None] | None = None, hours_to_kickoff: float | None = None, margin_of=None) -> list[Candidate]:
     """Coupe-circuit sur chaque candidat encore admissible. `reference_of(market_id)` → Reference ou None ;
-    `weight_of(family)` → w du pool ; `move_of(market_id, outcome_id, reference)` → SharpMove ou None. Un
-    candidat refusé reçoit comme raison d'exclusion le premier code bloquant du coupe-circuit."""
+    `weight_of(family)` → w du pool ; `margin_of(family)` → marge de calibration (ECE) ajoutée au seuil d'espérance ;
+    `move_of(market_id, outcome_id, reference)` → SharpMove ou None. Un candidat refusé reçoit comme raison
+    d'exclusion le premier code bloquant du coupe-circuit."""
     for c in candidates:
         if c.excluded:
             continue
         ref = reference_of(c.market_id)
         move = move_of(c.market_id, c.outcome_id, ref) if (move_of is not None and ref is not None) else None
-        c.assessment = circuit.assess(c.p, c.odds, c.family, c.spec, ref, c.outcome_id, weight_of(c.family), move, overperforming, dependency, hours_to_kickoff)
+        c.assessment = circuit.assess(c.p, c.odds, c.family, c.spec, ref, c.outcome_id, weight_of(c.family), move, overperforming, dependency, hours_to_kickoff,
+                                      ev_margin=margin_of(c.family) if margin_of is not None else 0.0)
         if c.assessment.blocks:
             c.excluded = c.assessment.blocks[0]
     return candidates

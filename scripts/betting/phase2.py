@@ -126,29 +126,53 @@ def choose_variant(model: str = DEFAULT_MODEL) -> dict:
     for name in sm.VARIANTS:
         v = sm.fit_variant(name, *fx)
         scores = _variant_scores(v, *cx)
-        report["variants"][name] = {"rho": v.rho, "dispersion": v.dispersion, **scores}
+        report["variants"][name] = {"rho": v.rho, "dispersion": v.dispersion, "nu": v.nu, "shrink": v.shrink, "meanTotal": round(v.mean_total, 4), **scores}
         if best is None or scores["logLossScore"] < best[1]:
             best = (v, scores["logLossScore"])
     v = best[0]
-    report["chosen"] = {"name": v.name, "rho": v.rho, "dispersion": v.dispersion, "criterion": "log-loss du score exact sur la saison de choix"}
+    report["observedTotals"] = _observed_totals(cx[2], cx[3])
+    report["chosen"] = {"name": v.name, "rho": v.rho, "dispersion": v.dispersion, "nu": v.nu, "shrink": v.shrink, "meanTotal": round(v.mean_total, 4),
+                        "criterion": "log-loss du score exact sur la saison de choix"}
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "variant.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     return report
 
 
+TOTAL_LINES = (1.5, 2.5, 3.5, 4.5)
+
+
+def _observed_totals(ft_h, ft_a, cap: int = 8) -> list[float]:
+    """Fréquences observées des totaux 0 … cap-1 et ≥ cap."""
+    t = np.minimum(np.asarray(ft_h, dtype=int) + np.asarray(ft_a, dtype=int), cap)
+    return [round(float(x), 4) for x in np.bincount(t, minlength=cap + 1) / len(t)]
+
+
 def _variant_scores(v: sm.Variant, xg_h, xg_a, ft_h, ft_a) -> dict:
-    ll_score, ll_1x2, ll_ou, n = 0.0, 0.0, 0.0, 0
+    """Log-loss hors échantillon : score exact, 1N2, plus/moins 1,5 à 4,5, les deux équipes marquent ; distribution
+    prédite des totaux (0 … 7, ≥ 8) et probabilité d'au moins 4 buts, pour vérifier la queue de distribution."""
+    ll_score, ll_1x2, ll_btts, n = 0.0, 0.0, 0.0, 0
+    ll_lines = {line: 0.0 for line in TOTAL_LINES}
+    pred_totals = np.zeros(9)
+    idx = np.add.outer(np.arange(sm.MAX_GOALS + 1), np.arange(sm.MAX_GOALS + 1))
     for mh, ma, h, a in zip(xg_h, xg_a, ft_h, ft_a):
         m = sm.score_matrix(float(mh), float(ma), v)
         hh, aa = min(int(h), sm.MAX_GOALS), min(int(a), sm.MAX_GOALS)
         ll_score -= np.log(m[hh, aa])
         p1, px, p2 = np.tril(m, -1).sum(), np.trace(m), np.triu(m, 1).sum()
         ll_1x2 -= np.log({1: p1, 0: px, -1: p2}[int(np.sign(h - a))])
-        idx = np.add.outer(np.arange(m.shape[0]), np.arange(m.shape[1]))
-        po = m[idx >= 3].sum()
-        ll_ou -= np.log(po if h + a >= 3 else 1 - po)
+        for line in TOTAL_LINES:
+            po = m[idx > line].sum()
+            ll_lines[line] -= np.log(po if h + a > line else 1 - po)
+        pb = m[1:, 1:].sum()
+        ll_btts -= np.log(pb if (h > 0 and a > 0) else 1 - pb)
+        for t in range(8):
+            pred_totals[t] += m[idx == t].sum()
+        pred_totals[8] += m[idx >= 8].sum()
         n += 1
-    return {"logLossScore": round(ll_score / n, 5), "logLoss1x2": round(ll_1x2 / n, 5), "logLossOver25": round(ll_ou / n, 5), "n": n}
+    pred_totals /= n
+    return {"logLossScore": round(ll_score / n, 5), "logLoss1x2": round(ll_1x2 / n, 5), "logLossOver25": round(ll_lines[2.5] / n, 5),
+            "logLossTotals": {str(line): round(x / n, 5) for line, x in ll_lines.items()}, "logLossBtts": round(ll_btts / n, 5),
+            "predictedTotals": [round(float(x), 4) for x in pred_totals], "pAtLeast4": round(float(pred_totals[4:].sum()), 4), "n": n}
 
 
 def frozen_variant() -> sm.Variant:
@@ -156,7 +180,8 @@ def frozen_variant() -> sm.Variant:
     if not p.exists():
         raise RuntimeError("variant.json absent : lancer `python3 -m betting.phase2 variant` d'abord.")
     c = json.loads(p.read_text(encoding="utf-8"))["chosen"]
-    return sm.Variant(c["name"], rho=float(c["rho"]), dispersion=float(c["dispersion"]))
+    return sm.Variant(c["name"], rho=float(c["rho"]), dispersion=float(c["dispersion"]), nu=float(c.get("nu", 1.0)), shrink=float(c.get("shrink", 1.0)),
+                      mean_total=float(c.get("meanTotal", 0.0)))
 
 
 # ----- calibration sans cotes -----
