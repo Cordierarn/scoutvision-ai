@@ -94,16 +94,22 @@ jobs:
           # cotes courantes des matchs à venir : un appel par tournoi (quelques secondes)
           python3 -m betting.fetch upcoming --days 7
           # historique des matchs terminés : environ 6,5 s par match (limite d'OddsPapi), donc le matin seulement ;
-          # les suggestions de l'après-midi n'en ont pas besoin. Chaque requête rapporte Winamax, Pinnacle et
-          # Betfair Exchange ; --refresh-sharp redemande les matchs archivés avant la collecte des références
-          # (CLV et rejeu du coupe-circuit), jusqu'à épuisement
-          if [ "$FULL" = 1 ]; then
-            python3 -m betting.fetch history --max-requests 250
-            python3 -m betting.fetch history --refresh-sharp --max-requests 150
-          fi
+          # les suggestions de l'après-midi n'en ont pas besoin
+          if [ "$FULL" = 1 ]; then python3 -m betting.fetch history --max-requests 400; fi
           python3 -m betting.fetch views
           python3 -m betting.fetch match
           python3 -m betting.fetch status
+
+      - name: "Référence sharp (The Odds API : Pinnacle, Betfair Exchange)"
+        # Un crédit par marché et par compétition ayant une rencontre sous 36 h (3 marchés) ; plan gratuit 500 par mois,
+        # réserve de 25. Écrit dans l'archive sous les bookmakers pinnacle / betfair-ex, lus par le coupe-circuit.
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: |
+          if [ -z "$THE_ODDS_API_KEY" ]; then echo "::warning::Secret THE_ODDS_API_KEY absent : pas de référence sharp, donc aucun pari validé."; exit 0; fi
+          cd scripts
+          python3 -m betting.sharpfeed pull --hours 36 || echo "::warning::référence sharp indisponible à ce passage (voir ci-dessus)"
+          python3 -m betting.sharpfeed status
 
       - name: Résultats de la veille (ESPN) et règlement
         run: |
@@ -127,7 +133,7 @@ jobs:
       - name: Publication de l'archive du Labo (release privée)
         run: |
           cd .research/betting
-          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json quota.json results_web.parquet markets_catalogue.json 2>/dev/null)
+          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json quota.json quota_theoddsapi.json results_web.parquet markets_catalogue.json 2>/dev/null)
           cd ../..
           gh release view betting-odds --repo "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds --repo "$DATA_REPO" --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (cotes Winamax FR via OddsPapi, journal, historique des soirées), mise à jour par betting-odds.yml" --prerelease
           gh release upload betting-odds betting-odds.tar.gz --repo "$DATA_REPO" --clobber

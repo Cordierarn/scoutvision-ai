@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,12 @@ Http = Callable[[str, dict], HttpResponse]
 
 class OddsPapiError(RuntimeError):
     pass
+
+
+def restricted_bookmakers(message: str) -> list[str]:
+    """Bookmakers refusés par le plan, lus dans l'erreur RESTRICTED_ACCESS (« Restricted bookmakers: a, b. … »)."""
+    m = re.search(r"Restricted bookmakers:\s*([^.\"]+)", message or "")
+    return [b.strip() for b in m.group(1).split(",") if b.strip()] if m else []
 
 
 class QuotaExceeded(OddsPapiError):
@@ -116,6 +123,7 @@ class OddsPapiClient:
         self._last_call: dict[str, float] = {}
         self.calls = 0        # appels HTTP émis (tentatives comprises)
         self.cache_hits = 0
+        self.restricted: set[str] = set()   # bookmakers refusés par le plan (RESTRICTED_ACCESS), appris en cours de session
 
     # ----- utilitaires -----
     def redact(self, text: str) -> str:
@@ -226,12 +234,32 @@ class OddsPapiClient:
             cursor = stop
         return list(out.values())
 
+    def _allowed(self, bookmakers: list[str]) -> list[str]:
+        return [b for b in bookmakers if b not in self.restricted]
+
+    def _get_bookmakers(self, endpoint: str, bookmakers: list[str], **params):
+        """Appel avec une liste de bookmakers ; un refus RESTRICTED_ACCESS retire les bookmakers hors plan (mémorisés
+        pour la session, signalés une fois) et reprend l'appel sans eux. None si aucun bookmaker ne reste."""
+        allowed = self._allowed(bookmakers)
+        if not allowed:
+            return None
+        try:
+            return self.get(endpoint, bookmakers=",".join(allowed), **params)
+        except OddsPapiError as exc:
+            refused = restricted_bookmakers(str(exc))
+            if not refused or "RESTRICTED_ACCESS" not in str(exc):
+                raise
+            self.restricted.update(refused)
+            print(f"OddsPapi : bookmaker(s) hors abonnement, ignoré(s) : {', '.join(sorted(refused))}", flush=True)
+            left = self._allowed(bookmakers)
+            return self.get(endpoint, bookmakers=",".join(left), **params) if left else None
+
     def historical_odds(self, fixture_id: str, bookmakers: list[str]) -> dict | None:
         """Historique complet d'un match pour les bookmakers demandés (3 par appel) ; None si absent (404)."""
         merged: dict | None = None
         for i in range(0, len(bookmakers), MAX_BOOKMAKERS_PER_CALL):
             chunk = bookmakers[i:i + MAX_BOOKMAKERS_PER_CALL]
-            data = self.get("historical-odds", fixtureId=fixture_id, bookmakers=",".join(chunk))
+            data = self._get_bookmakers("historical-odds", chunk, fixtureId=fixture_id)
             if not data:
                 continue
             if merged is None:
@@ -245,7 +273,7 @@ class OddsPapiClient:
         for tid in tournament_ids:
             for i in range(0, len(bookmakers), MAX_BOOKMAKERS_PER_CALL):
                 chunk = bookmakers[i:i + MAX_BOOKMAKERS_PER_CALL]
-                for fx in self.get("odds-by-tournaments", use_cache=False, tournamentIds=tid, bookmakers=",".join(chunk)) or []:
+                for fx in self._get_bookmakers("odds-by-tournaments", chunk, use_cache=False, tournamentIds=tid) or []:
                     cur = out.setdefault(fx["fixtureId"], {**fx, "bookmakerOdds": {}})
                     cur["bookmakerOdds"].update(fx.get("bookmakerOdds", {}))
         return list(out.values())
