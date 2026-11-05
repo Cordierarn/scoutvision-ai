@@ -202,6 +202,39 @@ def _assessment_fields(c: sg.Candidate) -> dict:
 
 # ----- suggestion d'un match -----
 
+BOOKMAKER_NAMES = {"pinnacle": "Pinnacle", "betfair-ex": "Betfair Exchange", BOOKMAKER: "Winamax sans marge"}
+
+
+def _explore_block(cands: list, snaps: pd.DataFrame | None, cat, before: pd.Timestamp, refs: dict | None, ctx: dict, home: str, away: str) -> list[dict]:
+    """Profil exploratoire (suggest.EXPLORE_PROFILE) : issues que le coupe-circuit refuse faute d'espérance, classées
+    par espérance face au marché sans marge (sharp si coté, sinon Winamax complet par la méthode de Shin). Vide sans
+    archive (tests, diagnostics) : jamais une probabilité de marché inventée."""
+    if snaps is None or cat is None or refs is None:
+        return []
+    winamax: dict[int, sharp.Reference | None] = {}
+
+    def market_probability(c):
+        ref = refs.get(c.market_id)
+        if ref is None:
+            if c.market_id not in winamax:
+                winamax[c.market_id] = sharp.market_reference(snaps, cat, c.market_id, before, bookmakers=(BOOKMAKER,))
+            ref = winamax[c.market_id]
+        if ref is None or c.outcome_id not in ref.shin:
+            return None
+        return ref.shin[c.outcome_id], ref.bookmaker
+
+    out = []
+    for i, (c, p_mkt, ev_mkt, ref) in enumerate(sg.explore(cands, market_probability), start=1):
+        name = BOOKMAKER_NAMES.get(ref, ref)
+        why = (f"Hors coupe-circuit : marché {name} {p_mkt * 100:.1f} %, moteur {c.p * 100:.1f} %, cote {c.odds:.2f} → espérance face au marché "
+               f"{ev_mkt * 100:+.1f} %").replace(".", ",")
+        out.append({"rank": i, "marketId": c.market_id, "outcomeId": c.outcome_id, "family": c.family, "label": c.label, "odds": round(c.odds, 2),
+                    "oddsAt": c.odds_at.isoformat(), "p": round(c.p, 4), "ev": round(c.ev, 4), "stakeFraction": sg.EXPLORE_STAKE, "stakeMode": "fixed",
+                    "pSharp": round(p_mkt, 4), "pRef": round(p_mkt, 4), "evRef": round(ev_mkt, 4), "poolW": None, "sharpBookmaker": ref,
+                    "sharpAt": None, "warnings": [], "verdict": "exploratoire", "reasons": [why] + reasons(c, ctx, home, away)})
+    return out
+
+
 def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime, now: dt.datetime, competition: str, excluded: set, ctx: dict,
                   home: str, away: str, snaps: pd.DataFrame | None = None, cat=None, quant: Quant | None = None,
                   team_ids: tuple[str | None, str | None] = (None, None)) -> dict:
@@ -209,10 +242,8 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
     catalogue sont fournis ; sinon classement sur le seul modèle (tests, diagnostics)."""
     cands = sg.evaluate_candidates(sims, outcomes, kickoff, now, excluded, competition)
     before = pd.Timestamp(min(now, kickoff))
-    flags, coverage = None, None
+    flags, coverage, refs = None, None, {}
     if snaps is not None and cat is not None:
-        refs: dict[int, sharp.Reference | None] = {}
-
         weights = quant.weights if quant else sharp.PoolWeights()
 
         def reference_of(mid: int):
@@ -249,6 +280,8 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
                             for s in ranked],
             "combo": None,   # combinés désactivés : la corrélation entre sélections d'un même match n'est pas mesurable face au marché sharp
         }
+    profiles[sg.EXPLORE_PROFILE] = {"suggestions": _explore_block(cands, snaps, cat, before, refs if snaps is not None and cat is not None else None, ctx, home, away),
+                                    "combo": None}
     excluded_counts: dict[str, int] = {}
     for c in cands:
         if c.excluded:
@@ -574,11 +607,12 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
             evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
                              "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")), "details": evening_details(e, names)})
     payload = {"schemaVersion": "1.1.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
-               "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in sg.PROFILES], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
+               "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in (*sg.PROFILES, sg.EXPLORE_PROFILE)], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
                "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kappa": circuit.KAPPA, "capPerBet": circuit.CAP_PER_BET,
                          "capPerMatch": circuit.CAP_PER_MATCH, "capHighOdds": circuit.CAP_HIGH_ODDS, "highOdds": circuit.HIGH_ODDS, "evMin": circuit.EV_MIN,
                          "evMinLowMargin": circuit.EV_MIN_LOW_MARGIN, "evMax": circuit.EV_MAX, "edgeMax": circuit.EDGE_MAX, "favoriteOdds": circuit.FAVORITE_ODDS,
-                         "lineupHours": circuit.LINEUP_HOURS, "combos": False},
+                         "lineupHours": circuit.LINEUP_HOURS, "combos": False,
+                         "explore": {"minOdds": sg.EXPLORE_MIN_ODDS, "maxOdds": sg.EXPLORE_MAX_ODDS, "maxPerMatch": sg.EXPLORE_MAX, "stake": sg.EXPLORE_STAKE}},
                "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights, "calibrationMargins": sharp.PoolWeights.load().margins,
                              "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
                "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:],

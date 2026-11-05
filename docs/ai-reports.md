@@ -57,7 +57,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 
 Claude adapter (`server/claudeAi.ts`): plain writing for reports and grounded summaries, the server-side
-web search tool (at most 5 searches per news request, sources taken from citations then search results)
+web search tool (at most 5 searches per news request) plus the URL fetch tool (at most 3 articles opened in full when an excerpt is not enough; pages read come first among the sources, then citations, then search results)
 for the betting assistant's news, the server-side URL fetch tool for the article fallback, and structured
 outputs (`json_schema`, schema made strict: `additionalProperties: false`, numeric and length constraints
 dropped, validated afterwards by the handler) for the plan. One model, effort `low`; retries on 429, 502,

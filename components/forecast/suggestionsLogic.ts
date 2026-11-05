@@ -6,13 +6,17 @@
 
 import type { BetStatus, BilanBlock, BilanProfile, HistoryBet, HistoryDay, StakeMode, SuggestionProfile } from '../../services/replayData';
 
-export const PROFILE_ORDER: SuggestionProfile[] = ['sur', 'equilibre', 'grosse_cote'];
-export const PROFILE_LABELS: Record<SuggestionProfile, string> = { sur: 'Sûr', equilibre: 'Équilibré', grosse_cote: 'Grosse cote' };
+export const PROFILE_ORDER: SuggestionProfile[] = ['sur', 'equilibre', 'grosse_cote', 'exploratoire'];
+export const PROFILE_LABELS: Record<SuggestionProfile, string> = { sur: 'Sûr', equilibre: 'Équilibré', grosse_cote: 'Grosse cote', exploratoire: 'Exploratoire' };
 export const PROFILE_HINTS: Record<SuggestionProfile, string> = {
   sur: 'Probabilité de référence la plus forte, cote minimale 1,30.',
   equilibre: 'Score = probabilité de référence × (1 + espérance) : la probabilité pondérée par le multiplicateur attendu de la mise.',
   grosse_cote: 'Cote de 3,00 ou plus, meilleure espérance face au marché sharp.',
+  exploratoire: 'Hors coupe-circuit : cotes de 1,60 à 6,00 que le moteur juge au moins aussi probables que le marché, classées par espérance face au marché sans marge (souvent négative). Mise symbolique de 0,5 %.',
 };
+/** Profil hors coupe-circuit : suggestions non validées, espérance face au marché généralement négative. */
+export const isExploratory = (p: SuggestionProfile) => p === 'exploratoire';
+export const EXPLORE_NOTE = 'Profil exploratoire : sélections hors coupe-circuit, publiées pour suivre le moteur chaque soir. Ce ne sont pas des paris validés : face au marché sans marge, leur espérance est le plus souvent négative. Mise fixe symbolique de 0,5 % de la bankroll.';
 /** Formulation partagée du principe du coupe-circuit (Matchs à venir, Suivi des paris). */
 export const CIRCUIT_NOTE = 'Référence : Pinnacle ou Betfair Exchange sans marge (méthode de Shin). Une sélection n\'apparaît que si sa cote Winamax dépasse cette référence d\'au moins 2,5 à 4 % d\'espérance ; sinon, pas de pari.';
 export const DEFAULT_PROFILE: SuggestionProfile = 'equilibre';
@@ -65,7 +69,7 @@ export function bilanLine(bilan: BilanProfile | undefined, family: string): stri
 /** Lecture du mode de mise. */
 export function stakeLabel(mode: StakeMode): string {
   if (mode === 'shrink_kelly') return 'Kelly rétréci (κ = 0,15), plafond 2,5 % de la bankroll';
-  return mode === 'kelly' ? 'Kelly rétréci sur la probabilité du moteur' : 'mise fixe 2 %, espérance négative';
+  return mode === 'kelly' ? 'Kelly rétréci sur la probabilité du moteur' : 'mise fixe symbolique, espérance négative face au marché';
 }
 
 /** CLV en texte signé : « +3 % », « −1 % » ; null quand la clôture n'est pas connue. */
@@ -74,7 +78,7 @@ export const formatClv = (v: number | null | undefined) => (v === null || v === 
 /** Référence sharp d'une suggestion, pour une infobulle ou une ligne de détail. */
 export function sharpLabel(s: { pSharp?: number | null; sharpBookmaker?: string | null; poolW?: number | null; pRef?: number }): string | null {
   if (s.pSharp === null || s.pSharp === undefined) return null;
-  const bk = s.sharpBookmaker === 'pinnacle' ? 'Pinnacle' : s.sharpBookmaker === 'betfair-ex' ? 'Betfair Exchange' : 'marché sharp';
+  const bk = s.sharpBookmaker === 'pinnacle' ? 'Pinnacle' : s.sharpBookmaker === 'betfair-ex' ? 'Betfair Exchange' : s.sharpBookmaker === 'winamax.fr' ? 'Winamax' : 'marché sharp';
   const pooled = s.poolW && s.pRef !== undefined ? ` ; référence ${formatPct(s.pRef)} (pool, poids modèle ${s.poolW})` : '';
   return `${bk} sans marge : ${formatPct(s.pSharp)}${pooled}`;
 }

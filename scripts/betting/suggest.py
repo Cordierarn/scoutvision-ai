@@ -38,7 +38,18 @@ from .circuit import Assessment
 from .simulate import Simulated
 
 PROFILES = ("sur", "equilibre", "grosse_cote")
-PROFILE_LABELS = {"sur": "Sûr", "equilibre": "Équilibré", "grosse_cote": "Grosse cote"}
+PROFILE_LABELS = {"sur": "Sûr", "equilibre": "Équilibré", "grosse_cote": "Grosse cote", "exploratoire": "Exploratoire"}
+# Profil exploratoire : hors coupe-circuit, publié à la demande du propriétaire pour avoir chaque soir une sélection
+# à suivre. Ce ne sont PAS des paris validés : l'espérance face au marché sans marge est le plus souvent négative.
+# Règles : cote 1,60 à 6,00 ; marché coté sans marge chez une référence (sharp, sinon Winamax complet, Shin) ; le
+# modèle au moins d'accord avec le marché ; classées par espérance face au marché (la cote la moins chère en marge
+# d'abord) ; trois au plus par match ; mise fixe symbolique de 0,5 % ; jamais de donnée douteuse (cote ancienne,
+# issue retirée, famille mal calibrée, mouvement sharp contraire, favori surperformant, écart suspect).
+EXPLORE_PROFILE = "exploratoire"
+EXPLORE_MIN_ODDS, EXPLORE_MAX_ODDS = 1.60, 6.00
+EXPLORE_MAX = 3
+EXPLORE_STAKE = 0.005
+EXPLORE_ALLOWED = (None, "ev_insuffisant", "reference_absente")
 MIN_ODDS = 1.30
 BIG_ODDS = 3.00
 MAX_AGE = dt.timedelta(hours=2)
@@ -290,6 +301,34 @@ def apply_circuit(candidates: list[Candidate], reference_of, weight_of, move_of=
         if c.assessment.blocks:
             c.excluded = c.assessment.blocks[0]
     return candidates
+
+
+def explore(candidates: list[Candidate], market_probability, max_n: int = EXPLORE_MAX) -> list[tuple[Candidate, float, float, str]]:
+    """Sélection exploratoire d'un match (voir EXPLORE_PROFILE). `market_probability(c)` → (probabilité sans marge de
+    l'issue, nom de la référence) ou None. Renvoie (candidat, probabilité marché, espérance face au marché, référence),
+    meilleure espérance d'abord, une seule issue par groupe de doublons."""
+    pool = []
+    for c in candidates:
+        if c.excluded not in EXPLORE_ALLOWED or not (EXPLORE_MIN_ODDS <= c.odds <= EXPLORE_MAX_ODDS):
+            continue
+        got = market_probability(c)
+        if got is None:
+            continue
+        p_mkt, ref = got
+        if p_mkt is None or not np.isfinite(p_mkt) or c.p < p_mkt:
+            continue
+        pool.append((c, float(p_mkt), float(p_mkt * c.odds - 1.0), ref))
+    pool.sort(key=lambda x: (x[2], x[0].p - x[1]), reverse=True)
+    seen, chosen = set(), []
+    for item in pool:
+        c = item[0]
+        if c.group in seen or any(overlap(c, k[0]) >= OVERLAP_DUPLICATE for k in chosen):
+            continue
+        seen.add(c.group)
+        chosen.append(item)
+        if len(chosen) >= max_n:
+            break
+    return chosen
 
 
 def rank(candidates: list[Candidate], profile: str, max_n: int = MAX_SUGGESTIONS) -> list[Suggestion]:

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
-  ClaudeClient, claudeArticlesReader, claudeGenerator, claudeGroundedGenerator, claudeJsonGenerator, parseFetchedUrls, parseWebSources, resolveClaudeModel, resolveEffort,
+  ClaudeClient, NEWS_FETCH_HINT, claudeArticlesReader, claudeGenerator, claudeGroundedGenerator, claudeJsonGenerator, parseFetchedUrls, parseWebSources, resolveClaudeModel, resolveEffort,
   strictSchema, withFallback,
 } from './claudeAi';
 import { DeadlineError, aiProviders } from './scoutReportPlugin';
@@ -72,14 +72,27 @@ describe('claudeGroundedGenerator', () => {
     expect(out.text).toBe('- Capitaine forfait.');
     expect(out.queries).toEqual(['Alpha Beta team news']);
     expect(out.sources).toEqual([{ title: 'Source citée', uri: 'https://cited.example/a' }, { title: 'Alpha sans son capitaine', uri: 'https://news.example/alpha' }]);
-    expect(client.calls[0].tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }]);
+    expect(client.calls[0].tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 }]);
+    expect(String(client.calls[0].messages[0].content)).toContain('fetch tool');
+    expect(out.articlesRead).toBe(0);
+  });
+
+  it('puts pages opened in full first among the sources and counts them', async () => {
+    const fetched: Anthropic.ContentBlock = {
+      type: 'web_fetch_tool_result', tool_use_id: 'f1', caller: { type: 'direct' },
+      content: { type: 'web_fetch_result', url: 'https://club.example/news/press-conference-friday', retrieved_at: null, content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '…' }, title: null, citations: null } },
+    } as unknown as Anthropic.WebFetchToolResultBlock;
+    const out = await claudeGroundedGenerator({ apiKey: 'k', client: fakeClient([message([search, results, fetched, cited])]) })('Actualité ?');
+    expect(out.articlesRead).toBe(1);
+    expect(out.sources[0]).toEqual({ title: 'club.example · press conference friday', uri: 'https://club.example/news/press-conference-friday' });
+    expect(out.sources).toHaveLength(3);
   });
 
   it('resumes a paused turn by replaying the received content, and keeps every block', async () => {
     const client = fakeClient([message([search, results], 'pause_turn'), message([cited])]);
     const out = await claudeGroundedGenerator({ apiKey: 'k', client })('Actualité ?');
     expect(client.calls).toHaveLength(2);
-    expect(client.calls[1].messages).toEqual([{ role: 'user', content: 'Actualité ?' }, { role: 'assistant', content: [search, results] }]);
+    expect(client.calls[1].messages).toEqual([{ role: 'user', content: `Actualité ?\n\n${NEWS_FETCH_HINT}` }, { role: 'assistant', content: [search, results] }]);
     expect(out.queries).toEqual(['Alpha Beta team news']); expect(out.sources).toHaveLength(2); expect(out.text).toBe('- Capitaine forfait.');
   });
 

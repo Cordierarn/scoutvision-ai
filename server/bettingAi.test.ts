@@ -135,6 +135,12 @@ describe('plan du jour', () => {
     expect(buildPlanPrompt(withContext, {})).toContain('percentages like "78,7 %"');
   });
 
+  it('ajoute les règles du profil exploratoire au prompt, et seulement pour lui', () => {
+    const expl = { ...buildPlanFacts(INDEX, ['m1'], 'equilibre', '2026-11-07'), profile: 'exploratoire' as const };
+    expect(buildPlanPrompt(expl, {})).toContain('were NOT validated by the engine');
+    expect(buildPlanPrompt(facts, {})).not.toContain('were NOT validated by the engine');
+  });
+
   it('transmet un « pas de pari » du moteur avec ses motifs, sans suggestion', () => {
     const f = buildPlanFacts(INDEX, ['m4'], 'equilibre', '2026-11-07');
     expect(f.matches[0]).toMatchObject({ engineVerdict: 'no_bet', suggestions: [], keyPlayerDependency: { home: 'Meneur G', away: null }, recentOverperformance: { home: true, away: false } });

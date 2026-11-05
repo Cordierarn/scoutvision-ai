@@ -24,6 +24,9 @@ export const DEFAULT_EFFORT: Effort = 'low';
 const MAX_TOKENS = 8000;
 const MAX_SEARCHES = 5;          // recherches web par demande d'actualité (facturées à l'unité)
 const MAX_FETCHES = 4;           // articles lus par demande (newsFeed.MAX_ARTICLES)
+const MAX_NEWS_FETCHES = 3;      // articles ouverts en entier pendant la recherche d'actualité
+/** Consigne ajoutée à la recherche d'actualité (Claude seulement : l'outil de lecture d'URL n'existe pas chez Gemini) */
+export const NEWS_FETCH_HINT = 'Tool use: search first. When a result looks relevant but its excerpt is not enough to confirm an absence, a doubt or a line-up (press conference, injury report, club announcement), open that page with the fetch tool before writing; open at most three pages.';
 const MAX_TURNS = 4;             // reprises d'un tour mis en pause par un outil serveur
 const CALL_TIMEOUT_MS = 90 * 1000;
 
@@ -101,6 +104,17 @@ export function parseWebSources(content: Anthropic.ContentBlock[]): Pick<Grounde
   return { sources: sources.slice(0, 12), queries: queries.slice(0, 8) };
 }
 
+/** Titre lisible d'une page ouverte sans titre connu : domaine et fin du chemin */
+function titleOf(url: string): string {
+  try {
+    const u = new URL(url);
+    const tail = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? '').replace(/[-_]+/g, ' ').replace(/\.\w+$/, '').trim();
+    return `${u.hostname.replace(/^www\./, '')}${tail ? ` · ${tail.slice(0, 80)}` : ''}`;
+  } catch {
+    return url.slice(0, 80);
+  }
+}
+
 /** Adresses effectivement lues par l'outil de lecture d'URL */
 export function parseFetchedUrls(content: Anthropic.ContentBlock[]): string[] {
   const read: string[] = [];
@@ -170,9 +184,16 @@ export function claudeGenerator(options: ClaudeOptions): GenerateText {
 export function claudeGroundedGenerator(options: ClaudeOptions): GenerateGrounded {
   return async prompt => {
     const client = await clientOf(options);
-    const { response, content } = await converse(client, { ...base(options, prompt), tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: MAX_SEARCHES }] }, options.log);
+    const { response, content } = await converse(client, {
+      ...base(options, `${prompt}\n\n${NEWS_FETCH_HINT}`),
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: MAX_SEARCHES }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_NEWS_FETCHES }],
+    }, options.log);
     checkStop(response);
-    return { text: responseText({ ...response, content }), modelVersion: response.model, ...parseWebSources(content) };
+    const found = parseWebSources(content);
+    const read = parseFetchedUrls(content);
+    // articles ouverts en entier d'abord : ce sont les sources les plus sûres de la réponse
+    const fetched = read.filter(u => /^https:\/\//.test(u) && !found.sources.some(s => s.uri === u)).map(u => ({ title: titleOf(u), uri: u }));
+    return { text: responseText({ ...response, content }), modelVersion: response.model, sources: [...fetched, ...found.sources].slice(0, 12), queries: found.queries, articlesRead: read.length };
   };
 }
 
