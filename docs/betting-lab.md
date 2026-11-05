@@ -255,8 +255,8 @@ encre neutre.
   release privée `betting-odds` ; artefact des suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
 - Premier passage : l'archive de cotes se reconstitue par lots de 400 matchs par passage (non décomptés) ;
   les artefacts de phase 2 (variante, calibration, ajustements) sont créés s'ils manquent.
-- Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement) et
-  `PITCHAPI_DATA_TOKEN`. Depuis l'environnement de développement, ESPN et les releases ne sont pas
+- Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement),
+  `THE_ODDS_API_KEY` (référence sharp ; sans elle, aucun pari n'est validé) et `PITCHAPI_DATA_TOKEN`. Depuis l'environnement de développement, ESPN et les releases ne sont pas
   accessibles : l'historique se règle en CI.
 
 ## Étape 1 du moteur quantitatif : référence sharp, coupe-circuit, CLV (5 novembre 2026)
@@ -266,12 +266,20 @@ Décision du propriétaire, après le bilan du rejeu (1 862 paris simulés 2026-
 la réponse normale est « pas de pari », et 100 % des calculs (devigging, espérance, coupe-circuit, mise)
 vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étapes ; ceci est l'étape 1.
 
-### Référence sharp (`scripts/betting/sharp.py`)
+### Référence sharp (`scripts/betting/sharp.py`, `sharpfeed.py`)
 
-- **Bookmakers.** `winamax.fr` reste le bookmaker d'exécution (cote jouée, espérance et mise). `pinnacle`
-  puis `betfair-ex` (OddsPapi) sont les références ; les trois tiennent dans la même requête (3 bookmakers
-  par appel) : la référence ne coûte aucune requête. `fetch history --refresh-sharp` redemande les matchs
-  archivés avant cette collecte (CLV et rejeu) ; le workflow le fait le matin par lots de 150.
+- **Bookmakers.** `winamax.fr` reste le bookmaker d'exécution (cote jouée, espérance et mise). `pinnacle` puis
+  `betfair-ex` sont les références. L'abonnement OddsPapi « normal » (25 $/mois) ne couvre que Winamax :
+  Pinnacle, Betfair, bet365, Unibet, Betclic… sont tous refusés (`RESTRICTED_ACCESS`, mesuré le 5 novembre
+  2026, y compris les flux Pinnacle retardés) ; le client retire désormais les bookmakers refusés et reprend
+  l'appel au lieu d'échouer. La référence vient de **The Odds API** (`sharpfeed.py`, clé `THE_ODDS_API_KEY`) :
+  Pinnacle sur toutes les rencontres des compétitions du Labo et Betfair Exchange (prix « back » bruts) sur
+  une partie, trois marchés (1N2, plus/moins et handicap asiatique à la ligne principale), écrits dans
+  l'archive sous les mêmes noms et au même schéma, datés de l'heure de l'appel. Coût : un crédit par marché
+  et par compétition ayant une rencontre sous 36 h (3 marchés), plan gratuit de 500 crédits par mois lus
+  dans les en-têtes, réserve de 25 ; premier relevé réel : 8 compétitions, 36 crédits, 77 rencontres
+  appariées sur 126 (les autres sont au-delà de la fenêtre OddsPapi, plus quelques noms non reconnus).
+  Un plan OddsPapi incluant Pinnacle suffirait à revenir à une seule source (`BOOKMAKERS`).
 - **Devigging.** Méthode de Shin (part de parieurs informés z, marge plus lourde sur les outsiders),
   comparée à la méthode des puissances (p_i = q_i^k) et à la proportionnelle ; les deux premières sont
   publiées dans la référence. Un marché n'est une référence que s'il est complet (issues qui se partagent
@@ -328,7 +336,10 @@ Pas de poids w > 0 (étape 2 : porte de validation par segment sur la clôture P
 handicap asiatique et plus/moins compris) ; pas de composition probable avant H−1 (seule la dépendance à
 un joueur clé est signalée) ; pas de Betfair après commission (prix bruts) ; pas de décorrélation ni
 d'agrégation du onze (étape 4). L'archive antérieure au 5 novembre n'a pas de bookmaker de référence :
-le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est archivé pour le match.
+le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est archivé pour le match. La
+« clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (passages de
+10 h, 14 h et 17 h UTC) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
+les ligues principales (étape 2).
 
 ## Phases suivantes
 
