@@ -162,7 +162,7 @@ export interface SuggestionsIndex {
     kappa?: number; capHighOdds?: number; highOdds?: number; evMin?: number; evMinLowMargin?: number; evMax?: number; edgeMax?: number; favoriteOdds?: number; lineupHours?: number; combos?: boolean;
     kellyFraction?: number; fixedStake?: number;   // artefacts antérieurs à l'étape 1
   };
-  reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
+  reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; calibrationMargins?: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
   matches: SuggestionMatch[];
   bilan: { start: number; profiles: Record<SuggestionProfile, BilanProfile> } | null;
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };

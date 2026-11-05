@@ -191,21 +191,38 @@ def pool(p_model: float, p_sharp: float, w: float) -> float:
 
 
 class PoolWeights:
-    """Poids w du modèle par segment famille × compétition : 0 par défaut (le marché sharp fait foi), relevé
-    seulement par l'étape 2 quand le poids hors échantillon d'un segment est strictement positif."""
+    """Poids w du modèle par segment famille × compétition : 0 par défaut (le marché de référence fait foi), relevé
+    seulement par la porte de validation quand le poids hors échantillon d'un segment est strictement positif.
+    `margins` : erreur de calibration hors échantillon (ECE) du segment validé, ajoutée au seuil d'espérance du
+    coupe-circuit (EV_min = EV_base + ECE). Clés « famille|compétition », ou « famille » pour toutes les compétitions."""
 
-    def __init__(self, weights: dict[str, float] | None = None):
+    def __init__(self, weights: dict[str, float] | None = None, margins: dict[str, float] | None = None, references: dict[str, str] | None = None):
         self.weights = {k: float(v) for k, v in (weights or {}).items()}
+        self.margins = {k: float(v) for k, v in (margins or {}).items()}
+        self.references = {k: str(v) for k, v in (references or {}).items()}     # segment → "sharp" ou "winamax"
 
     @classmethod
     def load(cls, path: Path = POOL_WEIGHTS) -> "PoolWeights":
         if path.exists():
             raw = json.loads(path.read_text(encoding="utf-8"))
-            return cls(raw.get("weights", raw) if isinstance(raw, dict) else {})
+            if isinstance(raw, dict) and "weights" in raw:
+                return cls(raw.get("weights") or {}, raw.get("margins") or {}, raw.get("references") or {})
+            return cls(raw if isinstance(raw, dict) else {})
         return cls()
 
+    def _lookup(self, table: dict, family: str, competition: str, default):
+        return table.get(f"{family}|{competition}", table.get(family, default))
+
     def weight(self, family: str, competition: str) -> float:
-        return self.weights.get(f"{family}|{competition}", self.weights.get(family, 0.0))
+        return float(self._lookup(self.weights, family, competition, 0.0))
+
+    def margin(self, family: str, competition: str) -> float:
+        return float(self._lookup(self.margins, family, competition, 0.0))
+
+    def reference(self, family: str, competition: str) -> str:
+        """Référence du segment : « sharp » (Pinnacle / Betfair, défaut) ou « winamax » (probabilité dé-viguée de
+        Winamax lui-même, segments de catégorie B validés par la porte)."""
+        return str(self._lookup(self.references, family, competition, "sharp"))
 
 
 # ----- mouvement sharp -----

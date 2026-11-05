@@ -213,18 +213,27 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
     if snaps is not None and cat is not None:
         refs: dict[int, sharp.Reference | None] = {}
 
+        weights = quant.weights if quant else sharp.PoolWeights()
+
         def reference_of(mid: int):
             if mid not in refs:
-                refs[mid] = sharp.market_reference(snaps, cat, mid, before)
+                ref = sharp.market_reference(snaps, cat, mid, before)
+                if ref is None:
+                    # catégorie B : segment validé par la porte sur la probabilité dé-viguée de Winamax lui-même ; la
+                    # référence est alors le marché Winamax complet (Shin), la cote jouée reste la cote Winamax brute
+                    market = cat.get(mid)
+                    fam = next((sp.family for sp in (market.spec(int(o)) for o in market.outcomes) if sp is not None), None) if market is not None else None
+                    if fam and weights.reference(fam, competition) == "winamax" and weights.weight(fam, competition) > 0:
+                        ref = sharp.market_reference(snaps, cat, mid, before, bookmakers=(BOOKMAKER,))
+                refs[mid] = ref
             return refs[mid]
 
         def move_of(mid: int, oid: int, ref: sharp.Reference):
             return sharp.sharp_move(snaps, cat, mid, oid, before, ref)
 
         flags = quant.team_flags(team_ids[0], team_ids[1], before) if quant else {"home": {}, "away": {}}
-        weights = quant.weights if quant else sharp.PoolWeights()
         hours = (pd.Timestamp(kickoff) - pd.Timestamp(now)).total_seconds() / 3600.0
-        sg.apply_circuit(cands, reference_of, lambda fam: weights.weight(fam, competition), move_of,
+        sg.apply_circuit(cands, reference_of, lambda fam: weights.weight(fam, competition), move_of, margin_of=lambda fam: weights.margin(fam, competition),
                          overperforming={k: v.get("overperforming", False) for k, v in flags.items()},
                          dependency={k: v.get("hub") for k, v in flags.items()}, hours_to_kickoff=hours)
         markets = {c.market_id for c in cands}
@@ -570,7 +579,7 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
                          "capPerMatch": circuit.CAP_PER_MATCH, "capHighOdds": circuit.CAP_HIGH_ODDS, "highOdds": circuit.HIGH_ODDS, "evMin": circuit.EV_MIN,
                          "evMinLowMargin": circuit.EV_MIN_LOW_MARGIN, "evMax": circuit.EV_MAX, "edgeMax": circuit.EDGE_MAX, "favoriteOdds": circuit.FAVORITE_ODDS,
                          "lineupHours": circuit.LINEUP_HOURS, "combos": False},
-               "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights,
+               "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights, "calibrationMargins": sharp.PoolWeights.load().margins,
                              "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
                "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:],
                "history": history(journal, results, names, generated_at)}

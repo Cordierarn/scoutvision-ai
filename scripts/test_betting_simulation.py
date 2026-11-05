@@ -202,3 +202,44 @@ class SettlementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComPoissonTests(unittest.TestCase):
+    def test_com_poisson_keeps_the_mean_and_reduces_the_variance_when_nu_exceeds_one(self):
+        k = np.arange(sm.MAX_GOALS + 1)
+        for mu in (0.6, 1.4, 2.3):
+            p1 = sm.com_poisson_pmf(mu, 1.0); p2 = sm.com_poisson_pmf(mu, 1.2)
+            np.testing.assert_allclose(p1, sm._marginal(mu, sm.Variant(), sm.MAX_GOALS), atol=1e-6)        # nu = 1 : Poisson
+            self.assertAlmostEqual(float((p2 * k).sum()), mu, places=3)
+            var1 = float((p1 * k ** 2).sum() - mu ** 2); var2 = float((p2 * k ** 2).sum() - mu ** 2)
+            self.assertLess(var2, var1); self.assertLess(var2, mu)
+
+    def test_total_shrink_keeps_the_supremacy_and_moves_the_total_toward_the_mean(self):
+        v = sm.Variant("compoisson", shrink=0.8, mean_total=2.7)
+        h, a = v.expected(2.4, 0.6)                                     # total 3,0 → 2,7 + 0,8 × 0,3 = 2,94 ; différence 1,8 conservée
+        self.assertAlmostEqual(h + a, 2.94); self.assertAlmostEqual(h - a, 1.8)
+        self.assertEqual(sm.Variant("compoisson", shrink=1.0, mean_total=2.7).expected(2.4, 0.6), (2.4, 0.6))
+        self.assertEqual(sm.Variant("compoisson", shrink=0.8).expected(2.4, 0.6), (2.4, 0.6))               # sans référence : rien
+        m = sm.score_matrix(2.4, 0.6, v)
+        self.assertAlmostEqual(float(m.sum()), 1.0)
+        idx = np.add.outer(np.arange(sm.MAX_GOALS + 1), np.arange(sm.MAX_GOALS + 1))
+        self.assertLess(float(m[idx > 2.5].sum()), float(sm.score_matrix(2.4, 0.6)[idx > 2.5].sum()))   # total rétréci : moins de plus de 2,5
+
+    def test_dixon_coles_applies_whenever_rho_is_set(self):
+        plain = sm.score_matrix(1.4, 1.2, sm.Variant("compoisson", nu=1.1))
+        dc = sm.score_matrix(1.4, 1.2, sm.Variant("compoisson", nu=1.1, rho=-0.05))
+        self.assertGreater(dc[0, 0], plain[0, 0]); self.assertLess(dc[1, 0], plain[1, 0])        # rho < 0 : plus de 0-0, moins de 1-0
+
+    def test_fit_compoisson_finds_underdispersion_and_shrink_on_synthetic_scores(self):
+        rng = np.random.default_rng(3)
+        n = 2500
+        xg_h = rng.uniform(0.8, 2.2, n); xg_a = rng.uniform(0.6, 1.8, n)
+        truth = sm.Variant("compoisson", nu=1.2, shrink=0.8, mean_total=float((xg_h + xg_a).mean()), rho=-0.03)
+        ft_h, ft_a = np.empty(n, int), np.empty(n, int)
+        for i in range(n):
+            m = sm.score_matrix(xg_h[i], xg_a[i], truth)
+            flat = rng.choice(m.size, p=m.ravel()); ft_h[i], ft_a[i] = divmod(int(flat), sm.MAX_GOALS + 1)
+        fitted = sm.fit_variant("compoisson", xg_h, xg_a, ft_h, ft_a)
+        self.assertGreaterEqual(fitted.nu, 1.1); self.assertLessEqual(fitted.nu, 1.3)
+        self.assertGreaterEqual(fitted.shrink, 0.7); self.assertLessEqual(fitted.shrink, 0.9)
+        self.assertAlmostEqual(fitted.mean_total, truth.mean_total, places=6)

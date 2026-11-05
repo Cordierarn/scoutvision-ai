@@ -269,6 +269,24 @@ class CircuitTests(unittest.TestCase):
         self.assertEqual(circuit.cap_match([0.02, 0.01]), [0.02, 0.01])
 
 
+class CalibrationMarginTests(unittest.TestCase):
+    def test_ev_threshold_adds_the_segment_margin_and_assess_records_the_required_ev(self):
+        self.assertAlmostEqual(circuit.ev_threshold("plus/moins"), 0.025); self.assertAlmostEqual(circuit.ev_threshold("résultat"), 0.04)
+        self.assertAlmostEqual(circuit.ev_threshold("plus/moins", 0.035), 0.06); self.assertAlmostEqual(circuit.ev_threshold("résultat", -0.1), 0.04)
+        ref = sharp.Reference("pinnacle", 101, dt.datetime(2026, 11, 7, 12, tzinfo=dt.timezone.utc), 0.03, 0.01, {101: 0.5, 102: 0.28, 103: 0.22}, {101: 0.5, 102: 0.28, 103: 0.22}, {101: 1.94, 102: 3.5, 103: 4.4})
+        spec = mk.Spec("1x2", "fulltime", 0.0, "1")
+        ok = circuit.assess(0.5, 2.12, "résultat", spec, ref, 101, 0.0)                    # EV = 0,5 × 2,12 − 1 = 6 % ≥ 4 %
+        self.assertEqual(ok.blocks, []); self.assertAlmostEqual(ok.ev_min, 0.04)
+        blocked = circuit.assess(0.5, 2.12, "résultat", spec, ref, 101, 0.0, ev_margin=0.03)   # seuil 7 % : refusé
+        self.assertEqual(blocked.blocks, ["ev_insuffisant"]); self.assertAlmostEqual(blocked.ev_min, 0.07)
+
+    def test_pool_weights_expose_margins_and_references_with_family_fallback(self):
+        pw = sharp.PoolWeights({"BTTS / clean sheet": 0.2, "plus/moins|ENG": 0.1}, {"BTTS / clean sheet": 0.021}, {"BTTS / clean sheet": "winamax"})
+        self.assertEqual((pw.weight("BTTS / clean sheet", "ESP"), pw.margin("BTTS / clean sheet", "ESP"), pw.reference("BTTS / clean sheet", "ESP")), (0.2, 0.021, "winamax"))
+        self.assertEqual((pw.weight("plus/moins", "ENG"), pw.margin("plus/moins", "ENG"), pw.reference("plus/moins", "ENG")), (0.1, 0.0, "sharp"))
+        self.assertEqual(sharp.PoolWeights().reference("x", "y"), "sharp")
+
+
 class SuggestMatchTests(unittest.TestCase):
     """suggest_match avec l'archive : Winamax pour les cotes jouées, Pinnacle pour la référence."""
 
