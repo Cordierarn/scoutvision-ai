@@ -322,6 +322,22 @@ class SuggestMatchTests(unittest.TestCase):
         res = product.suggest_match(self.sims, outcomes, KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B", snaps=snaps, cat=CAT, quant=self.quant, team_ids=("tA", "tB"))
         self.assertEqual(res["excluded"].get("marche_retire"), 1)
 
+    def test_exploratory_profile_lists_refused_outcomes_ranked_by_market_expected_value(self):
+        res = self.run_match(self.archive(winamax_home=1.80, pinnacle_home=1.80))  # Winamax trop proche de Pinnacle : rien de validé
+        self.assertEqual(res["profiles"]["equilibre"]["suggestions"], [])
+        expl = res["profiles"]["exploratoire"]["suggestions"]
+        self.assertTrue(expl)
+        self.assertLessEqual(len(expl), 3)
+        for s in expl:
+            self.assertTrue(1.60 <= s["odds"] <= 6.00); self.assertEqual((s["stakeMode"], s["stakeFraction"], s["verdict"]), ("fixed", 0.005, "exploratoire"))
+            self.assertAlmostEqual(s["evRef"], s["pSharp"] * s["odds"] - 1, places=3)
+            self.assertGreaterEqual(s["p"], s["pSharp"])                              # le moteur au moins d'accord avec le marché
+            self.assertTrue(s["reasons"][0].startswith("Hors coupe-circuit"))
+        evs = [s["evRef"] for s in expl]
+        self.assertEqual(evs, sorted(evs, reverse=True))
+        bare = product.suggest_match(self.sims, product.outcomes_from_snapshots(self.archive(), CAT, pd.Timestamp(self.now), "Club A", "Club B"), KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B")
+        self.assertEqual(bare["profiles"]["exploratoire"]["suggestions"], [])     # sans archive : aucune probabilité de marché inventée
+
     def test_winamax_late_on_pinnacle_is_a_bet_with_sharp_probability(self):
         res = self.run_match(self.archive(winamax_home=2.05, pinnacle_home=1.72))      # Winamax paie 2,05 un favori que Pinnacle met à 1,72
         sug = res["profiles"]["equilibre"]["suggestions"]
@@ -338,13 +354,13 @@ class SuggestMatchTests(unittest.TestCase):
 
     def test_fair_winamax_price_means_no_bet(self):
         res = self.run_match(self.archive(winamax_home=1.85, pinnacle_home=1.80))
-        self.assertEqual(sum(len(b["suggestions"]) for b in res["profiles"].values()), 0)
+        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k != "exploratoire"), 0)
         self.assertIn("ev_insuffisant", res["excluded"])
         self.assertIsNotNone(res["noBet"]); self.assertIn("espérance insuffisante", res["noBet"]["reasons"][0])
 
     def test_without_sharp_reference_nothing_is_bet(self):
         res = self.run_match(self.archive(winamax_home=2.05, with_pinnacle=False))
-        self.assertEqual(sum(len(b["suggestions"]) for b in res["profiles"].values()), 0)
+        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k != "exploratoire"), 0)
         self.assertEqual(set(res["excluded"]), {"reference_absente"})
         self.assertEqual(res["sharpCoverage"], 0.0)
         self.assertEqual(res["noBet"]["codes"], ["reference_absente"])

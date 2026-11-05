@@ -119,7 +119,7 @@ function loadOptional<T>(path: string): Promise<T | null> {
 
 
 // ----- Suggestions de paris (Labo paris, onglet Matchs à venir) : artefact privé calculé par le pipeline -----
-export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote';
+export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote' | 'exploratoire';
 export type StakeMode = 'shrink_kelly' | 'kelly' | 'fixed';
 export interface Suggestion {
   rank: number; marketId: number; outcomeId: number; family: string; label: string;
@@ -127,7 +127,7 @@ export interface Suggestion {
   stakeFraction: number; stakeMode: StakeMode; reasons: string[];
   /** Étape 1 du moteur quantitatif : probabilité sharp (Shin), probabilité de référence (pool), espérance face à elle */
   pSharp?: number | null; pRef?: number; evRef?: number | null; poolW?: number | null; sharpBookmaker?: string | null; sharpAt?: string | null;
-  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue';
+  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue' | 'exploratoire';
 }
 export interface SuggestionCombo {
   labels: string[]; marketIds: number[]; outcomeIds: number[]; jointP: number; odds: number; ev: number;
@@ -144,7 +144,7 @@ export interface SuggestionMatch {
   matchId: string; competition: string; date: string; home: string; away: string;
   status: 'ok' | 'no_odds'; kickoff?: string; oddsAt?: string; oddsStale?: boolean; xg?: [number, number];
   evaluated?: number; excluded?: Record<string, number>;
-  profiles?: Record<SuggestionProfile, { suggestions: Suggestion[]; combo: SuggestionCombo | null }>;
+  profiles?: Partial<Record<SuggestionProfile, { suggestions: Suggestion[]; combo: SuggestionCombo | null }>>;
   noBet?: NoBet | null; sharpCoverage?: number | null; teams?: { home: TeamFlags; away: TeamFlags };
 }
 /** CLV : part des paris où la clôture sharp est connue, CLV moyen et part des paris qui la battent. */
@@ -164,7 +164,7 @@ export interface SuggestionsIndex {
   };
   reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; calibrationMargins?: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
   matches: SuggestionMatch[];
-  bilan: { start: number; profiles: Record<SuggestionProfile, BilanProfile> } | null;
+  bilan: { start: number; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
   evenings?: EveningSummary[];
   history?: HistoryDay[];

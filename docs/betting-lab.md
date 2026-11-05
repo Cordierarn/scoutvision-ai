@@ -534,6 +534,38 @@ Relecture prévue : fin 2025-26 pour la catégorie A (GER, NED), et chaque semai
 l'archive 2026-27 grandit (150 matchs par partie et par compétition vers février 2027). La porte tourne dans
 `betting-odds.yml` avant les suggestions, `update-data.yml` la recalcule sans la catégorie B (archive absente).
 
+## Profil exploratoire (5 novembre 2026)
+
+À la demande du propriétaire, un quatrième profil, **Exploratoire**, s'ajoute à Sûr, Équilibré et Grosse cote dans
+Matchs à venir et dans le Suivi des paris. Les trois profils validés restent inchangés : ils n'affichent que ce qui
+passe le coupe-circuit, donc le plus souvent « pas de pari ». Le profil exploratoire montre chaque soir quelque chose
+à suivre, en le disant clairement : **ce ne sont pas des paris validés**.
+
+Règles (`suggest.explore`, `product._explore_block`) :
+
+- issues refusées par le coupe-circuit pour espérance insuffisante ou faute de référence sharp seulement (jamais une
+  cote ancienne, une issue retirée, une famille mal calibrée, un mouvement sharp contraire, un favori surperformant
+  ou un écart suspect) ;
+- cote de 1,60 à 6,00 ;
+- probabilité du marché sans marge : Pinnacle ou Betfair quand le marché y est coté, sinon le marché Winamax complet
+  dévigé par la méthode de Shin (un marché à une seule issue, comme le remboursé si nul archivé, est ignoré) ;
+- le moteur au moins d'accord avec le marché (probabilité du moteur ≥ probabilité du marché) ;
+- classées par espérance de la cote Winamax face au marché sans marge, la moins négative d'abord ; trois au plus par
+  match, une par groupe de doublons ;
+- mise fixe symbolique de 0,5 % de la bankroll ; journalisées sous le profil `exploratoire` pour suivre leur
+  rendement réel et leur CLV, comme les autres.
+
+Mesure sur les 56 matchs à venir du 5 novembre : 168 sélections (trois par match), cote médiane 1,76, espérance face
+au marché médiane −13 % (meilleure −8 %), référence Pinnacle pour un tiers, Winamax sans marge pour le reste. Ce
+chiffre est la marge de Winamax : il mesure ce que coûte en moyenne un pari sur ces marchés. Relâcher l'accord du
+moteur ne change presque rien (−13,0 % au lieu de −13,4 %).
+
+L'assistant IA accepte le profil exploratoire : son prompt précise alors que les sélections ne sont pas validées, que
+leur espérance face au marché est le plus souvent négative et qu'elles servent à suivre le moteur. La recherche
+d'actualité de Claude peut désormais ouvrir jusqu'à trois articles en entier (outil serveur de lecture d'URL) quand
+l'extrait d'un résultat ne suffit pas à confirmer une absence ou une composition ; les pages lues passent en tête des
+sources.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans

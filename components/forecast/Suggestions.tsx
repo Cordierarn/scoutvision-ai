@@ -9,7 +9,7 @@
 import React, { useId } from 'react';
 import type { BilanProfile, Suggestion, SuggestionMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
 import { InfoTip, Panel, Stat, StatStrip } from '../ui';
-import { CIRCUIT_NOTE, PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, oddsAge, sharpLabel, stakeEuros, stakeLabel } from './suggestionsLogic';
+import { CIRCUIT_NOTE, EXPLORE_NOTE, isExploratory, PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, oddsAge, sharpLabel, stakeEuros, stakeLabel } from './suggestionsLogic';
 
 const evClass = (ev: number) => (ev > 0 ? 'text-pos' : 'text-ink-2');
 
@@ -58,7 +58,8 @@ export const SuggestionsControls: React.FC<{
           <button type="button" onClick={onShowHistory} className="text-accent underline underline-offset-2 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">Voir le suivi des paris</button>
         </p>
       )}
-      {o && o.bets > 0 ? (
+      {isExploratory(profile) && <p role="note" className="text-xs text-warn mt-3">{EXPLORE_NOTE}{journal && journal.bets ? ` Journal réel : ${journal.bets} réglés, rendement ${formatEv(journal.returnFlat ?? 0)}.` : ''}</p>}
+      {isExploratory(profile) ? null : o && o.bets > 0 ? (
         <StatStrip className="mt-4 grid-cols-2 lg:grid-cols-4">
           <Stat label={`Bilan ${index.season} · ${PROFILE_LABELS[profile]}`} value={`${o.bets} paris`} sub="rejeu sur les matchs joués, cotes du dernier relevé avant coup d'envoi" />
           <Stat label="Réussite" value={o.hitRate === null ? 'N/D' : formatPct(o.hitRate)} sub="paris gagnés (demi-gains comptés)" />
@@ -95,7 +96,7 @@ const SuggestionRow: React.FC<{ s: Suggestion; bankroll: number | null; bilan?: 
         <span className="text-ink min-w-0">{s.label}</span>
         <span className="num text-ink text-right" title={`Cote Winamax relevée à ${age.time}`}>{formatOdds(s.odds)} <span className="text-2xs text-ink-4">{age.time}{age.stale ? ' · ancienne' : ''}</span></span>
         <span className="num text-right text-ink-2" title="Probabilité de la simulation ScoutVision">{formatPct(s.p)}</span>
-        <span className="num text-right text-ink-2" title={sharp ?? 'Pas de référence sharp'}>{s.pSharp === null || s.pSharp === undefined ? '–' : formatPct(s.pSharp)}</span>
+        <span className="num text-right text-ink-2" title={sharp ?? 'Pas de référence de marché'}>{s.pSharp === null || s.pSharp === undefined ? '–' : formatPct(s.pSharp)}</span>
         <span className={`num text-right ${evClass(ev)}`} title="Espérance pour 1 € misé, cote Winamax face à la probabilité de référence">{formatEv(ev)}</span>
         <span className="num text-right text-ink" title={stakeLabel(s.stakeMode)}>{bankroll === null ? 'N/D' : formatEuros(stake)}{s.stakeMode === 'fixed' && <span className="text-2xs text-ink-4"> fixe</span>}</span>
       </div>
@@ -104,7 +105,7 @@ const SuggestionRow: React.FC<{ s: Suggestion; bankroll: number | null; bilan?: 
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 num text-xs">
           <span className="text-ink">cote {formatOdds(s.odds)} <span className="text-ink-4">{age.time}{age.stale ? ' · ancienne' : ''}</span></span>
           <span className="text-ink-2">moteur {formatPct(s.p)}</span>
-          {s.pSharp !== null && s.pSharp !== undefined && <span className="text-ink-2">sharp {formatPct(s.pSharp)}</span>}
+          {s.pSharp !== null && s.pSharp !== undefined && <span className="text-ink-2">{s.verdict === 'exploratoire' ? 'marché' : 'sharp'} {formatPct(s.pSharp)}</span>}
           <span className={evClass(ev)}>esp. {formatEv(ev)}</span>
           <span className="text-ink">mise {bankroll === null ? 'N/D' : formatEuros(stake)}{s.stakeMode === 'fixed' ? ' (fixe)' : ''}</span>
         </div>
@@ -150,13 +151,15 @@ export const SuggestionsBlock: React.FC<{ match: SuggestionMatch | undefined; pr
     return (
       <details className="px-4 pb-2 group" open={open}>
         <summary className="cursor-pointer text-xs text-ink-2 py-1 select-none rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
-          Suggestions de paris <span className="text-ink-4">· {list.length ? `${list.length} ${PROFILE_LABELS[profile].toLowerCase()}` : 'pas de pari'}{match.oddsStale ? ' · cotes anciennes, non suggérées' : ''}{match.sharpCoverage !== undefined && match.sharpCoverage !== null && match.sharpCoverage < 1 ? ` · référence sharp sur ${formatPct(match.sharpCoverage)} des marchés` : ''}</span>
+          {isExploratory(profile) ? 'Sélections exploratoires' : 'Suggestions de paris'} <span className="text-ink-4">· {list.length ? `${list.length} ${PROFILE_LABELS[profile].toLowerCase()}${isExploratory(profile) ? ', non validées' : ''}` : isExploratory(profile) ? 'aucune' : 'pas de pari'}{match.oddsStale ? ' · cotes anciennes, non suggérées' : ''}{match.sharpCoverage !== undefined && match.sharpCoverage !== null && match.sharpCoverage < 1 ? ` · référence sharp sur ${formatPct(match.sharpCoverage)} des marchés` : ''}</span>
         </summary>
         {list.length === 0 ? (
-          <NoBetNote match={match} />
+          isExploratory(profile)
+            ? <p className="text-2xs text-ink-4 py-1">Aucune cote de 1,60 à 6,00 que le moteur juge au moins aussi probable que le marché sans marge sur ce match.</p>
+            : <NoBetNote match={match} />
         ) : (
           <>
-            <div className={`hidden sm:grid ${GRID} gap-3 sv-label text-right mt-1`}><span /><span className="text-left">Sélection</span><span>Cote · relevé</span><span>Moteur</span><span>Sharp</span><span>Espérance</span><span>Mise</span></div>
+            <div className={`hidden sm:grid ${GRID} gap-3 sv-label text-right mt-1`}><span /><span className="text-left">Sélection</span><span>Cote · relevé</span><span>Moteur</span><span>{isExploratory(profile) ? 'Marché' : 'Sharp'}</span><span>{isExploratory(profile) ? 'Esp. marché' : 'Espérance'}</span><span>Mise</span></div>
             <ul className="list-none m-0 p-0">
               {list.map(s => <SuggestionRow key={`${s.marketId}-${s.outcomeId}`} s={s} bankroll={bankroll} bilan={bilan} now={now} />)}
             </ul>

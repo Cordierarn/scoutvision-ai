@@ -17,6 +17,8 @@ const match: SuggestionMatch = {
       pSharp: 0.54, pRef: 0.54, evRef: 0.053, poolW: 0, sharpBookmaker: 'pinnacle', warnings: ['dependance_joueur_cle'], verdict: 'bet' }],
       combo: { labels: ['Club A gagne', 'Plus de 2,5 buts'], marketIds: [101, 106], outcomeIds: [101, 106], jointP: 0.35, odds: 3.16, ev: 0.106, stakeFraction: 0.01, stakeMode: 'kelly' } },
     grosse_cote: { suggestions: [], combo: null },
+    exploratoire: { suggestions: [{ rank: 1, marketId: 104, outcomeId: 104, family: 'BTTS / clean sheet', label: 'Les deux équipes marquent', odds: 1.85, oddsAt: '2026-11-07T13:40:00Z', p: 0.55, ev: 0.0175, stakeFraction: 0.005, stakeMode: 'fixed',
+      reasons: ['Hors coupe-circuit : marché Winamax sans marge 52,0 %, moteur 55,0 %, cote 1,85 → espérance face au marché −3,8 %'], pSharp: 0.52, pRef: 0.52, evRef: -0.038, poolW: null, sharpBookmaker: 'winamax.fr', warnings: [], verdict: 'exploratoire' }], combo: null },
   },
   noBet: { label: 'Club B gagne', family: 'résultat', odds: 4.2, p: 0.3, pSharp: 0.22, evRef: -0.076, reasons: ['espérance insuffisante face au marché sharp'], codes: ['ev_insuffisant'] },
   sharpCoverage: 0.8,
@@ -42,6 +44,22 @@ describe('Suggestions (rendu statique)', () => {
     expect(sur).toContain('Club A gagne');
     expect(sur).toContain('fixe'); // espérance négative : mise fixe signalée
     expect(sur).toContain('6,00');
+  });
+
+  it('affiche le profil exploratoire comme non validé, espérance face au marché et mise symbolique', () => {
+    const html = renderToStaticMarkup(<SuggestionsBlock match={match} profile="exploratoire" bankroll={300} open now={NOW} />);
+    expect(html).toContain('Sélections exploratoires');
+    expect(html).toContain('non validées');
+    expect(html).toContain('Esp. marché');
+    expect(html).toContain('Les deux équipes marquent');
+    expect(html).toContain('1,50'); // 300 × 0,005
+    expect(html).toContain('−4'); // espérance face au marché négative
+    const controls = renderToStaticMarkup(<SuggestionsControls index={index} profile="exploratoire" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />);
+    expect(controls).toContain('Exploratoire');
+    expect(controls).toContain('ne sont pas des paris validés');
+    const empty = renderToStaticMarkup(<SuggestionsBlock match={{ ...match, profiles: { ...match.profiles, exploratoire: { suggestions: [], combo: null } } }} profile="exploratoire" bankroll={300} open now={NOW} />);
+    expect(empty).toContain('Aucune cote de 1,60 à 6,00');
+    expect(empty).not.toContain('Pas de pari.');
   });
 
   it('signale une bankroll invalide par N/D et le champ en erreur', () => {
