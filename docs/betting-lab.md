@@ -189,9 +189,10 @@ Gains réels mais faibles : l'essentiel de l'information est déjà dans la base
 - Combiné : 2 ou 3 sélections de groupes différents, compatibles et non emboîtées, probabilité jointe =
   co-occurrence dans la simulation, cote = produit ; proposé si l'espérance jointe est positive, ou en
   profil « Sûr » si la probabilité jointe atteint 45 %.
-- Mises : quart de Kelly, plafonds 5 % par pari et 15 % par match ; espérance négative → mise fixe 2 %
-  signalée. Le pipeline publie des fractions ; le navigateur applique la bankroll saisie (300 € par
-  défaut, mémorisée dans `localStorage`).
+- Mises (jusqu'au 5 novembre 2026 ; voir l'étape 1 du moteur quantitatif plus bas) : quart de Kelly,
+  plafonds 5 % par pari et 15 % par match ; espérance négative → mise fixe 2 % signalée. Le pipeline publie
+  des fractions ; le navigateur applique la bankroll saisie (300 € par défaut, mémorisée dans
+  `localStorage`).
 - Raisons : forme à domicile / à l'extérieur sur 5 matchs, buts attendus du modèle, confrontations
   directes, part de 1re mi-temps pour les marchés de mi-temps.
 - Rejeu 2026-27 (`product replay`) : prévisions figées, features point-in-time, dernier relevé avant le
@@ -257,6 +258,77 @@ encre neutre.
 - Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement) et
   `PITCHAPI_DATA_TOKEN`. Depuis l'environnement de développement, ESPN et les releases ne sont pas
   accessibles : l'historique se règle en CI.
+
+## Étape 1 du moteur quantitatif : référence sharp, coupe-circuit, CLV (5 novembre 2026)
+
+Décision du propriétaire, après le bilan du rejeu (1 862 paris simulés 2026-27, rendement à mise fixe −8,5 % à
+−14,7 %, bankroll de 300 € ramenée à 7 €, 5 € et 1 € selon le profil) : le marché est efficient par défaut,
+la réponse normale est « pas de pari », et 100 % des calculs (devigging, espérance, coupe-circuit, mise)
+vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étapes ; ceci est l'étape 1.
+
+### Référence sharp (`scripts/betting/sharp.py`)
+
+- **Bookmakers.** `winamax.fr` reste le bookmaker d'exécution (cote jouée, espérance et mise). `pinnacle`
+  puis `betfair-ex` (OddsPapi) sont les références ; les trois tiennent dans la même requête (3 bookmakers
+  par appel) : la référence ne coûte aucune requête. `fetch history --refresh-sharp` redemande les matchs
+  archivés avant cette collecte (CLV et rejeu) ; le workflow le fait le matin par lots de 150.
+- **Devigging.** Méthode de Shin (part de parieurs informés z, marge plus lourde sur les outsiders),
+  comparée à la méthode des puissances (p_i = q_i^k) et à la proportionnelle ; les deux premières sont
+  publiées dans la référence. Un marché n'est une référence que s'il est complet (issues qui se partagent
+  la probabilité 1 : 1N2, deux issues de plus/moins et de handicap quelle que soit la ligne, BTTS, score
+  exact avec « autre »…), relevé moins de 6 h avant l'instant de décision ; sinon : pas de référence,
+  pas de pari. Jamais une probabilité inventée.
+- **Probabilité de référence.** p_ref ∝ p_modèle^w · p_sharp^(1−w) (pool logarithmique sur l'issue et son
+  complément). w = 0 par défaut pour tout segment famille × compétition
+  (`.research/betting/phase2/pool_weights.json`, écrit par l'étape 2 seulement quand le poids hors
+  échantillon d'un segment est strictement positif). Avec w = 0, le Labo ne détecte donc que les cas où
+  Winamax est en retard sur Pinnacle / Betfair.
+- **Mouvement sharp.** Variation de p_sharp entre un relevé de référence (H−24, sinon le plus ancien à au
+  moins 3 h) et le relevé courant, avec la limite de mise du marché quand OddsPapi la fournit (colonne
+  `limit`, souvent nulle) : une baisse de la probabilité de la sélection avec limite en hausse
+  (« limit-backed ») bloque le pari ; sans limite connue, seule une forte baisse (≥ 3 points) bloque.
+
+### Coupe-circuit et mise (`scripts/betting/circuit.py`, `opd.py`, `dependency.py`)
+
+Après les exclusions antérieures (cote < 1,30, relevé > 2 h, famille mal calibrée), chaque sélection est
+refusée si : pas de référence sharp ; espérance (cote Winamax × p_ref − 1) < 2,5 % sur le handicap
+asiatique et les plus/moins, < 4 % ailleurs ; espérance > 20 % ou écart p_ref − p_sharp > 15 points
+(« winner's curse » : plus probablement une donnée non observée) ; mouvement sharp contraire ; favori coté
+sous 1,55 dont l'équipe a dépassé ses xG de 3 buts ou ses points attendus de 2,5 sur ses 5 derniers
+matchs (OPD, xG de `replay_pitchapi.parquet`). Avertissements sans refus : à plus de 12 h du coup d'envoi,
+une équipe qui dépend fortement d'un joueur clé (≥ 30 % de l'intermédiarité des titulaires habituels dans
+le réseau de passes publié) divise le plafond de mise par deux ; limite de mise inconnue.
+
+Mise : Kelly rétréci f = κ (p_ref × cote − 1) / (cote − 1), κ = 0,15, plafonds 2,5 % par pari, 1 % au-delà
+d'une cote de 3,50, 5 % par match. Aucune mise sur une espérance négative : la sélection n'existe pas.
+Combinés désactivés (corrélation intra-match non mesurable face au marché). Les profils classent les seules
+sélections validées, sur p_ref.
+
+### CLV et produit
+
+- Journal : chaque suggestion publiée porte p_sharp, p_ref, espérance de référence, poids du pool,
+  bookmaker de référence ; après le coup d'envoi, `closing_p_sharp` (dernier marché complet avant le coup
+  d'envoi, sans borne d'âge) et `clv = cote prise × p_clôture − 1`. Le rejeu et le résumé du journal donnent
+  le CLV moyen et la part des paris qui battent la clôture (Buchdahl : le CLV juge une sélection bien plus
+  vite que le résultat, bruité par le hasard).
+- Export : `pSharp`, `pRef`, `evRef`, `poolW`, `sharpBookmaker`, `warnings`, `verdict` par suggestion ;
+  `noBet` par match (meilleure idée du moteur et motifs du refus), `sharpCoverage`, `teams` (OPD,
+  dépendance) ; `rules` et `reference` (bookmakers, méthode, poids, libellés) ; `schemaVersion` 1.1.0.
+- Interface : colonnes Moteur / Sharp / Espérance (face à la référence) / Mise ; « Pas de pari » avec la
+  meilleure idée refusée et ses motifs ; CLV par pari et CLV moyen dans le Suivi des paris.
+- Assistant IA : reçoit les seuls faits calculés (cote Winamax, probabilités moteur / sharp / référence,
+  espérance, mise, motifs de « pas de pari », dépendance à un joueur clé, surperformance récente) ; verdicts
+  « garder / prudence / éviter » sur les seules sélections validées ; les « pas de pari » du moteur sont
+  placés en tête des matchs à éviter avec la raison calculée ; aucune sélection validée nulle part → plan
+  déterministe sans appel au modèle.
+
+### Ce que l'étape 1 ne fait pas encore
+
+Pas de poids w > 0 (étape 2 : porte de validation par segment sur la clôture Pinnacle de football-data,
+handicap asiatique et plus/moins compris) ; pas de composition probable avant H−1 (seule la dépendance à
+un joueur clé est signalée) ; pas de Betfair après commission (prix bruts) ; pas de décorrélation ni
+d'agrégation du onze (étape 4). L'archive antérieure au 5 novembre n'a pas de bookmaker de référence :
+le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est archivé pour le match.
 
 ## Phases suivantes
 

@@ -5,10 +5,11 @@ Ligne de commande du Labo paris, phase 1 (tout sous .research/betting/, ignoré 
   python3 -m betting.fetch status [--account]              compteur local du quota (et compteur serveur, 1 requête)
   python3 -m betting.fetch fixtures --from 2026-07-01 --to 2026-11-10
                                                            rencontres Big 5 (1 requête par fenêtre de 10 jours)
-  python3 -m betting.fetch history --max-requests 20 [--since 2026-10-01] [--competitions ENG,ESP] [--refresh-players]
+  python3 -m betting.fetch history --max-requests 20 [--since 2026-10-01] [--competitions ENG,ESP] [--refresh-players | --refresh-sharp]
                                                            historique Winamax complet des matchs terminés non archivés,
                                                            du plus récent au plus ancien (1 requête par match) ;
                                                            --refresh-players redemande les matchs archivés sans marché joueur
+                                                           --refresh-sharp redemande ceux archivés sans Pinnacle ni Betfair (référence, CLV)
   python3 -m betting.fetch snapshot                        relevé courant des rencontres à venir (1 requête décomptée par tournoi)
   python3 -m betting.fetch upcoming [--days 7] [--per-fixture]  cotes courantes des rencontres à venir (un appel par tournoi)
   python3 -m betting.fetch views                           vues dérivées premier / H−24 / H−1 / dernier avant coup d'envoi
@@ -29,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import BOOKMAKER, COMPETITIONS, RESEARCH, ROOT, TOURNAMENTS
+from . import BOOKMAKER, BOOKMAKERS, COMPETITIONS, RESEARCH, ROOT, SHARP_BOOKMAKERS, TOURNAMENTS
 from . import archive, matching
 from .client import OddsPapiClient, QuotaExceeded
 
@@ -147,6 +148,10 @@ def cmd_history(args) -> int:
     if args.refresh_players:
         # matchs archivés sans aucun marché joueur (plan sans « player props » au moment de l'appel) : à redemander
         done = set(snaps.loc[snaps["player_id"].notna(), "fixture_id"].unique())
+    elif getattr(args, "refresh_sharp", False):
+        # matchs archivés avant la collecte des bookmakers de référence (Pinnacle, Betfair) : à redemander, la
+        # même requête rapporte les trois bookmakers (le CLV et le rejeu en ont besoin)
+        done = set(snaps.loc[snaps["bookmaker"].isin(SHARP_BOOKMAKERS), "fixture_id"].unique())
     else:
         done = set(snaps["fixture_id"].unique())
     todo = fx[(fx["status_id"] == STATUS_FINISHED) & fx["competition"].isin(comps) & ~fx["fixture_id"].isin(done)]
@@ -159,7 +164,7 @@ def cmd_history(args) -> int:
     buffer = SnapshotBuffer()
     for f in todo.head(budget).itertuples(index=False):
         try:
-            payload = client.historical_odds(f.fixture_id, [BOOKMAKER])
+            payload = client.historical_odds(f.fixture_id, list(BOOKMAKERS))
         except QuotaExceeded as exc:
             print(str(exc))
             break
@@ -187,7 +192,7 @@ def cmd_upcoming(args) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     horizon = pd.Timestamp(now) + pd.Timedelta(days=args.days)
     try:
-        fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in COMPETITIONS], [BOOKMAKER])
+        fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in COMPETITIONS], list(BOOKMAKERS))
     except QuotaExceeded as exc:
         print(f"{exc} : repli sur /historical-odds match par match", flush=True)
         return _upcoming_per_fixture(client, args)
@@ -215,7 +220,7 @@ def _upcoming_per_fixture(client: OddsPapiClient, args) -> int:
     print(f"{len(todo)} rencontres à venir sous {args.days} jours (environ 6,5 s par rencontre)", flush=True)
     for f in todo.head(args.max_requests).itertuples(index=False):
         try:
-            payload = client.historical_odds(f.fixture_id, [BOOKMAKER])
+            payload = client.historical_odds(f.fixture_id, list(BOOKMAKERS))
         except QuotaExceeded as exc:
             print(str(exc)); break
         fetched += 1
@@ -234,7 +239,7 @@ def cmd_snapshot(args) -> int:
     player_props_enabled(client)
     comp_of = {tid: c for c, tid in TOURNAMENTS.items()}
     now = dt.datetime.now(dt.timezone.utc)
-    fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in COMPETITIONS], [BOOKMAKER])
+    fixtures = client.odds_by_tournaments([TOURNAMENTS[c] for c in COMPETITIONS], list(BOOKMAKERS))
     rows = archive.fixture_rows(fixtures, comp_of, season="")
     if not rows.empty:
         rows["season"] = rows["start_time"].map(archive.season_of)
@@ -300,7 +305,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("status"); p.add_argument("--account", action="store_true"); p.add_argument("--sync", action="store_true"); p.set_defaults(fn=cmd_status)
     p = sub.add_parser("fixtures"); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True); p.set_defaults(fn=cmd_fixtures)
-    p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.add_argument("--refresh-players", action="store_true"); p.set_defaults(fn=cmd_history)
+    p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.add_argument("--refresh-players", action="store_true"); p.add_argument("--refresh-sharp", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("snapshot"); p.set_defaults(fn=cmd_snapshot)
     p = sub.add_parser("upcoming"); p.add_argument("--days", type=int, default=7); p.add_argument("--max-requests", type=int, default=200); p.add_argument("--per-fixture", action="store_true"); p.set_defaults(fn=cmd_upcoming)
     p = sub.add_parser("views"); p.set_defaults(fn=cmd_views)

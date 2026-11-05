@@ -14,7 +14,7 @@ import {
   AssistantVerdict, MAX_ASSISTANT_MATCHES, NEWS_CONCURRENCY, RESPONSIBLE_GAMBLING, VERDICT_LABELS, candidateMatches, defaultSelection, googleSearchUrl,
   mapLimited, planStake, verdictClass,
 } from './assistantLogic';
-import { PROFILE_LABELS, formatEuros, formatOdds, formatPct, stakeEuros } from './suggestionsLogic';
+import { PROFILE_LABELS, formatEuros, formatEv, formatOdds, formatPct, stakeEuros } from './suggestionsLogic';
 
 type Phase = 'idle' | 'news' | 'plan' | 'done' | 'error';
 export interface NewsFailure { match: string; message: string }
@@ -80,19 +80,20 @@ export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; ne
       <section aria-label="Plan du jour">
         <h4 className="sv-label mb-1">Plan du jour · {PROFILE_LABELS[plan.profile as SuggestionProfile] ?? plan.profile}</h4>
         {plan.picks.length === 0 ? (
-          <p className="text-xs text-ink-3">Aucune sélection retenue : l'IA conseille de passer son tour sur ces matchs.</p>
+          <p className="text-xs text-ink-3">Aucune sélection : pas de pari sur ces matchs (coupe-circuit du moteur, ou actualité contraire).</p>
         ) : (
           <>
             <div className="hidden md:block overflow-x-auto">
               <table className="sv-table">
-                <thead><tr><th scope="col">Match</th><th scope="col">Sélection</th><th scope="col" className="text-right">Cote</th><th scope="col" className="text-right">Proba</th><th scope="col" className="text-right">Mise</th><th scope="col">Avis</th><th scope="col">Pourquoi</th></tr></thead>
+                <thead><tr><th scope="col">Match</th><th scope="col">Sélection</th><th scope="col" className="text-right">Cote</th><th scope="col" className="text-right" title="Probabilité de référence du moteur (marché sharp sans marge)">Proba réf.</th><th scope="col" className="text-right" title="Espérance de la cote Winamax face à la référence">Esp.</th><th scope="col" className="text-right">Mise</th><th scope="col">Avis</th><th scope="col">Pourquoi</th></tr></thead>
                 <tbody>
                   {plan.picks.map(p => (
                     <tr key={p.ref}>
                       <td className="text-ink whitespace-nowrap">{p.match}</td>
                       <td className="text-ink">{p.label}</td>
                       <td className="text-right num text-ink">{formatOdds(p.odds)}</td>
-                      <td className="text-right num text-ink-2">{formatPct(p.probability)}</td>
+                      <td className="text-right num text-ink-2" title={p.sharpProbability === null ? undefined : `moteur ${formatPct(p.engineProbability)} · sharp ${formatPct(p.sharpProbability)}`}>{formatPct(p.probability)}</td>
+                      <td className="text-right num text-pos">{formatEv(p.expectedValue)}</td>
                       <td className="text-right num text-ink">{bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, p.stakeFraction))}</td>
                       <td><VerdictTag v={p.verdict} /></td>
                       <td className="text-ink-2 text-xs">{p.why}</td>
@@ -108,7 +109,8 @@ export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; ne
                   <div className="text-ink-2 text-xs">{p.label}</div>
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 num text-xs mt-0.5">
                     <span className="text-ink">cote {formatOdds(p.odds)}</span>
-                    <span className="text-ink-2">proba {formatPct(p.probability)}</span>
+                    <span className="text-ink-2">proba réf. {formatPct(p.probability)}</span>
+                    <span className="text-pos">esp. {formatEv(p.expectedValue)}</span>
                     <span className="text-ink">mise {bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, p.stakeFraction))}</span>
                     <VerdictTag v={p.verdict} />
                   </div>
@@ -123,7 +125,7 @@ export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; ne
         {plan.avoid.length > 0 && (
           <div className="text-xs mt-2">
             <span className="text-ink">À éviter : </span>
-            {plan.avoid.map((a, i) => <span key={a.matchId} className="text-ink-2">{i > 0 && ' · '}{a.match}{a.why ? ` (${a.why})` : ''}</span>)}
+            {plan.avoid.map((a, i) => <span key={a.matchId} className="text-ink-2">{i > 0 && ' · '}{a.match}{a.why ? ` (${a.why})` : ''}{a.source === 'moteur' ? <span className="text-ink-4"> · moteur</span> : null}</span>)}
           </div>
         )}
         {plan.discipline && <p className="text-2xs text-ink-3 mt-2">{plan.discipline}</p>}
@@ -196,7 +198,7 @@ export const BettingAssistant: React.FC<{ index: SuggestionsIndex; profile: Sugg
 
   return (
     <Panel title="Assistant IA du jour" icon={Sparkles}
-      subtitle="L'IA cherche l'actualité d'avant-match sur le web (absences, compositions, rotation), que le moteur ne voit pas, et dit pour chaque suggestion s'il faut la garder, la prendre avec prudence ou l'éviter. Elle ne calcule ni probabilité, ni cote, ni mise.">
+      subtitle="L'IA cherche l'actualité d'avant-match sur le web (absences, compositions, rotation), que le moteur ne voit pas, et dit pour chaque sélection validée par le coupe-circuit s'il faut la garder, la prendre avec prudence ou l'éviter. Elle ne calcule ni probabilité, ni cote, ni mise, et ne contredit jamais un « pas de pari » du moteur.">
       {candidates.length === 0 ? (
         <p className="text-xs text-ink-3">Aucun match à venir avec des cotes : rien à analyser pour l'instant.</p>
       ) : (

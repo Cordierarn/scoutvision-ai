@@ -57,7 +57,7 @@ export interface MatchContext {
 }
 
 interface TeamRow { teamId: string; team: string; competition: string; profile: TeamProfile }
-interface PlayerAgg extends KeyPlayer { minutes: number }
+interface PlayerAgg extends KeyPlayer { minutes: number; totalMinutes?: number }
 
 type ForecastMatch = { match_id?: string; competition?: string; home?: string; away?: string; pHome?: number; pDraw?: number; pAway?: number; xgHome?: number; xgAway?: number;
   leverage?: { home?: { objective?: string; delta?: number }; away?: { objective?: string; delta?: number } }; market?: { fair?: number[] } };
@@ -125,14 +125,15 @@ export function contextLoader(dataDir: string): ContextLoader {
           const minutes = num(r[col.min]);
           const cur: PlayerAgg = prev ?? { name: String(r[col.name]), position: typeof r[col.pos] === 'string' ? r[col.pos] as string : null, age: r2(r[col.age]), matches: 0, starts: 0,
             minutesShare: null, goals: 0, assists: 0, xG: 0, xA: 0, rating: null, vaepPer90: null, rapmNet: r2(r[col.rapm]), minutes: 0 };
-          // part des minutes, note et impact : ceux de la compétition où le joueur a le plus joué
-          if (!prev || minutes > prev.minutes) { cur.minutesShare = r3(r[col.share]); cur.rating = r2(r[col.rating]); cur.vaepPer90 = r3(r[col.vaep]); }
+          // part des minutes, note et impact : ceux de la compétition où le joueur a le plus joué ; minutes et
+          // matchs cumulés sur toutes les compétitions (un seul match de coupe ne fait pas un titulaire)
+          if (!prev || minutes > prev.minutes) { cur.minutesShare = r3(r[col.share]); cur.rating = r2(r[col.rating]); cur.vaepPer90 = r3(r[col.vaep]); cur.minutes = minutes; }
           cur.matches += num(r[col.mp]); cur.starts += num(r[col.st]); cur.goals += num(r[col.g]); cur.assists += num(r[col.a]);
-          cur.xG = r2(num(cur.xG) + num(r[col.xg])); cur.xA = r2(num(cur.xA) + num(r[col.xa])); cur.minutes = Math.max(cur.minutes, minutes);
+          cur.xG = r2(num(cur.xG) + num(r[col.xg])); cur.xA = r2(num(cur.xA) + num(r[col.xa])); cur.totalMinutes = (cur.totalMinutes ?? 0) + minutes;
           players.set(id, cur);
         }
         return new Map([...byTeam].map(([team, ps]) => [team, [...ps.values()]
-          .sort((a, b) => (b.minutesShare ?? 0) - (a.minutesShare ?? 0) || b.minutes - a.minutes)]));
+          .sort((a, b) => (b.totalMinutes ?? 0) - (a.totalMinutes ?? 0) || (b.minutesShare ?? 0) - (a.minutesShare ?? 0))]));
       }));
     }
     return playersBySeason.get(season)!();
@@ -165,7 +166,7 @@ export function contextLoader(dataDir: string): ContextLoader {
       seasonStakes: lev?.objective && typeof lev.delta === 'number' ? { objective: lev.objective, swing: r3(lev.delta) ?? 0 } : null,
       profiles: all.sort((a, b) => (a.competition === competition ? -1 : b.competition === competition ? 1 : 0)).map(r => r.profile),
       usualSystem: top ? { formation: top.formation, matches: top.matches, xi: top.slots.map(s => s.players?.[0]?.[1]).filter((n): n is string => !!n) } : null,
-      keyPlayers: pickKeyPlayers(pool).map(({ minutes: _m, ...p }) => p),
+      keyPlayers: pickKeyPlayers(pool).map(({ minutes: _m, totalMinutes: _t, ...p }) => p),
     };
   };
 

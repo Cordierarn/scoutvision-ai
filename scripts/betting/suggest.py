@@ -13,9 +13,16 @@ Profils :
   improbable sont tous deux pénalisés ;
 - « Grosse cote » : cote ≥ 3,00, meilleure espérance.
 
-Mises (fraction de la bankroll, calculée ici ; le navigateur n'applique que la bankroll saisie) : quart de
-Kelly f = (p × cote − 1) / (cote − 1) / 4, plafonné à 5 % par pari et 15 % par match ; espérance négative →
-mise fixe de 2 % signalée comme telle.
+Coupe-circuit (étape 1 du moteur quantitatif, `circuit.py`) : chaque candidat admissible est ensuite confronté à
+la référence sharp (Pinnacle, sinon Betfair Exchange, probabilités de Shin) ; sans référence, sans espérance
+suffisante face à elle, avec un écart suspect, un mouvement sharp contraire ou un favori qui vient de
+dépasser ses xG, la sélection est refusée (« pas de pari »). Les profils classent les seules sélections qui
+passent, sur la probabilité de référence p_ref (sharp, ou pool modèle / sharp si l'étape 2 a validé le segment).
+
+Mises (fraction de la bankroll, calculée ici ; le navigateur n'applique que la bankroll saisie) : Kelly rétréci
+f = κ (p_ref × cote − 1) / (cote − 1), κ = 0,15, plafonné à 2,5 % par pari (1 % au-delà d'une cote de 3,50,
+moitié quand la composition est inconnue et l'équipe dépend d'un joueur clé) et 5 % par match. Aucune mise
+sur une espérance négative : la sélection n'existe pas.
 """
 
 from __future__ import annotations
@@ -25,7 +32,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from . import circuit
 from . import markets as mk
+from .circuit import Assessment
 from .simulate import Simulated
 
 PROFILES = ("sur", "equilibre", "grosse_cote")
@@ -36,10 +45,9 @@ MAX_AGE = dt.timedelta(hours=2)
 MAX_SUGGESTIONS = 5
 MIN_SUGGESTIONS = 3
 OVERLAP_DUPLICATE = 0.85      # deux issues gagnées ensemble dans ≥ 85 % des cas où l'une gagne sont un même pari
-KELLY_FRACTION = 0.25
-CAP_PER_BET = 0.05
-CAP_PER_MATCH = 0.15
-FIXED_STAKE = 0.02
+KAPPA = circuit.KAPPA
+CAP_PER_BET = circuit.CAP_PER_BET
+CAP_PER_MATCH = circuit.CAP_PER_MATCH
 COMBO_MIN_SELECTIONS, COMBO_MAX_SELECTIONS = 2, 3
 COMBO_MIN_JOINT_P = 0.05      # un combiné à moins de 5 % de chances n'est jamais proposé
 COMBO_MAX_ODDS = 30.0         # ni un empilement de cotes au-delà de 30
@@ -58,10 +66,21 @@ class Candidate:
     group: str = ""
     label: str = ""
     excluded: str | None = None   # raison d'exclusion, None si admissible
+    assessment: Assessment | None = None   # verdict du coupe-circuit (apply_circuit)
 
     @property
     def family(self) -> str:
         return self.spec.family
+
+    @property
+    def p_ref(self) -> float:
+        """Probabilité de référence : celle du coupe-circuit (sharp ou pool), sinon celle du modèle."""
+        return self.assessment.p_ref if self.assessment is not None else self.p
+
+    @property
+    def ev_ref(self) -> float:
+        """Espérance face à la probabilité de référence (cote Winamax), sinon celle du modèle."""
+        return self.assessment.ev if self.assessment is not None and self.assessment.ev is not None else self.ev
 
 
 @dataclass
@@ -70,7 +89,7 @@ class Suggestion:
     rank: int
     score: float
     stake_fraction: float
-    stake_mode: str               # kelly | fixed
+    stake_mode: str               # shrink_kelly (coupe-circuit appliqué) | kelly (classement sans référence, tests)
 
 
 @dataclass
@@ -214,11 +233,11 @@ def describe(spec: mk.Spec, home: str, away: str) -> str:
 
 def score(c: Candidate, profile: str) -> float:
     if profile == "sur":
-        return c.p
+        return c.p_ref
     if profile == "equilibre":
-        return c.p * (1.0 + c.ev)
+        return c.p_ref * (1.0 + c.ev_ref)
     if profile == "grosse_cote":
-        return c.ev
+        return c.ev_ref
     raise ValueError(profile)
 
 
@@ -239,16 +258,34 @@ def overlap(a: Candidate, b: Candidate) -> float:
 
 
 def kelly_fraction(p: float, odds: float) -> float:
-    """Fraction de Kelly entière (avant le quart) pour une issue sans remboursement ; 0 si pas d'avantage."""
+    """Fraction de Kelly entière (avant rétrécissement) pour une issue sans remboursement ; 0 si pas d'avantage."""
     if odds <= 1.0:
         return 0.0
     return max(0.0, (p * odds - 1.0) / (odds - 1.0))
 
 
-def stake_for(p: float, odds: float, ev: float) -> tuple[float, str]:
-    if ev <= 0:
-        return FIXED_STAKE, "fixed"
-    return min(CAP_PER_BET, KELLY_FRACTION * kelly_fraction(p, odds)), "kelly"
+def stake_for(c: Candidate) -> tuple[float, str]:
+    """Mise d'une sélection : celle du coupe-circuit (Kelly rétréci plafonné) quand il a été appliqué, sinon le
+    même Kelly rétréci sur la probabilité du modèle (classement sans référence : tests, diagnostics)."""
+    if c.assessment is not None:
+        return c.assessment.stake_fraction, "shrink_kelly"
+    return round(min(circuit.stake_cap(c.odds, False), KAPPA * kelly_fraction(c.p, c.odds)), 4), "kelly"
+
+
+def apply_circuit(candidates: list[Candidate], reference_of, weight_of, move_of=None, overperforming: dict[str, bool] | None = None,
+                  dependency: dict[str, str | None] | None = None, hours_to_kickoff: float | None = None) -> list[Candidate]:
+    """Coupe-circuit sur chaque candidat encore admissible. `reference_of(market_id)` → Reference ou None ;
+    `weight_of(family)` → w du pool ; `move_of(market_id, outcome_id, reference)` → SharpMove ou None. Un
+    candidat refusé reçoit comme raison d'exclusion le premier code bloquant du coupe-circuit."""
+    for c in candidates:
+        if c.excluded:
+            continue
+        ref = reference_of(c.market_id)
+        move = move_of(c.market_id, c.outcome_id, ref) if (move_of is not None and ref is not None) else None
+        c.assessment = circuit.assess(c.p, c.odds, c.family, c.spec, ref, c.outcome_id, weight_of(c.family), move, overperforming, dependency, hours_to_kickoff)
+        if c.assessment.blocks:
+            c.excluded = c.assessment.blocks[0]
+    return candidates
 
 
 def rank(candidates: list[Candidate], profile: str, max_n: int = MAX_SUGGESTIONS) -> list[Suggestion]:
@@ -265,14 +302,10 @@ def rank(candidates: list[Candidate], profile: str, max_n: int = MAX_SUGGESTIONS
             break
     out = []
     for i, c in enumerate(chosen, 1):
-        f, mode = stake_for(c.p, c.odds, c.ev)
+        f, mode = stake_for(c)
         out.append(Suggestion(c, i, score(c, profile), f, mode))
-    total = sum(s.stake_fraction for s in out)
-    if total > CAP_PER_MATCH:
-        for s in out:
-            s.stake_fraction *= CAP_PER_MATCH / total
-    for s in out:
-        s.stake_fraction = round(s.stake_fraction, 4)
+    for s, f in zip(out, circuit.cap_match([s.stake_fraction for s in out])):
+        s.stake_fraction = f
     return out
 
 
@@ -306,8 +339,8 @@ def combine(suggestions: list[Suggestion], profile: str) -> Combo | None:
     sc, combo, joint, odds, ev = best
     if not (ev >= 0 or (profile == "sur" and joint >= 0.45)):
         return None
-    f, mode = stake_for(joint, odds, ev)
-    return Combo(list(combo), joint, odds, ev, sc, round(min(f, CAP_PER_BET), 4), mode)
+    f = round(min(CAP_PER_BET, KAPPA * kelly_fraction(joint, odds)), 4)
+    return Combo(list(combo), joint, odds, ev, sc, f, "kelly")
 
 
 def _combinations(items, k):

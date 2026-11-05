@@ -15,7 +15,8 @@ import { scoutReportMiddleware } from './scoutReportPlugin';
 const KEY = 'AIzaTEST-secret-key-123';     // clé factice de test, jamais une vraie clé
 const NOW = new Date('2026-11-07T12:00:00Z');
 const sug = (rank: number, label: string, family: string, odds: number, p: number, ev: number, stakeFraction = 0.02) =>
-  ({ rank, family, label, odds, oddsAt: '2026-11-07T11:40:00Z', p, ev, stakeFraction, stakeMode: 'kelly' as const, reasons: ['Forme : 3 V 1 N 1 D'] });
+  ({ rank, family, label, odds, oddsAt: '2026-11-07T11:40:00Z', p, ev, stakeFraction, stakeMode: 'shrink_kelly' as const, reasons: ['Forme : 3 V 1 N 1 D'],
+    pSharp: Math.round((p - 0.04) * 1000) / 1000, pRef: Math.round((p - 0.04) * 1000) / 1000, evRef: Math.round(((p - 0.04) * odds - 1) * 1000) / 1000, poolW: 0, sharpBookmaker: 'pinnacle', warnings: [] as string[], verdict: 'bet' });
 const INDEX: SuggestionsIndexFile = {
   generatedAt: '2026-11-07T11:45:00Z', season: '2026-27', bookmaker: 'Bookmaker test',
   matches: [
@@ -24,6 +25,10 @@ const INDEX: SuggestionsIndexFile = {
     { matchId: 'm2', competition: 'AAA', date: '2026-11-07', home: 'Club C', away: 'Club D', status: 'ok', kickoff: '2026-11-07T20:00:00Z', xg: [1.1, 1.2],
       profiles: { equilibre: { suggestions: [sug(1, 'Moins de 3,5 buts', 'plus/moins', 1.4, 0.74, 0.04)], combo: null } } },
     { matchId: 'm3', competition: 'AAA', date: '2026-11-07', home: 'Club E', away: 'Club F', status: 'no_odds' },
+    { matchId: 'm4', competition: 'AAA', date: '2026-11-07', home: 'Club G', away: 'Club H', status: 'ok', kickoff: '2026-11-07T21:00:00Z', xg: [1.3, 1.3],
+      profiles: { equilibre: { suggestions: [], combo: null } },
+      noBet: { label: 'Club G gagne', family: 'résultat', odds: 2.1, p: 0.5, pSharp: 0.45, evRef: -0.055, reasons: ['espérance insuffisante face au marché sharp'], codes: ['ev_insuffisant'] },
+      teams: { home: { hub: 'Meneur G', opd: { matches: 5, goalsMinusXg: 3.4, pointsMinusXp: 2.8, overperforming: true } }, away: { hub: null } } },
   ],
   bilan: { profiles: { equilibre: { byFamily: { 'résultat': { bets: 40, hitRate: 0.5, returnFlat: -0.06 }, 'plus/moins': { bets: 60, hitRate: 0.55, returnFlat: -0.02 }, 'buteur': { bets: 5, hitRate: 0.2, returnFlat: -0.4 } } } } },
 };
@@ -121,12 +126,20 @@ describe('actualité ancrée', () => {
 describe('plan du jour', () => {
   const facts = buildPlanFacts(INDEX, ['m1', 'm2', 'm3', 'inconnu'], 'equilibre', '2026-11-07');
 
-  it('transmet probabilités et espérances en pourcentages, et le contexte des équipes', () => {
+  it('transmet les chiffres calculés (moteur, sharp, référence, espérance, mise) en pourcentages, et le contexte des équipes', () => {
     const withContext = buildPlanFacts(INDEX, ['m1'], 'equilibre', '2026-11-07', () => CONTEXT);
-    expect(withContext.matches[0].suggestions[0]).toMatchObject({ probabilityPct: 60, expectedValuePct: 11 });
+    expect(withContext.matches[0].suggestions[0]).toMatchObject({ engineProbabilityPct: 60, sharpProbabilityPct: 56, referenceProbabilityPct: 56, expectedValuePct: 3.6, stakePct: 3, sharpBookmaker: 'pinnacle', verdict: 'bet' });
+    expect(withContext.matches[0].engineVerdict).toBe('bet');
     expect(withContext.matches[0].context?.home.keyPlayers[0].name).toBe('Buteur A');
     expect(buildPlanPrompt(withContext, {})).toContain('"keyPlayers"');
-    expect(buildPlanPrompt(withContext, {})).toContain('write them like "78,7 %"');
+    expect(buildPlanPrompt(withContext, {})).toContain('percentages like "78,7 %"');
+  });
+
+  it('transmet un « pas de pari » du moteur avec ses motifs, sans suggestion', () => {
+    const f = buildPlanFacts(INDEX, ['m4'], 'equilibre', '2026-11-07');
+    expect(f.matches[0]).toMatchObject({ engineVerdict: 'no_bet', suggestions: [], keyPlayerDependency: { home: 'Meneur G', away: null }, recentOverperformance: { home: true, away: false } });
+    expect(f.matches[0].noBet).toMatchObject({ label: 'Club G gagne', odds: 2.1, engineProbabilityPct: 50, sharpProbabilityPct: 45, expectedValuePct: -5.5 });
+    expect(buildPlanPrompt(f, {})).toContain("The engine's verdict is final");
   });
 
   it('ne transmet que les matchs avec cotes, des références stables et le bilan des familles présentes', () => {
@@ -134,17 +147,26 @@ describe('plan du jour', () => {
     expect(facts.matches[0].suggestions.map(s => s.ref)).toEqual(['m1#1', 'm1#2']);
     expect(Object.keys(facts.familyRecord).sort()).toEqual(['plus/moins', 'résultat']);
     const prompt = buildPlanPrompt(facts, { m1: '- Club B : attaquant suspendu.' });
-    expect(prompt).toContain('Never invent a bet');
+    expect(prompt).toContain('never suggest a selection, market or line that is not listed');
     expect(prompt).toContain('[m1] Club A – Club B\n- Club B : attaquant suspendu.');
     expect(prompt).toContain('[m2] Club C – Club D\nActualité non recherchée.');
   });
 
-  it('valide références, verdicts et sélection ; la mise vient du moteur, jamais du modèle', () => {
+  it('valide références, verdicts et sélection ; probabilité et mise viennent du moteur, jamais du modèle ; combiné écarté', () => {
     const plan = validatePlan(GOOD_PLAN, facts, {}, INDEX);
-    expect(plan.picks.map(p => [p.ref, p.verdict, p.stakeFraction, p.odds])).toEqual([['m1#1', 'garder', 0.03, 1.85], ['m2#1', 'garder', 0.02, 1.4]]);
-    expect(plan.combo?.labels).toEqual(['Club A – Club B : Club A gagne', 'Club C – Club D : Moins de 3,5 buts']);
+    expect(plan.picks.map(p => [p.ref, p.verdict, p.stakeFraction, p.odds, p.probability, p.engineProbability, p.sharpProbability])).toEqual([['m1#1', 'garder', 0.03, 1.85, 0.56, 0.6, 0.56], ['m2#1', 'garder', 0.02, 1.4, 0.7, 0.74, 0.7]]);
+    expect(plan.combo).toBeNull();
     expect(plan.matches[0].verdicts.map(v => v.verdict)).toEqual(['garder', 'prudence']);
-    expect(plan.warnings).toEqual([]);
+    expect(plan.warnings).toEqual(['Combiné proposé écarté : les combinés sont désactivés.']);
+  });
+
+  it('place les « pas de pari » du moteur en tête des matchs à éviter, avec la raison calculée', () => {
+    const f = buildPlanFacts(INDEX, ['m1', 'm4'], 'equilibre', '2026-11-07');
+    const plan = validatePlan({ ...GOOD_PLAN, combo: { refs: [], why: '' }, avoid: [{ matchId: 'm4', why: 'Le moteur a raison.' }, { matchId: 'm1', why: 'Trop de doutes.' }] }, f, {}, INDEX);
+    expect(plan.avoid.map(a => [a.matchId, a.source])).toEqual([['m4', 'moteur'], ['m1', 'ia']]);
+    expect(plan.avoid[0].why).toContain('Pas de pari selon le moteur');
+    expect(plan.avoid[0].why).toContain('espérance insuffisante');
+    expect(plan.matches.map(m => m.engineVerdict)).toEqual(['bet', 'no_bet']);
   });
 
   it('écarte une sélection inventée, évitée ou en double, et un combiné non conforme', () => {
@@ -158,7 +180,7 @@ describe('plan du jour', () => {
     const plan = validatePlan(bad, facts, {}, INDEX);
     expect(plan.picks).toEqual([]);                       // m1#1 évitée, m9#1 inconnue, m2#1 sans verdict
     expect(plan.combo).toBeNull();
-    expect(plan.avoid.map(a => a.matchId)).toEqual(['m1']);
+    expect(plan.avoid.map(a => [a.matchId, a.source])).toEqual([['m1', 'ia']]);
     expect(plan.matches[0].verdicts.map(v => v.verdict)).toEqual(['eviter', 'non_evalue']);
     expect(plan.warnings.join(' ')).toContain('sans avis');
     expect(plan.warnings.join(' ')).toContain('Combiné proposé écarté');
@@ -179,7 +201,7 @@ describe('plan du jour', () => {
     const out = await handleBettingPlan({ matchIds: ['m1', 'm2'], profile: 'equilibre' }, { ...d, generateJson: async p => { prompt = p; return { text: JSON.stringify(GOOD_PLAN), modelVersion: 'gemini-test-001' }; } });
     expect(out.status).toBe(200);
     expect(prompt).toContain('attaquant suspendu');
-    expect(out.body.warnings).toEqual(['1 match(s) sans actualité recherchée : avis fondé sur les seules données du moteur.']);
+    expect(out.body.warnings).toEqual(['1 match(s) sans actualité recherchée : avis fondé sur les seules données du moteur.', 'Combiné proposé écarté : les combinés sont désactivés.']);
     expect(out.body.meta).toMatchObject({ model: 'gemini-test-001', requestedModel: 'gemini-test', suggestionsAt: INDEX.generatedAt });
     expect((out.body.matches as { news: unknown }[])[0].news).toMatchObject({ sources: [{ title: 'source.test' }] });
   });
@@ -188,7 +210,11 @@ describe('plan du jour', () => {
     expect((await handleBettingPlan({}, deps())).status).toBe(400);
     expect((await handleBettingPlan({ matchIds: Array.from({ length: 9 }, (_, i) => `m${i}`) }, deps())).status).toBe(400);
     expect((await handleBettingPlan({ matchIds: ['m3'] }, deps())).status).toBe(404);
-    expect((await handleBettingPlan({ matchIds: ['m1'], profile: 'sur' }, deps())).status).toBe(422);   // aucun pari Sûr publié
+    const none = await handleBettingPlan({ matchIds: ['m1'], profile: 'sur' }, deps({ generateJson: async () => { throw new Error('le modèle ne doit pas être appelé'); } }));
+    expect(none.status).toBe(200);                                                                    // aucun pari Sûr validé : plan calculé, sans appel au modèle
+    expect(String(none.body.summary)).toContain('Pas de pari aujourd\'hui');
+    expect(none.body.picks).toEqual([]);
+    expect((none.body.meta as { model: string }).model).toBe('moteur');
     expect((await handleBettingPlan({ matchIds: ['m1'] }, deps({ generateJson: async () => ({ text: 'pas du json' }) }))).status).toBe(502);
     const late = await handleBettingPlan({ matchIds: ['m1'] }, deps({ generateJson: async () => { throw new Error('délai dépassé'); } }));
     expect(late.body.error).toContain('Plan trop long à générer');

@@ -12,7 +12,7 @@ import { CompetitionBadge } from '../Media';
 import { EmptyState, LoadError, Panel, Skeleton, Stat, StatStrip } from '../ui';
 import { ProfileBankroll } from './Suggestions';
 import {
-  PROFILE_LABELS, STATUS_LABELS, betNet, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, historySummary, stakeEuros, statusClass,
+  CIRCUIT_NOTE, PROFILE_LABELS, STATUS_LABELS, betNet, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, historySummary, sharpLabel, stakeEuros, statusClass,
 } from './suggestionsLogic';
 
 const dayLabel = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -110,14 +110,18 @@ const Evenings: React.FC<{ evenings: EveningSummary[] }> = ({ evenings }) => {
 
 // ----- Suggestions publiées et réglées, par profil -----
 
+const HISTORY_GRID = 'grid-cols-[minmax(0,1fr)_4rem_4.5rem_4.5rem_5.5rem_7rem_5.5rem]';
+
 const HistoryBetRow: React.FC<{ b: HistoryBet; bankroll: number | null }> = ({ b, bankroll }) => {
   const net = betNet(bankroll, b);
+  const clv = formatClv(b.clv);
   return (
     <li className="py-1.5 border-t border-line/60 first:border-t-0">
-      <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_4rem_4.5rem_5.5rem_7rem_5.5rem] items-baseline gap-3 text-sm">
+      <div className={`hidden sm:grid ${HISTORY_GRID} items-baseline gap-3 text-sm`}>
         <span className="text-ink min-w-0">{b.label}</span>
         <span className="num text-right text-ink">{formatOdds(b.odds)}</span>
-        <span className="num text-right text-ink-2" title="Notre probabilité au moment de la suggestion">{formatPct(b.p)}</span>
+        <span className="num text-right text-ink-2" title={sharpLabel(b) ?? 'Probabilité de la simulation au moment de la suggestion'}>{formatPct(b.pSharp ?? b.p)}</span>
+        <span className={`num text-right ${clv === null ? 'text-ink-4' : signedClass(b.clv ?? null)}`} title="CLV : cote prise face à la cote juste de clôture (Pinnacle ou Betfair sans marge)">{clv ?? '–'}</span>
         <span className="num text-right text-ink-2">{bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, b.stakeFraction))}</span>
         <span><StatusTag status={b.status} /></span>
         <span className={`num text-right ${signedClass(net)}`}>{net === null ? '–' : formatSignedEuros(net)}</span>
@@ -126,6 +130,7 @@ const HistoryBetRow: React.FC<{ b: HistoryBet; bankroll: number | null }> = ({ b
         <div className="text-ink">{b.label}</div>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 num text-xs mt-0.5">
           <span className="text-ink">cote {formatOdds(b.odds)}</span>
+          {clv !== null && <span className={signedClass(b.clv ?? null)}>CLV {clv}</span>}
           <span className="text-ink-2">mise {bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, b.stakeFraction))}</span>
           <StatusTag status={b.status} />
           {net !== null && <span className={signedClass(net)}>{formatSignedEuros(net)}</span>}
@@ -177,6 +182,12 @@ export const BetHistory: React.FC<{
               sub={bankroll !== null && summary.staked > 0 ? `rendement ${formatEv(summary.net / summary.staked)}` : undefined} />
           </StatStrip>
         )}
+        {summary.clvBets > 0 && (
+          <p className="text-xs text-ink-2 mt-3">
+            <span className="text-ink">CLV moyen {formatClv(summary.meanClv)}</span> sur {summary.clvBets} pari{summary.clvBets > 1 ? 's' : ''} avec clôture sharp connue, {formatPct(summary.clvBeatRate ?? 0)} la battent.
+            {' '}Le CLV (cote prise face à la cote juste de clôture) juge la sélection plus vite que le résultat, qui dépend surtout du hasard sur quelques dizaines de paris.
+          </p>
+        )}
       </Panel>
 
       {days.length === 0 ? (
@@ -188,15 +199,15 @@ export const BetHistory: React.FC<{
           {days.map(d => (
             <section key={d.date} className="sv-panel overflow-hidden" aria-label={dayLabel(d.date)}>
               <div className="px-4 h-8 flex items-center border-b border-line sv-label !text-ink-2 first-letter:uppercase">{dayLabel(d.date)}</div>
-              <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_4rem_4.5rem_5.5rem_7rem_5.5rem] gap-3 sv-label text-right px-4 pt-2">
-                <span className="text-left">Sélection</span><span>Cote</span><span>Proba</span><span>Mise</span><span className="text-left">Résultat</span><span>Net</span>
+              <div className={`hidden sm:grid ${HISTORY_GRID} gap-3 sv-label text-right px-4 pt-2`}>
+                <span className="text-left">Sélection</span><span>Cote</span><span>Proba</span><span>CLV</span><span>Mise</span><span className="text-left">Résultat</span><span>Net</span>
               </div>
               {d.matches.map(m => <HistoryMatchBlock key={m.matchId} m={m} bets={m.profiles[profile] ?? []} bankroll={bankroll} />)}
             </section>
           ))}
         </div>
       )}
-      <p className="text-2xs text-ink-4">Cotes {index.bookmaker}. Les combinés figurent dans les soirées suivies, pas dans cette liste. Mises indicatives : rien n'est placé automatiquement.</p>
+      <p className="text-2xs text-ink-4">Cotes {index.bookmaker}. {index.reference ? `${CIRCUIT_NOTE} ` : ''}Les combinés figurent dans les soirées suivies, pas dans cette liste. Mises indicatives : rien n'est placé automatiquement.</p>
     </div>
   );
 };

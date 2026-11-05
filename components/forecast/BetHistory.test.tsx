@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest';
 import type { HistoryBet, SuggestionsIndex } from '../../services/replayData';
 import { BetHistory } from './BetHistory';
 
-const bet = (label: string, status: HistoryBet['status'], realised: number | null): HistoryBet =>
-  ({ label, family: 'résultat', odds: 2, p: 0.55, ev: 0.1, stakeFraction: 0.02, stakeMode: 'kelly', status, realised });
+const bet = (label: string, status: HistoryBet['status'], realised: number | null, clv: number | null = null): HistoryBet =>
+  ({ label, family: 'résultat', odds: 2, p: 0.55, ev: 0.1, stakeFraction: 0.02, stakeMode: 'shrink_kelly', status, realised, pSharp: 0.52, evRef: 0.04, clv });
 
 const index: SuggestionsIndex = {
   schemaVersion: '1.0.0', generatedAt: '2026-11-08T07:00:00Z', season: '2026-27', bookmaker: 'Winamax FR (OddsPapi)',
@@ -22,7 +22,7 @@ const index: SuggestionsIndex = {
   ] }],
   history: [{ date: '2026-11-07', matches: [
     { matchId: 'm1', competition: 'ENG', kickoff: '2026-11-07T15:00:00Z', home: 'Club A', away: 'Club B', score: [2, 1],
-      profiles: { equilibre: [bet('Club A gagne', 'won', 1), bet('Moins de 1,5 but', 'lost', -1)], sur: [bet('Club A ou nul', 'won', 0.3)] } },
+      profiles: { equilibre: [bet('Club A gagne', 'won', 1, 0.05), bet('Moins de 1,5 but', 'lost', -1, -0.03)], sur: [bet('Club A ou nul', 'won', 0.3)] } },
     { matchId: 'm2', competition: 'ENG', kickoff: '2026-11-07T20:00:00Z', home: 'Club C', away: 'Club D', score: null,
       profiles: { equilibre: [bet('Club C gagne', 'pending', null)] } },
   ] }],
@@ -51,6 +51,8 @@ describe('BetHistory (rendu statique)', () => {
     expect(html).toContain('+6,00');   // 300 × 2 % × (2 − 1)
     expect(html).toContain('−6,00');
     expect(html).toContain('50 %');    // 1 gagné sur 2 réglés
+    expect(html).toContain('CLV moyen +1 %');   // (+5 % − 3 %) / 2, sur les deux paris avec clôture connue
+    expect(html).toContain('52 %');    // probabilité sharp affichée à la place de celle du moteur
     expect(html).not.toContain('Club A ou nul');   // profil Sûr non affiché
     const sur = renderToStaticMarkup(<BetHistory index={index} {...props} profile="sur" />);
     expect(sur).toContain('Club A ou nul');
