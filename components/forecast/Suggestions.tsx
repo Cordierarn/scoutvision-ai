@@ -7,7 +7,7 @@
  */
 
 import React, { useId } from 'react';
-import type { BilanProfile, Suggestion, SuggestionMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
+import type { BilanProfile, ExploreDayCombo, Suggestion, SuggestionMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
 import { InfoTip, Panel, Stat, StatStrip } from '../ui';
 import { CIRCUIT_NOTE, EXPLORE_NOTE, isExploratory, PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, oddsAge, sharpLabel, stakeEuros, stakeLabel } from './suggestionsLogic';
 
@@ -59,6 +59,7 @@ export const SuggestionsControls: React.FC<{
         </p>
       )}
       {isExploratory(profile) && <p role="note" className="text-xs text-warn mt-3">{EXPLORE_NOTE}{journal && journal.bets ? ` Journal réel : ${journal.bets} réglés, rendement ${formatEv(journal.returnFlat ?? 0)}.` : ''}</p>}
+      {isExploratory(profile) && <DayCombos days={index.exploreCombos ?? []} bankroll={bankroll} />}
       {isExploratory(profile) ? null : o && o.bets > 0 ? (
         <StatStrip className="mt-4 grid-cols-2 lg:grid-cols-4">
           <Stat label={`Bilan ${index.season} · ${PROFILE_LABELS[profile]}`} value={`${o.bets} paris`} sub="rejeu sur les matchs joués, cotes du dernier relevé avant coup d'envoi" />
@@ -81,6 +82,42 @@ export const SuggestionsControls: React.FC<{
 };
 
 const GRID = 'grid-cols-[1.4rem_minmax(0,1fr)_7rem_4.5rem_4.5rem_5rem_6rem]';
+
+const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+/** Combinés du jour du profil exploratoire : sélections de matchs différents, cote = produit des cotes Winamax. */
+const DayCombos: React.FC<{ days: { date: string; combos: ExploreDayCombo[] }[]; bankroll: number | null }> = ({ days, bankroll }) => {
+  const shown = days.filter(d => d.combos.length > 0);
+  if (!shown.length) return <p className="text-xs text-ink-4 mt-3">Combinés du jour : aucun (il faut au moins deux matchs avec une sélection exploratoire le même jour).</p>;
+  return (
+    <div className="mt-4 space-y-3">
+      <h4 className="sv-label">Combinés du jour · sélections de matchs différents</h4>
+      {shown.map(d => (
+        <div key={d.date}>
+          <div className="text-xs text-ink-3 mb-1 first-letter:uppercase">{dayLabel(d.date)}</div>
+          <ul className="list-none m-0 p-0 space-y-2">
+            {d.combos.map(c => (
+              <li key={c.legs.map(l => l.matchId).join('-')} className="rounded border border-line bg-raised/40 px-3 py-2 text-sm">
+                <div className="text-ink">Combiné {c.legs.length} sélections</div>
+                <ul className="list-none m-0 p-0 text-xs text-ink-2 mt-0.5">
+                  {c.legs.map(l => <li key={l.matchId}><span className="text-ink-4">{l.match} :</span> {l.label} <span className="num text-ink">{formatOdds(l.odds)}</span></li>)}
+                </ul>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 num text-xs mt-1">
+                  <span className="text-ink">cote {formatOdds(c.odds)}</span>
+                  <span className="text-ink-2">proba marché {formatPct(c.jointP)}</span>
+                  <span className="text-ink-2">moteur {formatPct(c.jointModel)}</span>
+                  <span className={evClass(c.ev)}>esp. marché {formatEv(c.ev)}</span>
+                  <span className="text-ink">mise {bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, c.stakeFraction))} (fixe)</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <p className="text-2xs text-ink-4">L'espérance d'un combiné cumule la marge de chaque sélection : elle est plus négative que celle des paris simples.</p>
+    </div>
+  );
+};
 
 const SuggestionRow: React.FC<{ s: Suggestion; bankroll: number | null; bilan?: BilanProfile; now: Date }> = ({ s, bankroll, bilan, now }) => {
   const age = oddsAge(s.oddsAt, now);

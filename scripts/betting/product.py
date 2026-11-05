@@ -224,7 +224,8 @@ def _explore_block(cands: list, snaps: pd.DataFrame | None, cat, before: pd.Time
         return ref.shin[c.outcome_id], ref.bookmaker
 
     out = []
-    for i, (c, p_mkt, ev_mkt, ref) in enumerate(sg.explore(cands, market_probability), start=1):
+    picks = sg.explore(cands, market_probability)
+    for i, (c, p_mkt, ev_mkt, ref) in enumerate(picks, start=1):
         name = BOOKMAKER_NAMES.get(ref, ref)
         why = (f"Hors coupe-circuit : marché {name} {p_mkt * 100:.1f} %, moteur {c.p * 100:.1f} %, cote {c.odds:.2f} → espérance face au marché "
                f"{ev_mkt * 100:+.1f} %").replace(".", ",")
@@ -280,6 +281,8 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
                             for s in ranked],
             "combo": None,   # combinés désactivés : la corrélation entre sélections d'un même match n'est pas mesurable face au marché sharp
         }
+    # pas de combiné d'un même match : ses sélections sont liées et Winamax ne paie pas le produit des cotes (MyMatch) ;
+    # les combinés exploratoires se font entre matchs différents (explore_day_combos, à l'export)
     profiles[sg.EXPLORE_PROFILE] = {"suggestions": _explore_block(cands, snaps, cat, before, refs if snaps is not None and cat is not None else None, ctx, home, away),
                                     "combo": None}
     excluded_counts: dict[str, int] = {}
@@ -584,6 +587,21 @@ def evening_details(evening: dict, names: dict) -> list[dict]:
     return out
 
 
+def explore_day_combos(entries: list[dict]) -> list[dict]:
+    """Combinés du jour du profil exploratoire, par date de coup d'envoi (heure de Paris) : la meilleure sélection
+    exploratoire de chaque match, combinée entre matchs différents (suggest.day_combos)."""
+    by_day: dict[str, list[dict]] = {}
+    for e in entries:
+        block = (e.get("profiles") or {}).get(sg.EXPLORE_PROFILE) or {}
+        top = (block.get("suggestions") or [None])[0]
+        if e.get("status") != "ok" or not top or top.get("pRef") is None or not e.get("kickoff"):
+            continue
+        day = pd.Timestamp(e["kickoff"]).tz_convert("Europe/Paris").strftime("%Y-%m-%d")
+        by_day.setdefault(day, []).append({"matchId": e["matchId"], "match": f"{e['home']} – {e['away']}", "label": top["label"], "odds": top["odds"],
+                                           "pRef": top["pRef"], "p": top["p"], "kickoff": e["kickoff"]})
+    return [{"date": d, "combos": sg.day_combos(legs)} for d, legs in sorted(by_day.items()) if len(legs) >= 2]
+
+
 def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     bilan = json.loads(BILAN.read_text(encoding="utf-8")) if BILAN.exists() else None
     journal = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
@@ -615,7 +633,7 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
                          "explore": {"minOdds": sg.EXPLORE_MIN_ODDS, "maxOdds": sg.EXPLORE_MAX_ODDS, "maxPerMatch": sg.EXPLORE_MAX, "stake": sg.EXPLORE_STAKE}},
                "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights, "calibrationMargins": sharp.PoolWeights.load().margins,
                              "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
-               "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:],
+               "matches": entries, "exploreCombos": explore_day_combos(entries), "bilan": bilan, "journal": js, "evenings": evenings[-30:],
                "history": history(journal, results, names, generated_at)}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = EXPORT_DIR / "index.json"

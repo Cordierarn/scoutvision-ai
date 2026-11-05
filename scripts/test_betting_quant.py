@@ -19,6 +19,7 @@ import pandas as pd
 
 from betting import catalogue, circuit, dependency, opd, product, sharp
 from betting import markets as mk
+from betting import suggest as sg
 from betting import simulate as sm
 
 KO = pd.Timestamp("2026-11-07T15:00:00Z")
@@ -337,6 +338,23 @@ class SuggestMatchTests(unittest.TestCase):
         self.assertEqual(evs, sorted(evs, reverse=True))
         bare = product.suggest_match(self.sims, product.outcomes_from_snapshots(self.archive(), CAT, pd.Timestamp(self.now), "Club A", "Club B"), KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B")
         self.assertEqual(bare["profiles"]["exploratoire"]["suggestions"], [])     # sans archive : aucune probabilité de marché inventée
+        self.assertIsNone(res["profiles"]["exploratoire"]["combo"])                  # jamais de combiné d'un même match
+
+    def test_day_combos_join_different_matches_within_odds_bounds_and_best_market_value(self):
+        legs = [{"matchId": "a", "match": "A", "label": "x", "odds": 1.8, "pRef": 0.53, "p": 0.6, "kickoff": "2026-11-07T15:00:00Z"},
+                {"matchId": "b", "match": "B", "label": "y", "odds": 2.1, "pRef": 0.45, "p": 0.5, "kickoff": "2026-11-07T17:00:00Z"},
+                {"matchId": "c", "match": "C", "label": "z", "odds": 1.7, "pRef": 0.55, "p": 0.57, "kickoff": "2026-11-07T19:00:00Z"},
+                {"matchId": "d", "match": "D", "label": "w", "odds": 9.0, "pRef": 0.09, "p": 0.12, "kickoff": "2026-11-07T19:00:00Z"}]
+        combos = sg.day_combos(legs)
+        self.assertEqual([len(c["legs"]) for c in combos], [2, 3])
+        for c in combos:
+            self.assertTrue(2.0 <= c["odds"] <= 12.0); self.assertEqual(len({l["matchId"] for l in c["legs"]}), len(c["legs"]))
+            self.assertAlmostEqual(c["jointP"], np.prod([l["pRef"] for l in c["legs"]]), places=3); self.assertAlmostEqual(c["ev"], c["jointP"] * c["odds"] - 1, places=2)
+        entries = [{"matchId": l["matchId"], "home": l["match"], "away": "Z", "status": "ok", "kickoff": l["kickoff"],
+                    "profiles": {"exploratoire": {"suggestions": [{"label": l["label"], "odds": l["odds"], "pRef": l["pRef"], "p": l["p"]}]}}} for l in legs]
+        days = product.explore_day_combos(entries)
+        self.assertEqual([d["date"] for d in days], ["2026-11-07"]); self.assertEqual(len(days[0]["combos"]), 2)
+        self.assertEqual(product.explore_day_combos(entries[:1]), [])                  # un seul match : pas de combiné
 
     def test_winamax_late_on_pinnacle_is_a_bet_with_sharp_probability(self):
         res = self.run_match(self.archive(winamax_home=2.05, pinnacle_home=1.72))      # Winamax paie 2,05 un favori que Pinnacle met à 1,72

@@ -129,6 +129,11 @@ export interface Suggestion {
   pSharp?: number | null; pRef?: number; evRef?: number | null; poolW?: number | null; sharpBookmaker?: string | null; sharpAt?: string | null;
   warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue' | 'exploratoire';
 }
+/** Combiné du jour du profil exploratoire : une sélection par match, matchs différents. */
+export interface ExploreDayCombo {
+  legs: { matchId: string; match: string; label: string; odds: number; pRef: number; p: number; kickoff: string }[];
+  odds: number; jointP: number; jointModel: number; ev: number; stakeFraction: number; stakeMode: StakeMode;
+}
 export interface SuggestionCombo {
   labels: string[]; marketIds: number[]; outcomeIds: number[]; jointP: number; odds: number; ev: number;
   stakeFraction: number; stakeMode: StakeMode;
@@ -164,6 +169,7 @@ export interface SuggestionsIndex {
   };
   reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; calibrationMargins?: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
   matches: SuggestionMatch[];
+  exploreCombos?: { date: string; combos: ExploreDayCombo[] }[];
   bilan: { start: number; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
   evenings?: EveningSummary[];

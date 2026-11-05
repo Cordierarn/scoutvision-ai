@@ -560,6 +560,14 @@ au marché médiane −13 % (meilleure −8 %), référence Pinnacle pour un tie
 chiffre est la marge de Winamax : il mesure ce que coûte en moyenne un pari sur ces marchés. Relâcher l'accord du
 moteur ne change presque rien (−13,0 % au lieu de −13,4 %).
 
+**Combinés du jour** (`suggest.day_combos`, `product.explore_day_combos`, champ `exploreCombos` de l'export) : la meilleure
+sélection exploratoire de chaque match, combinée entre matchs différents du même jour (indépendants, donc probabilité
+jointe = produit des probabilités sans marge), un combiné de 2 et un de 3 sélections par jour, cote de 2,00 à 12,00,
+retenus sur la meilleure espérance face au marché, mise symbolique de 0,5 %. Mesure du 5 novembre : cotes de 3,7 à
+10,9, espérance de −15 % à −28 % (la marge de chaque sélection se cumule). Pas de combiné d'un même match : ses
+sélections sont liées, le produit des cotes affichait jusqu'à +72 % d'espérance, un artefact que Winamax ne paie pas
+(MyMatch cote lui-même ces combinaisons).
+
 L'assistant IA accepte le profil exploratoire : son prompt précise alors que les sélections ne sont pas validées, que
 leur espérance face au marché est le plus souvent négative et qu'elles servent à suivre le moteur. La recherche
 d'actualité de Claude peut désormais ouvrir jusqu'à trois articles en entier (outil serveur de lecture d'URL) quand
