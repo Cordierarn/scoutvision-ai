@@ -28,6 +28,10 @@ const index: SuggestionsIndex = {
   profiles: [{ id: 'sur', label: 'Sûr' }, { id: 'equilibre', label: 'Équilibré' }, { id: 'grosse_cote', label: 'Grosse cote' }], defaultProfile: 'equilibre', defaultBankroll: 300,
   rules: { minOdds: 1.3, bigOdds: 3, maxAgeHours: 2, kellyFraction: 0.25, capPerBet: 0.05, capPerMatch: 0.15, fixedStake: 0.02 },
   matches: [match], bilan: null, journal: { published: 0, settled: 0, byProfile: {} },
+  exploreCombos: [{ date: '2026-11-07', combos: [{ legs: [
+    { matchId: 'm1', match: 'Club A – Club B', label: 'Les deux équipes marquent', odds: 1.85, pRef: 0.52, p: 0.55, kickoff: '2026-11-07T15:00:00Z' },
+    { matchId: 'm2', match: 'Club C – Club D', label: 'Club C gagne', odds: 2.10, pRef: 0.45, p: 0.5, kickoff: '2026-11-07T17:00:00Z' }],
+    odds: 3.89, jointP: 0.234, jointModel: 0.275, ev: -0.09, stakeFraction: 0.005, stakeMode: 'fixed' }] }],
 };
 
 describe('Suggestions (rendu statique)', () => {
@@ -57,6 +61,10 @@ describe('Suggestions (rendu statique)', () => {
     const controls = renderToStaticMarkup(<SuggestionsControls index={index} profile="exploratoire" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />);
     expect(controls).toContain('Exploratoire');
     expect(controls).toContain('ne sont pas des paris validés');
+    expect(controls).toContain('Combinés du jour');
+    expect(controls).toContain('Combiné 2 sélections');
+    expect(controls).toContain('3,89');
+    expect(controls).toContain('−9');
     const empty = renderToStaticMarkup(<SuggestionsBlock match={{ ...match, profiles: { ...match.profiles, exploratoire: { suggestions: [], combo: null } } }} profile="exploratoire" bankroll={300} open now={NOW} />);
     expect(empty).toContain('Aucune cote de 1,60 à 6,00');
     expect(empty).not.toContain('Pas de pari.');

@@ -386,6 +386,32 @@ def combine(suggestions: list[Suggestion], profile: str) -> Combo | None:
     return Combo(list(combo), joint, odds, ev, sc, f, "kelly")
 
 
+DAY_COMBO_MIN_ODDS, DAY_COMBO_MAX_ODDS = 2.0, 12.0
+
+
+def day_combos(legs: list[dict], max_legs: int = 3) -> list[dict]:
+    """Combinés du jour (profil exploratoire) : une sélection par match, matchs différents, donc indépendantes. `legs` :
+    {matchId, match, label, odds, pRef (probabilité sans marge), p (moteur), kickoff}. Pour 2 puis 3 sélections, la
+    combinaison de cote 2,00 à 12,00 à la meilleure espérance face au marché ; au plus un combiné par taille."""
+    out = []
+    for k in range(2, max_legs + 1):
+        best = None
+        for combo in _combinations(legs, k):
+            if len({l["matchId"] for l in combo}) < k:
+                continue
+            odds = float(np.prod([l["odds"] for l in combo]))
+            if not (DAY_COMBO_MIN_ODDS <= odds <= DAY_COMBO_MAX_ODDS):
+                continue
+            joint = float(np.prod([l["pRef"] for l in combo]))
+            ev = joint * odds - 1.0
+            if best is None or ev > best["ev"]:
+                best = {"legs": [dict(l) for l in combo], "odds": round(odds, 2), "jointP": round(joint, 4),
+                        "jointModel": round(float(np.prod([l["p"] for l in combo])), 4), "ev": round(ev, 4), "stakeFraction": EXPLORE_STAKE, "stakeMode": "fixed"}
+        if best:
+            out.append(best)
+    return out
+
+
 def _combinations(items, k):
     n = len(items)
     if k == 2:
