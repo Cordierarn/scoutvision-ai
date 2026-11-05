@@ -279,6 +279,10 @@ vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étape
   et par compétition ayant une rencontre sous 36 h (3 marchés), plan gratuit de 500 crédits par mois lus
   dans les en-têtes, réserve de 25 ; premier relevé réel : 8 compétitions, 36 crédits, 77 rencontres
   appariées sur 126 (les autres sont au-delà de la fenêtre OddsPapi, plus quelques noms non reconnus).
+  Appariement des rencontres : même compétition, coup d'envoi à ± 2 h, les deux noms similaires (seuil
+  0,5) ; sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau suffit et l'autre nom
+  est appris dans `aliases_theoddsapi.json` (Red Star Belgrade → nom OddsPapi, Köln / Cologne…) ; deux
+  rencontres désignées = aucun appariement, jamais le plus proche.
   Un plan OddsPapi incluant Pinnacle suffirait à revenir à une seule source (`BOOKMAKERS`).
 - **Devigging.** Méthode de Shin (part de parieurs informés z, marge plus lourde sur les outsiders),
   comparée à la méthode des puissances (p_i = q_i^k) et à la proportionnelle ; les deux premières sont
@@ -332,14 +336,67 @@ sélections validées, sur p_ref.
 
 ### Ce que l'étape 1 ne fait pas encore
 
-Pas de poids w > 0 (étape 2 : porte de validation par segment sur la clôture Pinnacle de football-data,
-handicap asiatique et plus/moins compris) ; pas de composition probable avant H−1 (seule la dépendance à
-un joueur clé est signalée) ; pas de Betfair après commission (prix bruts) ; pas de décorrélation ni
+Pas de poids w > 0 (l'étape 2 ci-dessous confirme w = 0 partout sur la clôture Pinnacle) ; pas de
+composition probable avant H−1 (seule la dépendance à un joueur clé est signalée) ; pas de Betfair après commission (prix bruts) ; pas de décorrélation ni
 d'agrégation du onze (étape 4). L'archive antérieure au 5 novembre n'a pas de bookmaker de référence :
 le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est archivé pour le match. La
 « clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (passages de
 10 h, 14 h et 17 h UTC) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
 les ligues principales (étape 2).
+
+## Étape 2 du moteur quantitatif : porte de validation par segment (5 novembre 2026)
+
+Question posée : la simulation apporte-t-elle, quelque part, une information que la clôture Pinnacle n'a
+pas déjà ? Si non, le poids w du modèle dans la probabilité de référence reste 0 et le coupe-circuit ne
+voit que le marché sharp (`scripts/betting/gate.py`, `python3 -m betting.gate [--write]`).
+
+### Méthode
+
+- **Données** : clôture Pinnacle de football-data (dataset de la recherche, `replay_market.parquet`,
+  cotes brutes `odds_ps_closing_*` pour le 1N2 et `odds_p_ou_closing_*` pour le plus/moins 2,5),
+  dévigées par la méthode de Shin ; probabilités du modèle lues dans la simulation de phase 2 (variante
+  figée) sur les buts attendus figés avant le match (`phase2.matches_with_predictions`, anti-fuite).
+  Pas de clôture pour les coupes d'Europe (football-data ne les couvre pas) : leurs segments gardent w = 0.
+- **Pool** : p ∝ p_modèle^w · p_sharp^(1−w), w sur une grille de 0 à 1 par pas de 0,05, **choisi sur la
+  saison 2024-25** (log-loss minimal) puis **évalué sur 2025-26 sans réoptimisation** ; gain de log-loss
+  du pool contre la clôture seule, intervalle bootstrap à 90 % (2 000 tirages, graine fixe).
+- **Verdict** par famille × compétition : `trop_peu_de_matchs` (moins de 150 matchs sur l'une des deux
+  saisons), `poids_nul` (w = 0 déjà en validation), `gain_non_significatif` (w > 0 mais borne basse ≤ 0),
+  `valide` (w > 0 et borne basse > 0). Seuls les segments `valide` entrent dans
+  `.research/betting/phase2/pool_weights.json` ; le fichier est écrit même vide, le produit lit alors w = 0.
+  Le rapport complet (tous les segments, log-loss par poids) est dans `gate.json`.
+- **Cycle** : recalcul à chaque amorce du Labo (`update-data.yml`, après `betting.adjust`), fichiers
+  embarqués dans l'archive `betting-seed`. Tests synthétiques dans `scripts/test_betting_gate.py` (un
+  modèle qui connaît la vérité face à une clôture bruitée est validé ; un modèle faux ne l'est jamais).
+
+### Résultat (clôture Pinnacle 2024-25 → 2025-26, 8 ligues du Labo)
+
+| Famille | Segment | Validation / test | w choisi | Gain hors échantillon [IC 90 %] | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| résultat | toutes | 2 891 / 1 450 | 0,00 | — | poids nul |
+| résultat | ENG | 377 / 209 | 0,50 | −0,0097 [−0,0182 ; −0,0005] | non significatif (négatif) |
+| résultat | ENG2 | 547 / 268 | 0,25 | −0,0021 [−0,0055 ; +0,0013] | non significatif |
+| résultat | FRA | 304 / 152 | 0,05 | −0,0005 [−0,0014 ; +0,0004] | non significatif |
+| résultat | ESP, ITA, POR | ≥ 302 / ≥ 151 | 0,00 | — | poids nul |
+| résultat | GER, NED | 303 / < 150 | — | — | trop peu de matchs (test) |
+| plus/moins | toutes | 2 875 / 1 442 | 0,00 | — | poids nul |
+| plus/moins | ENG | 374 / 209 | 0,20 | −0,0003 [−0,0027 ; +0,0021] | non significatif |
+| plus/moins | ENG2 | 547 / 268 | 0,50 | −0,0068 [−0,0121 ; −0,0011] | non significatif (négatif) |
+| plus/moins | ESP, FRA, ITA, POR | ≥ 301 / ≥ 151 | 0,00 | — | poids nul |
+| plus/moins | GER, NED | ≥ 295 / < 150 | — | — | trop peu de matchs (test) |
+
+**Aucun segment validé.** Sur toute la famille (près de 2 900 matchs de validation), le poids optimal du
+modèle est 0 : la clôture Pinnacle contient déjà tout ce que la simulation sait. Les quelques poids
+positifs choisis sur 2024-25 (ENG, ENG2, FRA) se retournent sur 2025-26 : un gain apparent en validation
+qui ne tient pas hors échantillon, exactement ce que la porte doit écarter. Le produit reste donc à w = 0
+partout : la probabilité de référence est la probabilité sharp, et le coupe-circuit ne joue que lorsque
+Winamax s'écarte de Pinnacle / Betfair au-delà des seuils de l'étape 1. Le modèle sert aux marchés sans
+référence sharp uniquement comme signal d'exclusion, jamais comme source d'avantage.
+
+Ce résultat est attendu (Pitcan 2026 trouve un poids faible mais positif avec un modèle xG plus riche et
+plus de saisons) et sera réévalué : à la fin de 2025-26 (GER et NED passeront le seuil des 150 matchs), à
+l'arrivée du handicap asiatique dans le dataset football-data, et après toute variante du modèle qui
+améliore son log-loss propre en recherche (`docs/forecast-research.md`).
 
 ## Phases suivantes
 

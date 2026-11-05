@@ -73,7 +73,7 @@ jobs:
           python3 -m backtest.season_replay
           python3 -m backtest.export_replays
 
-      - name: Amorce du Labo paris (résultats détaillés, variante, calibration, ajustements)
+      - name: Amorce du Labo paris (résultats détaillés, variante, calibration, ajustements, porte de validation)
         # Publiée dans la release privée betting-odds : le workflow quotidien du Labo n'a pas besoin du cache PitchAPI
         run: |
           cd scripts
@@ -81,6 +81,7 @@ jobs:
           python3 -m betting.phase2 variant
           python3 -m betting.phase2 calibrate
           python3 -m betting.adjust
+          python3 -m betting.gate --write || echo "porte de validation non calculée (clôture Pinnacle indisponible) : poids du pool à 0"
           cd ..
           tar -czf "$RUNNER_TEMP/betting-seed.tar.gz" .research/forecast/predictions .research/forecast/replay_pitchapi.parquet .research/forecast/replay_pitchapi.meta.json .research/betting/results.parquet .research/betting/phase2
           gh release view betting-odds -R "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds -R "$DATA_REPO" --latest=false --prerelease --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (amorce, cotes Winamax FR via OddsPapi, journal, historique des soirées)."

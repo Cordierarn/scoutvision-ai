@@ -133,7 +133,7 @@ jobs:
       - name: Publication de l'archive du Labo (release privée)
         run: |
           cd .research/betting
-          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json quota.json quota_theoddsapi.json results_web.parquet markets_catalogue.json 2>/dev/null)
+          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json aliases_theoddsapi.json quota.json quota_theoddsapi.json results_web.parquet markets_catalogue.json 2>/dev/null)
           cd ../..
           gh release view betting-odds --repo "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds --repo "$DATA_REPO" --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (cotes Winamax FR via OddsPapi, journal, historique des soirées), mise à jour par betting-odds.yml" --prerelease
           gh release upload betting-odds betting-odds.tar.gz --repo "$DATA_REPO" --clobber
