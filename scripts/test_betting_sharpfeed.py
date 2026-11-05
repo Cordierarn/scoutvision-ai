@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -80,6 +82,25 @@ class ConversionTests(unittest.TestCase):
         unknown = event("Omega Rovers", "Sigma Wanderers")                                              # aucune rencontre de ce nom
         self.assertIsNone(sharpfeed.match_fixture(unknown, FIXTURES, "ENG"))
         self.assertIsNone(sharpfeed.match_fixture(event("Club Alpha", "Beta United"), FIXTURES, "ESP"))   # autre compétition
+
+    def test_one_sure_side_learns_the_other_name_and_ambiguity_learns_nothing(self):
+        aliases = {}
+        fx = sharpfeed.match_fixture(event("Gamma Town", "Crvena Delta"), FIXTURES, "ENG", aliases)       # côté domicile sûr, visiteur inconnu
+        self.assertEqual(fx.fixture_id, "f2")
+        self.assertEqual(aliases, {"Crvena Delta": "Delta City"})
+        fx = sharpfeed.match_fixture(event("Gamma Town", "Crvena Delta"), FIXTURES, "ENG", aliases)       # l'alias vaut ensuite un nom exact
+        self.assertEqual(fx.fixture_id, "f2")
+        before = dict(aliases)
+        self.assertIsNone(sharpfeed.match_fixture(event("Club Alpha FC", "Delta City"), FIXTURES, "ENG", aliases))   # deux rencontres désignées : rien
+        self.assertIsNone(sharpfeed.match_fixture(event("Gamma Tn", "Crvena Omega"), FIXTURES, "ENG", aliases))     # côté domicile pas assez sûr (0,33)
+        self.assertEqual(aliases, before)
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "a" / "aliases.json"
+            self.assertEqual(sharpfeed.load_aliases(path), {})
+            sharpfeed.save_aliases(aliases, path)
+            self.assertEqual(sharpfeed.load_aliases(path), aliases)
+        snaps, report = sharpfeed.events_to_snapshots([event("Gamma Town", "Crvena Delta")], FIXTURES, CAT, "ENG", NOW, aliases={})
+        self.assertEqual(report["matched"], 1); self.assertEqual(set(snaps["fixture_id"]), {"f2"})
 
     def test_sports_to_pull_only_competitions_with_a_fixture_in_the_window(self):
         now = pd.Timestamp(NOW)

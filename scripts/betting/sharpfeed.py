@@ -49,8 +49,10 @@ SPORT_KEYS = {"ENG": "soccer_epl", "ESP": "soccer_spain_la_liga", "GER": "soccer
 BUDGET = 500
 RESERVE = 25
 NAME_THRESHOLD = 0.5
+STRONG_THRESHOLD = 0.8       # un côté sûr suffit quand il désigne une seule rencontre du créneau : l'autre nom est appris
 KICKOFF_TOLERANCE = dt.timedelta(hours=2)
 CREDITS = RESEARCH / "quota_theoddsapi.json"
+ALIASES = RESEARCH / "aliases_theoddsapi.json"     # nom The Odds API → nom OddsPapi, appris
 SOURCE = "the-odds-api"
 
 
@@ -164,34 +166,52 @@ def _outcome_id(market, name: str) -> int | None:
     return None
 
 
-def match_fixture(event: dict, fixtures: pd.DataFrame, competition: str) -> pd.Series | None:
-    """Rencontre OddsPapi de la même compétition, coup d'envoi à ± 2 h, noms des deux équipes similaires
-    (seuil 0,5 chacun) ; None sans candidat net."""
+def load_aliases(path: Path = ALIASES) -> dict[str, str]:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def save_aliases(aliases: dict[str, str], path: Path = ALIASES) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(sorted(aliases.items())), ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _side_score(name: str, candidate: str, aliases: dict[str, str]) -> float:
+    return 1.0 if aliases.get(name) == candidate else similarity(name, candidate)
+
+
+def match_fixture(event: dict, fixtures: pd.DataFrame, competition: str, aliases: dict[str, str] | None = None) -> pd.Series | None:
+    """Rencontre OddsPapi de la même compétition, coup d'envoi à ± 2 h : les deux noms similaires (seuil 0,5,
+    ou alias appris), sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau ; l'autre nom
+    est alors appris dans `aliases` (« Red Star Belgrade » → le nom OddsPapi). None sans candidat net."""
+    aliases = aliases if aliases is not None else {}
     start = pd.Timestamp(event["commence_time"])
     f = fixtures[(fixtures["competition"] == competition) & ((fixtures["start_time"] - start).abs() <= KICKOFF_TOLERANCE)]
-    best, best_score, runner = None, 0.0, 0.0
-    for r in f.itertuples(index=False):
-        h, a = similarity(event["home_team"], r.home_name), similarity(event["away_team"], r.away_name)
-        if h < NAME_THRESHOLD or a < NAME_THRESHOLD:
-            continue
-        score = h + a
-        if score > best_score:
-            best, runner, best_score = r, best_score, score
-        elif score > runner:
-            runner = score
-    if best is None or (runner > 0 and best_score - runner < 0.2):
+    scored = [(r, _side_score(event["home_team"], r.home_name, aliases), _side_score(event["away_team"], r.away_name, aliases)) for r in f.itertuples(index=False)]
+    both = sorted([(h + a, r) for r, h, a in scored if h >= NAME_THRESHOLD and a >= NAME_THRESHOLD], key=lambda x: -x[0])
+    if both and (len(both) == 1 or both[0][0] - both[1][0] >= 0.2):
+        return both[0][1]
+    if both:
         return None
-    return best
+    one_side = [(r, h, a) for r, h, a in scored if max(h, a) >= STRONG_THRESHOLD]
+    if len(one_side) != 1:
+        return None
+    r, h, a = one_side[0]
+    if h >= STRONG_THRESHOLD and a < NAME_THRESHOLD:
+        aliases[event["away_team"]] = r.away_name
+    elif a >= STRONG_THRESHOLD and h < NAME_THRESHOLD:
+        aliases[event["home_team"]] = r.home_name
+    return r
 
 
-def events_to_snapshots(events: list[dict], fixtures: pd.DataFrame, cat, competition: str, observed_at: dt.datetime) -> tuple[pd.DataFrame, dict]:
+def events_to_snapshots(events: list[dict], fixtures: pd.DataFrame, cat, competition: str, observed_at: dt.datetime,
+                        aliases: dict[str, str] | None = None) -> tuple[pd.DataFrame, dict]:
     """Relevés (schéma de l'archive) des bookmakers de référence ; `report` : rencontres appariées ou non,
-    marchés sans équivalent au catalogue."""
+    marchés sans équivalent au catalogue. `aliases` est enrichi des noms appris."""
     idx = catalogue_index(cat)
     rows, report = [], {"events": len(events), "matched": 0, "unmatched": [], "unknownMarkets": 0, "prices": 0}
     at = observed_at.isoformat()
     for ev in events:
-        fx = match_fixture(ev, fixtures, competition)
+        fx = match_fixture(ev, fixtures, competition, aliases)
         if fx is None:
             report["unmatched"].append(f"{ev.get('home_team')} – {ev.get('away_team')} ({ev.get('commence_time')})")
             continue
@@ -263,6 +283,8 @@ def cmd_pull(args) -> int:
     print(f"{len(comps)} compétition(s) avec une rencontre sous {args.hours:g} h : {', '.join(comps) or 'aucune'} ; "
           f"{len(markets)} crédit(s) par compétition, {client.credits.available} disponibles", flush=True)
     cat = load_catalogue()
+    aliases = load_aliases()
+    known = len(aliases)
     buffer, totals = SnapshotBuffer(every=10_000), {"matched": 0, "events": 0, "prices": 0, "unmatched": []}
     with archive_lock():
         for comp in comps:
@@ -272,7 +294,7 @@ def cmd_pull(args) -> int:
                 print(str(exc))
                 break
             observed = dt.datetime.now(dt.timezone.utc)
-            snaps, report = events_to_snapshots(events, fixtures, cat, comp, observed)
+            snaps, report = events_to_snapshots(events, fixtures, cat, comp, observed, aliases)
             for key in ("matched", "events", "prices"):
                 totals[key] += report[key]
             totals["unmatched"] += [f"{comp} : {u}" for u in report["unmatched"]]
@@ -280,6 +302,9 @@ def cmd_pull(args) -> int:
                 buffer.add(part, _odds_path(comp, str(season)))
             print(f"  {comp:5s} {report['matched']}/{report['events']} rencontres appariées, {report['prices']} prix, {report['unknownMarkets']} marché(s) sans équivalent", flush=True)
         added = buffer.flush()
+    if len(aliases) > known:
+        save_aliases(aliases)
+        print(f"{len(aliases) - known} alias de nom appris ({ALIASES.name})")
     if totals["unmatched"]:
         print("Non appariées : " + " ; ".join(totals["unmatched"][:10]) + (" …" if len(totals["unmatched"]) > 10 else ""))
     print(f"{totals['matched']}/{totals['events']} rencontres, {totals['prices']} prix, {added} relevés ajoutés ; crédits {client.credits.used} utilisés, {client.credits.available} disponibles")
