@@ -22,11 +22,11 @@ const index = {
 const plan: BettingPlan = {
   profile: 'equilibre', promptVersion: 'ai-betting-plan-v1', summary: 'Une absence importante côté Club B.',
   meta: { model: 'modele-test', requestedModel: 'modele-test', generatedAt: '2026-11-07T12:05:00Z', suggestionsAt: '2026-11-07T11:45:00Z' },
-  matches: [{ matchId: 'm1', match: 'Club A – Club B', kickoff: '2026-11-07T19:00:00Z',
+  matches: [{ matchId: 'm1', match: 'Club A – Club B', kickoff: '2026-11-07T19:00:00Z', engineVerdict: 'bet',
     news: { matchId: 'm1', text: '- Club B : attaquant suspendu.', sources: [{ title: 'source.test', uri: 'https://example.test/a' }], queries: ['Club A Club B absents'], fetchedAt: '2026-11-07T12:01:00Z', model: 'modele-test' },
     verdicts: [{ ref: 'm1#1', label: 'Club A gagne', verdict: 'garder', reason: 'Attaquant adverse suspendu.' }, { ref: 'm1#2', label: 'Plus de 2,5 buts', verdict: 'eviter', reason: 'Moins de puissance offensive.' }] }],
-  picks: [{ ref: 'm1#1', matchId: 'm1', match: 'Club A – Club B', label: 'Club A gagne', family: 'résultat', odds: 1.85, probability: 0.6, expectedValue: 0.11, stakeFraction: 0.03, stakeMode: 'kelly', verdict: 'garder', why: 'Absence adverse.' }],
-  combo: null, avoid: [{ matchId: 'm9', match: 'Club E – Club F', why: 'Compositions inconnues.' }], discipline: 'Mises du moteur, sans rattrapage.', warnings: ['1 match(s) sans actualité recherchée.'],
+  picks: [{ ref: 'm1#1', matchId: 'm1', match: 'Club A – Club B', label: 'Club A gagne', family: 'résultat', odds: 1.85, probability: 0.56, engineProbability: 0.6, sharpProbability: 0.56, sharpBookmaker: 'pinnacle', expectedValue: 0.036, stakeFraction: 0.01, stakeMode: 'shrink_kelly', warnings: [], verdict: 'garder', why: 'Absence adverse.' }],
+  combo: null, avoid: [{ matchId: 'm9', match: 'Club E – Club F', why: 'Pas de pari selon le moteur : espérance insuffisante.', source: 'moteur' }], discipline: 'Mises du moteur, sans rattrapage.', warnings: ['1 match(s) sans actualité recherchée.'],
 };
 
 describe('BettingAssistant (rendu statique)', () => {
@@ -42,7 +42,10 @@ describe('BettingAssistant (rendu statique)', () => {
 
   it('affiche le plan : mise du moteur sur la bankroll, avis, actualité sourcée, avertissements', () => {
     const html = renderToStaticMarkup(<PlanView plan={plan} bankroll={300} newsErrors={[{ match: 'Club G – Club H', message: 'Recherche trop longue.' }]} />);
-    expect(html).toContain('9,00');                     // 300 × 3 %
+    expect(html).toContain('3,00');                     // 300 × 1 % (Kelly rétréci du moteur)
+    expect(html).toContain('56 %');                     // probabilité de référence (sharp), pas celle du moteur
+    expect(html).toContain('+4');                       // espérance face à la référence
+    expect(html).toContain('· moteur');                 // « pas de pari » du moteur dans les matchs à éviter
     expect(html).toContain('À garder');
     expect(html).toContain('À éviter');
     expect(html).toContain('Club E – Club F');
@@ -51,6 +54,6 @@ describe('BettingAssistant (rendu statique)', () => {
     expect(html).toContain('https://www.google.com/search?q=Club%20A%20Club%20B%20absents');
     expect(html).toContain('Actualité indisponible pour Club G – Club H : Recherche trop longue.');
     expect(html).toContain('modele-test');
-    expect(renderToStaticMarkup(<PlanView plan={{ ...plan, picks: [] }} bankroll={null} />)).toContain('passer son tour');
+    expect(renderToStaticMarkup(<PlanView plan={{ ...plan, picks: [] }} bankroll={null} />)).toContain('pas de pari sur ces matchs');
   });
 });

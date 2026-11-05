@@ -11,8 +11,11 @@ journal immuable des suggestions publiées et export de l'artefact privé lu par
   python3 -m betting.product all
 
 Probabilités : simulation de phase 2 (variante figée) sur les buts attendus ajustés (`adjust.py`) ; pour les
-rencontres à venir, buts attendus du pipeline (forecast.json). Le navigateur ne calcule que la mise à
-partir de la bankroll saisie (fractions publiées ici).
+rencontres à venir, buts attendus du pipeline (forecast.json). Référence : probabilités de Shin du marché
+sharp (Pinnacle, sinon Betfair Exchange, `sharp.py`), coupe-circuit et Kelly rétréci (`circuit.py`) ; les
+combinés sont désactivés (corrélation intra-match non mesurable face au marché). CLV de chaque pari publié :
+cote prise × probabilité juste de clôture − 1. Le navigateur ne calcule que la mise à partir de la bankroll
+saisie (fractions publiées ici).
 """
 
 from __future__ import annotations
@@ -27,8 +30,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import COMPETITIONS, RESEARCH, ROOT
-from . import adjust, markets as mk, simulate as sm, suggest as sg
+from . import BOOKMAKER, COMPETITIONS, RESEARCH, ROOT
+from . import adjust, circuit, dependency, markets as mk, opd, sharp, simulate as sm, suggest as sg
 from .catalogue import load as load_catalogue
 from .phase2 import OUT as PHASE2, frozen_variant, load_results as _pitchapi_results, matches_with_predictions
 from .results import half_share
@@ -39,8 +42,9 @@ EXPORT_DIR = ROOT / "public" / "data" / "forecast" / "suggestions"
 SEASON = "2026-27"
 START_BANKROLL = 300.0
 UPCOMING_DAYS = 7
+QUANT_COLUMNS = ["p_sharp", "p_ref", "ev_ref", "pool_w", "sharp_bookmaker", "closing_p_sharp", "clv"]
 JOURNAL_COLUMNS = ["suggestion_id", "published_at", "match_id", "fixture_id", "competition", "kickoff_utc", "profile", "rank", "kind", "market_id", "outcome_id",
-                   "family", "label", "odds", "odds_at", "p", "ev", "stake_fraction", "stake_mode", "settled", "realised", "settled_at"]
+                   "family", "label", "odds", "odds_at", "p", "ev", "stake_fraction", "stake_mode", "settled", "realised", "settled_at"] + QUANT_COLUMNS
 
 
 # ----- données communes -----
@@ -82,8 +86,9 @@ def competition_half(results: pd.DataFrame, season: str) -> dict[str, float]:
 
 
 def outcomes_from_snapshots(snaps: pd.DataFrame, cat, before: pd.Timestamp, home: str, away: str) -> list[dict]:
-    """Dernier relevé strictement antérieur à `before` pour chaque issue d'un match, en dicts pour `suggest`."""
-    s = snaps[snaps["created_at"] < before].sort_values("created_at")
+    """Dernier relevé Winamax strictement antérieur à `before` pour chaque issue d'un match, en dicts pour
+    `suggest` (les bookmakers de référence restent dans `snaps` pour le coupe-circuit)."""
+    s = snaps[(snaps["created_at"] < before) & (snaps["bookmaker"] == BOOKMAKER)].sort_values("created_at")
     if s.empty:
         return []
     last = s.groupby(["market_id", "outcome_id", "player_id"], dropna=False).last().reset_index()
@@ -155,29 +160,98 @@ def reasons(c: sg.Candidate, ctx: dict, home: str, away: str) -> list[str]:
     return out[:3]
 
 
+# ----- référence sharp, OPD, dépendance : contexte quantitatif d'un passage -----
+
+class Quant:
+    """Données du coupe-circuit chargées une fois par passage : poids du pool par segment, xG par match (OPD),
+    dépendances aux joueurs clés de la saison."""
+
+    def __init__(self, results: pd.DataFrame, season: str = None, weights: sharp.PoolWeights | None = None,
+                 xg_matches: pd.DataFrame | None = None, deps: dependency.TeamDependencies | None = None):
+        self.weights = weights or sharp.PoolWeights.load()
+        self.xg = xg_matches if xg_matches is not None else opd.load_xg_matches(results)
+        self.deps = deps or dependency.TeamDependencies.load(season or SEASON)
+
+    def team_flags(self, home_id: str | None, away_id: str | None, before: pd.Timestamp) -> dict:
+        out = {}
+        for side, tid in (("home", home_id), ("away", away_id)):
+            o = opd.team_opd(self.xg, tid, before) if tid else None
+            d = self.deps.of(tid)
+            out[side] = {"opd": o.as_dict() if o else None, "dependency": d.as_dict() if d else None,
+                         "overperforming": bool(o and o.overperforming), "hub": d.player if d and d.strong else None}
+        return out
+
+
+def _sharp_reason(a: circuit.Assessment, odds: float) -> str:
+    bk = {"pinnacle": "Pinnacle", "betfair-ex": "Betfair Exchange"}.get(a.sharp_bookmaker or "", a.sharp_bookmaker or "marché sharp")
+    pooled = f", référence {a.p_ref * 100:.1f} % (pool w = {a.w:g})" if a.w > 0 else ""
+    return (f"Marché sharp ({bk}, sans marge) : {a.p_sharp * 100:.1f} %{pooled} ; cote Winamax {odds:.2f} → espérance {a.ev * 100:+.1f} %").replace(".", ",")
+
+
+def _assessment_fields(c: sg.Candidate) -> dict:
+    a = c.assessment
+    if a is None:
+        return {"pSharp": None, "pRef": round(c.p, 4), "evRef": round(c.ev, 4), "poolW": None, "sharpBookmaker": None, "sharpAt": None, "warnings": [], "verdict": "non_evalue"}
+    return {"pSharp": None if a.p_sharp is None else round(a.p_sharp, 4), "pRef": round(a.p_ref, 4), "evRef": None if a.ev is None else round(a.ev, 4), "poolW": a.w,
+            "sharpBookmaker": a.sharp_bookmaker, "sharpAt": a.sharp_at, "warnings": list(a.warnings), "verdict": a.verdict}
+
+
 # ----- suggestion d'un match -----
 
 def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime, now: dt.datetime, competition: str, excluded: set, ctx: dict,
-                  home: str, away: str) -> dict:
+                  home: str, away: str, snaps: pd.DataFrame | None = None, cat=None, quant: Quant | None = None,
+                  team_ids: tuple[str | None, str | None] = (None, None)) -> dict:
+    """Sélections d'un match par profil, après le coupe-circuit quand l'archive (`snaps`, tous bookmakers) et le
+    catalogue sont fournis ; sinon classement sur le seul modèle (tests, diagnostics)."""
     cands = sg.evaluate_candidates(sims, outcomes, kickoff, now, excluded, competition)
+    before = pd.Timestamp(min(now, kickoff))
+    flags, coverage = None, None
+    if snaps is not None and cat is not None:
+        refs: dict[int, sharp.Reference | None] = {}
+
+        def reference_of(mid: int):
+            if mid not in refs:
+                refs[mid] = sharp.market_reference(snaps, cat, mid, before)
+            return refs[mid]
+
+        def move_of(mid: int, oid: int, ref: sharp.Reference):
+            return sharp.sharp_move(snaps, cat, mid, oid, before, ref)
+
+        flags = quant.team_flags(team_ids[0], team_ids[1], before) if quant else {"home": {}, "away": {}}
+        weights = quant.weights if quant else sharp.PoolWeights()
+        hours = (pd.Timestamp(kickoff) - pd.Timestamp(now)).total_seconds() / 3600.0
+        sg.apply_circuit(cands, reference_of, lambda fam: weights.weight(fam, competition), move_of,
+                         overperforming={k: v.get("overperforming", False) for k, v in flags.items()},
+                         dependency={k: v.get("hub") for k, v in flags.items()}, hours_to_kickoff=hours)
+        markets = {c.market_id for c in cands}
+        coverage = round(sum(1 for m in markets if reference_of(m) is not None) / len(markets), 3) if markets else None
     profiles = {}
     for profile in sg.PROFILES:
         ranked = sg.rank(cands, profile)
-        combo = sg.combine(ranked, profile)
         profiles[profile] = {
             "suggestions": [{"rank": s.rank, "marketId": s.candidate.market_id, "outcomeId": s.candidate.outcome_id, "family": s.candidate.family,
                              "label": s.candidate.label, "odds": round(s.candidate.odds, 2), "oddsAt": s.candidate.odds_at.isoformat(), "p": round(s.candidate.p, 4),
-                             "ev": round(s.candidate.ev, 4), "stakeFraction": s.stake_fraction, "stakeMode": s.stake_mode, "reasons": reasons(s.candidate, ctx, home, away)}
+                             "ev": round(s.candidate.ev, 4), "stakeFraction": s.stake_fraction, "stakeMode": s.stake_mode, **_assessment_fields(s.candidate),
+                             "reasons": ([_sharp_reason(s.candidate.assessment, s.candidate.odds)] if s.candidate.assessment else []) + reasons(s.candidate, ctx, home, away)}
                             for s in ranked],
-            "combo": None if combo is None else {"labels": [c.label for c in combo.candidates], "marketIds": [c.market_id for c in combo.candidates],
-                                                 "outcomeIds": [c.outcome_id for c in combo.candidates], "jointP": round(combo.joint_p, 4), "odds": round(combo.odds, 2),
-                                                 "ev": round(combo.ev, 4), "stakeFraction": combo.stake_fraction, "stakeMode": combo.stake_mode},
+            "combo": None,   # combinés désactivés : la corrélation entre sélections d'un même match n'est pas mesurable face au marché sharp
         }
-    excluded_counts = {}
+    excluded_counts: dict[str, int] = {}
     for c in cands:
         if c.excluded:
             excluded_counts[c.excluded] = excluded_counts.get(c.excluded, 0) + 1
-    return {"profiles": profiles, "evaluated": len(cands), "excluded": excluded_counts}
+    # meilleure sélection du modèle refusée par le coupe-circuit : ce que l'on aurait joué avant, et pourquoi on ne le joue plus
+    refused = [c for c in cands if c.assessment is not None and c.assessment.blocks]
+    best = max(refused, key=lambda c: c.p * (1.0 + c.ev), default=None)
+    no_bet = None
+    if best is not None:
+        a = best.assessment
+        no_bet = {"label": best.label, "family": best.family, "odds": round(best.odds, 2), "p": round(best.p, 4), "pSharp": None if a.p_sharp is None else round(a.p_sharp, 4),
+                  "evRef": None if a.ev is None else round(a.ev, 4), "reasons": [circuit.BLOCK_LABELS.get(b, b) for b in a.blocks], "codes": list(a.blocks)}
+    out = {"profiles": profiles, "evaluated": len(cands), "excluded": excluded_counts, "noBet": no_bet, "sharpCoverage": coverage}
+    if flags is not None:
+        out["teams"] = flags
+    return out
 
 
 # ----- rejeu de la saison -----
@@ -194,6 +268,7 @@ def replay(season: str = SEASON) -> dict:
     fixtures = pd.read_parquet(RESEARCH / "fixtures.parquet").set_index("fixture_id")
     snaps = pd.concat([pd.read_parquet(p) for c in COMPETITIONS for p in sorted((RESEARCH / "odds" / c).glob("*.parquet"))], ignore_index=True)
     df = df.merge(matched, on="match_id").sort_values("kickoff_utc")
+    quant = Quant(results, season)
     rows = []
     for m in df.itertuples(index=False):
         kick = pd.Timestamp(m.kickoff_utc)
@@ -204,14 +279,18 @@ def replay(season: str = SEASON) -> dict:
         xh, xa = adjust.adjusted_xg({"expected_goals_home": m.expected_goals_home, "expected_goals_away": m.expected_goals_away}, feats.loc[m.match_id] if m.match_id in feats.index else None, adj)
         sims = sm.simulate(xh, xa, comp_half.get(m.competition, 0.45), variant)
         ctx = {}
-        res = suggest_match(sims, outcomes, kick.to_pydatetime(), kick.to_pydatetime(), m.competition, excluded, ctx, m.home_team_name, m.away_team_name)
+        res = suggest_match(sims, outcomes, kick.to_pydatetime(), kick.to_pydatetime(), m.competition, excluded, ctx, m.home_team_name, m.away_team_name,
+                            snaps=s, cat=cat, quant=quant, team_ids=(m.home_team_id, m.away_team_id))
         result = mk.Result(int(m.ft_home), int(m.ft_away), int(m.ht_home), int(m.ht_away), m.first_goal, m.last_goal)
         for profile, block in res["profiles"].items():
             for sgg in block["suggestions"]:
                 spec = cat[sgg["marketId"]].spec(sgg["outcomeId"])
                 settled = mk.settle(spec, result)
+                closing = sharp.closing_reference(s, cat, sgg["marketId"], kick)
+                p_close = closing.probability(sgg["outcomeId"]) if closing else None
                 rows.append({"match_id": m.match_id, "competition": m.competition, "kickoff_utc": kick, "profile": profile, "kind": "simple", "rank": sgg["rank"],
                              "family": sgg["family"], "odds": sgg["odds"], "p": sgg["p"], "ev": sgg["ev"], "stake_fraction": sgg["stakeFraction"], "stake_mode": sgg["stakeMode"],
+                             "p_sharp": sgg["pSharp"], "p_ref": sgg["pRef"], "ev_ref": sgg["evRef"], "clv": None if p_close is None else sharp.clv(sgg["odds"], p_close),
                              "settled": settled, "realised": mk.realised_return(settled, sgg["odds"])})
             combo = block["combo"]
             if combo:
@@ -264,13 +343,23 @@ def _block(g: pd.DataFrame) -> dict:
     settled = g[g["settled"].notna()]
     out = {"bets": int(len(g)), "hitRate": round(float((settled["settled"] > 0).mean()), 4) if len(settled) else None,
            "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None}
+    out.update(clv_block(g))
     return out
+
+
+def clv_block(g: pd.DataFrame) -> dict:
+    """CLV moyen et part des paris qui battent la clôture juste, sur les paris où la clôture sharp est connue."""
+    if "clv" not in g:
+        return {"clvBets": 0, "meanClv": None, "clvBeatRate": None}
+    c = pd.to_numeric(g["clv"], errors="coerce").dropna()
+    return {"clvBets": int(len(c)), "meanClv": round(float(c.mean()), 4) if len(c) else None, "clvBeatRate": round(float((c > 0).mean()), 4) if len(c) else None}
 
 
 def summarise(tab: pd.DataFrame) -> dict:
     out = {"start": START_BANKROLL, "profiles": {}}
     if tab.empty:
-        tab = pd.DataFrame(columns=["match_id", "competition", "kickoff_utc", "profile", "kind", "rank", "family", "odds", "p", "ev", "stake_fraction", "stake_mode", "settled", "realised"])
+        tab = pd.DataFrame(columns=["match_id", "competition", "kickoff_utc", "profile", "kind", "rank", "family", "odds", "p", "ev", "stake_fraction", "stake_mode",
+                                    "p_sharp", "p_ref", "ev_ref", "clv", "settled", "realised"])
     for profile in sg.PROFILES:
         g = tab[tab["profile"] == profile]
         simple = g[g["kind"] == "simple"]
@@ -297,6 +386,7 @@ def upcoming_suggestions(now: dt.datetime | None = None, days: int = UPCOMING_DA
     horizon = pd.Timestamp(now) + pd.Timedelta(days=days)
     teams = results.drop_duplicates("home_team_name").set_index("home_team_name")["home_team_id"].to_dict()
     teams.update(results.drop_duplicates("away_team_name").set_index("away_team_name")["away_team_id"].to_dict())
+    quant = Quant(results, SEASON)
     out = []
     for mid, m in fc.items():
         kick = pd.Timestamp(m["date"], tz="UTC")
@@ -313,24 +403,29 @@ def upcoming_suggestions(now: dt.datetime | None = None, days: int = UPCOMING_DA
         if not outcomes or m.get("xgHome") is None or m.get("xgAway") is None:
             out.append(entry); continue
         latest = max(o["odds_at"] for o in outcomes)
-        entry.update({"status": "ok", "kickoff": kickoff.isoformat(), "oddsAt": latest.isoformat(), "oddsStale": (pd.Timestamp(now) - pd.Timestamp(latest)) > sg.MAX_AGE})
+        entry.update({"status": "ok", "fixtureId": str(fixture_id), "kickoff": kickoff.isoformat(), "oddsAt": latest.isoformat(), "oddsStale": (pd.Timestamp(now) - pd.Timestamp(latest)) > sg.MAX_AGE})
         hid, aid = teams.get(m["home"]), teams.get(m["away"])
         feats = adjust.features_as_of(results, hid, aid, m["competition"], pd.Timestamp(now), adj.half_life) if hid and aid else None
         xh, xa = adjust.adjusted_xg({"expected_goals_home": m["xgHome"], "expected_goals_away": m["xgAway"]}, feats, adj)
         sims = sm.simulate(xh, xa, comp_half.get(m["competition"], 0.45), variant)
         ctx = {"home": team_context(results, hid, "home", pd.Timestamp(now)) if hid else None, "away": team_context(results, aid, "away", pd.Timestamp(now)) if aid else None,
                "h2h": h2h_context(results, hid, aid, pd.Timestamp(now)) if hid and aid else None, "xg": (xh, xa)}
-        res = suggest_match(sims, outcomes, kickoff, now, m["competition"], excluded, ctx, m["home"], m["away"])
+        res = suggest_match(sims, outcomes, kickoff, now, m["competition"], excluded, ctx, m["home"], m["away"], snaps=s, cat=cat, quant=quant, team_ids=(hid, aid))
         entry.update(res)
         entry["xg"] = [round(xh, 2), round(xa, 2)]
         out.append(entry)
     return out
 
 
-def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.DataFrame, cat) -> pd.DataFrame:
+def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.DataFrame, cat, snaps: pd.DataFrame | None = None) -> pd.DataFrame:
     """Ajoute au journal les suggestions publiées (jamais réécrites : clé = match, profil, issue, horodatage du
-    relevé) et règle celles dont le match est terminé."""
+    relevé), règle celles dont le match est terminé et, quand l'archive (`snaps`) porte la clôture sharp du
+    marché, calcule le CLV de chaque suggestion dont le coup d'envoi est passé."""
     existing = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
+    for col in JOURNAL_COLUMNS:            # journal antérieur à l'étape 1 : colonnes quantitatives absentes
+        if col not in existing.columns:
+            existing[col] = None
+    existing = existing[JOURNAL_COLUMNS]
     rows = []
     for e in entries:
         if e.get("status") != "ok":
@@ -338,10 +433,12 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
         for profile, block in e["profiles"].items():
             for s in block["suggestions"]:
                 sid = hashlib.sha1(f"{e['matchId']}|{profile}|{s['marketId']}|{s['outcomeId']}|{s['oddsAt']}".encode()).hexdigest()[:16]
-                rows.append({"suggestion_id": sid, "published_at": published_at.isoformat(), "match_id": e["matchId"], "fixture_id": None, "competition": e["competition"],
+                rows.append({"suggestion_id": sid, "published_at": published_at.isoformat(), "match_id": e["matchId"], "fixture_id": e.get("fixtureId"), "competition": e["competition"],
                              "kickoff_utc": e["kickoff"], "profile": profile, "rank": s["rank"], "kind": "simple", "market_id": s["marketId"], "outcome_id": s["outcomeId"],
                              "family": s["family"], "label": s["label"], "odds": s["odds"], "odds_at": s["oddsAt"], "p": s["p"], "ev": s["ev"],
-                             "stake_fraction": s["stakeFraction"], "stake_mode": s["stakeMode"], "settled": None, "realised": None, "settled_at": None})
+                             "stake_fraction": s["stakeFraction"], "stake_mode": s["stakeMode"], "settled": None, "realised": None, "settled_at": None,
+                             "p_sharp": s.get("pSharp"), "p_ref": s.get("pRef"), "ev_ref": s.get("evRef"), "pool_w": s.get("poolW"), "sharp_bookmaker": s.get("sharpBookmaker"),
+                             "closing_p_sharp": None, "clv": None})
     new = pd.DataFrame(rows, columns=JOURNAL_COLUMNS)
     new = new[~new["suggestion_id"].isin(existing["suggestion_id"])]
     journal = pd.concat([existing, new], ignore_index=True) if len(new) else existing
@@ -355,6 +452,17 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
         journal.at[i, "settled"] = -2.0 if settled is None else settled   # -2 = remboursé
         journal.at[i, "realised"] = mk.realised_return(settled, float(journal.at[i, "odds"]))
         journal.at[i, "settled_at"] = published_at.isoformat()
+    # CLV : clôture sharp (dernier relevé complet avant le coup d'envoi) des suggestions dont le match a commencé
+    if snaps is not None and not snaps.empty:
+        kick = pd.to_datetime(journal["kickoff_utc"], utc=True, format="ISO8601")
+        todo = journal["clv"].isna() & journal["fixture_id"].notna() & (kick <= pd.Timestamp(published_at))
+        for i in journal[todo].index:
+            s = snaps[snaps["fixture_id"] == journal.at[i, "fixture_id"]]
+            closing = sharp.closing_reference(s, cat, int(journal.at[i, "market_id"]), kick[i]) if not s.empty else None
+            p_close = closing.probability(int(journal.at[i, "outcome_id"])) if closing else None
+            if p_close is not None:
+                journal.at[i, "closing_p_sharp"] = round(p_close, 4)
+                journal.at[i, "clv"] = round(sharp.clv(float(journal.at[i, "odds"]), p_close), 4)
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     journal.to_parquet(JOURNAL, index=False)
     return journal
@@ -396,8 +504,10 @@ def history(journal: pd.DataFrame, results: pd.DataFrame, names: dict, now: dt.d
         score = [int(scores.at[mid, "ft_home"]), int(scores.at[mid, "ft_away"])] if mid in scores.index else None
         profiles = {}
         for prof, gp in g.groupby("profile", sort=False):
+            num = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) or pd.isna(v) else round(float(v), 4)
             profiles[prof] = [{"label": r.label, "family": r.family, "odds": round(float(r.odds), 2), "p": round(float(r.p), 4), "ev": round(float(r.ev), 4),
                                "stakeFraction": round(float(r.stake_fraction), 5), "stakeMode": r.stake_mode,
+                               "pSharp": num(getattr(r, "p_sharp", None)), "evRef": num(getattr(r, "ev_ref", None)), "clv": num(getattr(r, "clv", None)),
                                "status": "pending" if pd.isna(r.settled) else SETTLED_STATUS.get(float(r.settled), "pending"),
                                "realised": None if pd.isna(r.realised) else round(float(r.realised), 4)} for r in gp.itertuples(index=False)]
         by_day.setdefault(kick.strftime("%Y-%m-%d"), []).append({"matchId": mid, "competition": g["competition"].iloc[0], "kickoff": kick.isoformat(),
@@ -424,9 +534,13 @@ def evening_details(evening: dict, names: dict) -> list[dict]:
 def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     bilan = json.loads(BILAN.read_text(encoding="utf-8")) if BILAN.exists() else None
     journal = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
+    for col in JOURNAL_COLUMNS:
+        if col not in journal.columns:
+            journal[col] = None
     settled = journal[journal["settled"].notna()]
     js = {"published": int(len(journal)), "settled": int(len(settled)),
-          "byProfile": {p: {"bets": int(len(g)), "hitRate": round(float((g["settled"] > 0).mean()), 4) if len(g) else None, "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None}
+          "byProfile": {p: {"bets": int(len(g)), "hitRate": round(float((g["settled"] > 0).mean()), 4) if len(g) else None, "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None,
+                            **clv_block(journal[journal["profile"] == p])}
                         for p, g in settled.groupby("profile")}}
     results = load_results()
     names = match_names(results)
@@ -439,10 +553,14 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
             cumul += profit or 0.0
             evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
                              "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")), "details": evening_details(e, names)})
-    payload = {"schemaVersion": "1.0.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
+    payload = {"schemaVersion": "1.1.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
                "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in sg.PROFILES], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
-               "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kellyFraction": sg.KELLY_FRACTION, "capPerBet": sg.CAP_PER_BET,
-                         "capPerMatch": sg.CAP_PER_MATCH, "fixedStake": sg.FIXED_STAKE},
+               "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kappa": circuit.KAPPA, "capPerBet": circuit.CAP_PER_BET,
+                         "capPerMatch": circuit.CAP_PER_MATCH, "capHighOdds": circuit.CAP_HIGH_ODDS, "highOdds": circuit.HIGH_ODDS, "evMin": circuit.EV_MIN,
+                         "evMinLowMargin": circuit.EV_MIN_LOW_MARGIN, "evMax": circuit.EV_MAX, "edgeMax": circuit.EDGE_MAX, "favoriteOdds": circuit.FAVORITE_ODDS,
+                         "lineupHours": circuit.LINEUP_HOURS, "combos": False},
+               "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights,
+                             "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
                "matches": entries, "bilan": bilan, "journal": js, "evenings": evenings[-30:],
                "history": history(journal, results, names, generated_at)}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -463,7 +581,8 @@ def main(argv=None) -> int:
             print(f"{sg.PROFILE_LABELS[p]:12s} paris {o['bets']:5d} réussite {o['hitRate']} rendement {o['returnFlat']} bankroll finale {o['finalBankroll']} creux {o['maxDrawdown']}")
     if args.cmd in ("suggest", "export", "all"):
         entries = upcoming_suggestions(now)
-        journal_append(entries, now, load_results(), load_catalogue())
+        snaps = pd.concat([pd.read_parquet(p) for c in COMPETITIONS for p in sorted((RESEARCH / "odds" / c).glob("*.parquet"))], ignore_index=True)
+        journal_append(entries, now, load_results(), load_catalogue(), snaps)
         ok = [e for e in entries if e.get("status") == "ok"]
         print(f"{len(entries)} rencontres à venir, {len(ok)} avec cotes et suggestions")
         if args.cmd in ("export", "all"):

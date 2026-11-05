@@ -120,22 +120,36 @@ function loadOptional<T>(path: string): Promise<T | null> {
 
 // ----- Suggestions de paris (Labo paris, onglet Matchs à venir) : artefact privé calculé par le pipeline -----
 export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote';
+export type StakeMode = 'shrink_kelly' | 'kelly' | 'fixed';
 export interface Suggestion {
   rank: number; marketId: number; outcomeId: number; family: string; label: string;
   odds: number; oddsAt: string; p: number; ev: number;
-  stakeFraction: number; stakeMode: 'kelly' | 'fixed'; reasons: string[];
+  stakeFraction: number; stakeMode: StakeMode; reasons: string[];
+  /** Étape 1 du moteur quantitatif : probabilité sharp (Shin), probabilité de référence (pool), espérance face à elle */
+  pSharp?: number | null; pRef?: number; evRef?: number | null; poolW?: number | null; sharpBookmaker?: string | null; sharpAt?: string | null;
+  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue';
 }
 export interface SuggestionCombo {
   labels: string[]; marketIds: number[]; outcomeIds: number[]; jointP: number; odds: number; ev: number;
-  stakeFraction: number; stakeMode: 'kelly' | 'fixed';
+  stakeFraction: number; stakeMode: StakeMode;
+}
+/** Meilleure sélection du modèle refusée par le coupe-circuit, et pourquoi (libellés calculés par le pipeline). */
+export interface NoBet { label: string; family: string; odds: number; p: number; pSharp: number | null; evRef: number | null; reasons: string[]; codes: string[] }
+export interface TeamFlags {
+  opd: { matches: number; goalsMinusXg: number; pointsMinusXp: number; overperforming: boolean } | null;
+  dependency: { player: string; share: number; rapmNet: number | null; strong: boolean } | null;
+  overperforming: boolean; hub: string | null;
 }
 export interface SuggestionMatch {
   matchId: string; competition: string; date: string; home: string; away: string;
   status: 'ok' | 'no_odds'; kickoff?: string; oddsAt?: string; oddsStale?: boolean; xg?: [number, number];
   evaluated?: number; excluded?: Record<string, number>;
   profiles?: Record<SuggestionProfile, { suggestions: Suggestion[]; combo: SuggestionCombo | null }>;
+  noBet?: NoBet | null; sharpCoverage?: number | null; teams?: { home: TeamFlags; away: TeamFlags };
 }
-export interface BilanBlock { bets: number; hitRate: number | null; returnFlat: number | null }
+/** CLV : part des paris où la clôture sharp est connue, CLV moyen et part des paris qui la battent. */
+export interface ClvBlock { clvBets?: number; meanClv?: number | null; clvBeatRate?: number | null }
+export interface BilanBlock extends ClvBlock { bets: number; hitRate: number | null; returnFlat: number | null }
 export interface BilanProfile {
   overall: BilanBlock & { finalBankroll: number; maxDrawdown: number; curve: { date: string; bankroll: number }[] };
   combos: BilanBlock; byFamily: Record<string, BilanBlock>; byCompetition: Record<string, BilanBlock>;
@@ -143,7 +157,12 @@ export interface BilanProfile {
 export interface SuggestionsIndex {
   schemaVersion: string; generatedAt: string; season: string; bookmaker: string;
   profiles: { id: SuggestionProfile; label: string }[]; defaultProfile: SuggestionProfile; defaultBankroll: number;
-  rules: { minOdds: number; bigOdds: number; maxAgeHours: number; kellyFraction: number; capPerBet: number; capPerMatch: number; fixedStake: number };
+  rules: {
+    minOdds: number; bigOdds: number; maxAgeHours: number; capPerBet: number; capPerMatch: number;
+    kappa?: number; capHighOdds?: number; highOdds?: number; evMin?: number; evMinLowMargin?: number; evMax?: number; edgeMax?: number; favoriteOdds?: number; lineupHours?: number; combos?: boolean;
+    kellyFraction?: number; fixedStake?: number;   // artefacts antérieurs à l'étape 1
+  };
+  reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
   matches: SuggestionMatch[];
   bilan: { start: number; profiles: Record<SuggestionProfile, BilanProfile> } | null;
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
@@ -159,8 +178,9 @@ export interface EveningSummary {
 }
 /** Suggestion publiée avant le coup d'envoi (dernière publication), avec son règlement ; `realised` pour 1 € misé. */
 export interface HistoryBet {
-  label: string; family: string; odds: number; p: number; ev: number; stakeFraction: number; stakeMode: 'kelly' | 'fixed';
+  label: string; family: string; odds: number; p: number; ev: number; stakeFraction: number; stakeMode: StakeMode;
   status: BetStatus; realised: number | null;
+  pSharp?: number | null; evRef?: number | null; clv?: number | null;
 }
 export interface HistoryMatch {
   matchId: string; competition: string; kickoff: string; home: string | null; away: string | null; score: [number, number] | null;

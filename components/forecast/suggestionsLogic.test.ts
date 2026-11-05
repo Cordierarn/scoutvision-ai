@@ -45,6 +45,7 @@ describe('suggestionsLogic', () => {
     expect(bilanLine(bilan, 'résultat')).toBeNull();
     expect(bilanLine(undefined, 'résultat')).toBeNull();
     expect(stakeLabel('fixed')).toContain('mise fixe');
+    expect(stakeLabel('shrink_kelly')).toContain('Kelly rétréci');
   });
 
   it('règle le net sur la bankroll saisie et ignore les paris en attente', () => {
@@ -58,8 +59,8 @@ describe('suggestionsLogic', () => {
 
   it('résume un profil : réussite hors remboursements, mises et net des paris réglés', () => {
     const s = historySummary(days, 'equilibre', 300);
-    expect(s).toEqual({ bets: 5, settled: 4, won: 2, hitRate: 2 / 3, staked: 24, net: 3 });
-    expect(historySummary(days, 'grosse_cote', 300)).toEqual({ bets: 0, settled: 0, won: 0, hitRate: null, staked: 0, net: 0 });
+    expect(s).toEqual({ bets: 5, settled: 4, won: 2, hitRate: 2 / 3, staked: 24, net: 3, clvBets: 0, meanClv: null, clvBeatRate: null });
+    expect(historySummary(days, 'grosse_cote', 300)).toEqual({ bets: 0, settled: 0, won: 0, hitRate: null, staked: 0, net: 0, clvBets: 0, meanClv: null, clvBeatRate: null });
   });
 
   it('formate un montant signé et colore le statut', () => {

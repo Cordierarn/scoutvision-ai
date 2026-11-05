@@ -289,7 +289,12 @@ Design, from the research done on 3 November 2026:
   (WC2026-Agents, LLM-SoccerArena, WorldCupArena), betting returns ranged from −18 % to +10 %, fading the
   market lost money for every model, and the edge over closing odds was essentially zero. Over the
   2026-27 replay, the Winamax odds were also better calibrated than our engine in every bet family.
-  So the model never computes a probability, odds, expected value or stake.
+  So the model never computes a probability, odds, expected value or stake. Since 5 November 2026 the
+  Python engine also decides "bet" or "no bet" against a sharp reference (Pinnacle / Betfair, Shin
+  de-vig, see `docs/betting-lab.md`); the model only receives the computed facts (Winamax odds, engine /
+  sharp / reference probabilities, expected value, shrunk-Kelly stake, "no bet" reasons, key-player
+  dependency) and never contradicts that verdict. When no bet is validated at all, the plan is built
+  server-side without calling the model.
 - What an agent adds is recent team news the statistical engine cannot see: absences, doubts, probable
   rotation, line-ups published about an hour before kickoff. Search access alone does not guarantee
   better forecasts, so the news is used only to keep, temper or drop the engine's own suggestions.

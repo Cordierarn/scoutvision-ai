@@ -1,7 +1,7 @@
 """
 Tests du moteur de suggestions (scripts/betting/suggest.py) et du produit (product.py) sans réseau ni
-données réelles : classement par profil, doublons, cote ancienne, famille exclue, combiné, mises, bilan et
-journal.
+données réelles : classement par profil, doublons, cote ancienne, famille exclue, combiné, mises (Kelly rétréci), bilan et
+journal. Le coupe-circuit et la référence sharp sont testés dans test_betting_quant.
 
   python3 -m unittest test_betting_suggest -v        # ou : npm run test:data
 """
@@ -131,14 +131,16 @@ class ComboTests(unittest.TestCase):
 
 
 class StakeTests(unittest.TestCase):
-    def test_quarter_kelly_known_cases(self):
+    def test_shrink_kelly_known_cases(self):
         self.assertAlmostEqual(sg.kelly_fraction(0.6, 2.0), 0.2)
-        f, mode = sg.stake_for(0.6, 2.0, 0.6 * 2.0 - 1)
-        self.assertEqual(mode, "kelly"); self.assertAlmostEqual(f, 0.05)             # 0,2 / 4 = 0,05 = plafond
-        f2, _ = sg.stake_for(0.55, 2.0, 0.1)
-        self.assertAlmostEqual(f2, 0.025)                                            # (1,1 − 1)/1 /4
-        self.assertEqual(sg.stake_for(0.4, 2.0, -0.2), (sg.FIXED_STAKE, "fixed"))    # espérance négative : mise fixe
+        c = sg.Candidate(1, 1, mk.Spec("1x2", "fulltime", 0.0, "1"), 2.0, NOW, 0.6, 0.2, np.array([True]))
+        f, mode = sg.stake_for(c)
+        self.assertEqual(mode, "kelly"); self.assertAlmostEqual(f, 0.025)             # κ 0,15 × 0,2 = 0,03 → plafond 2,5 %
+        c2 = sg.Candidate(1, 1, mk.Spec("1x2", "fulltime", 0.0, "1"), 2.0, NOW, 0.55, 0.1, np.array([True]))
+        self.assertAlmostEqual(sg.stake_for(c2)[0], 0.015)                           # 0,15 × (1,1 − 1) / 1
         self.assertEqual(sg.kelly_fraction(0.3, 2.0), 0.0)
+        big = sg.Candidate(1, 1, mk.Spec("1x2", "fulltime", 0.0, "2"), 4.0, NOW, 0.3, 0.2, np.array([True]))
+        self.assertLessEqual(sg.stake_for(big)[0], 0.01)                              # cote > 3,50 : plafond 1 %
 
     def test_caps_per_bet_and_per_match(self):
         sims = sm.simulate(2.4, 0.5, 0.45)
@@ -146,7 +148,7 @@ class StakeTests(unittest.TestCase):
                 outcome("teamtotals-team1", "Over", 2.6, hcp=1.5, mid=8, oid=81)]
         ranked = sg.rank(sg.evaluate_candidates(sims, outs, KO, NOW), "equilibre")
         self.assertTrue(all(s.stake_fraction <= sg.CAP_PER_BET + 1e-9 for s in ranked))
-        self.assertLessEqual(sum(s.stake_fraction for s in ranked), sg.CAP_PER_MATCH + 1e-6)
+        self.assertLessEqual(sum(s.stake_fraction for s in ranked), sg.CAP_PER_MATCH + 1e-9)
 
     def test_bankroll_curve_exact_to_the_cent(self):
         bets = pd.DataFrame({"kickoff_utc": pd.to_datetime(["2026-01-01", "2026-01-01", "2026-01-02", "2026-01-03"], utc=True),

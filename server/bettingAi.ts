@@ -8,11 +8,14 @@
  * 2. /api/ai/betting-plan : plan du jour en JSON strict (schéma) à partir des suggestions du moteur et
  *    de l'actualité en cache ; le serveur valide tout (références, verdicts, nombres).
  *
- * Ce que l'IA ne fait jamais : calculer une probabilité, une cote, une espérance ou une mise, ni proposer
- * une sélection absente des suggestions du moteur. Elle garde, nuance ou écarte des suggestions existantes
- * au vu d'une actualité sourcée, que le modèle statistique ignore. Les références de recherche montrent
- * que les modèles de langage ne battent pas le marché sur les probabilités, et que l'actualité récente
- * (compositions, absences) est ce qu'un agent ajoute réellement.
+ * Ce que l'IA ne fait jamais : calculer ou ajuster une probabilité, une cote, une espérance ou une mise, ni
+ * proposer une sélection absente des suggestions du moteur, ni contredire le verdict du coupe-circuit
+ * Python (étape 1 du moteur quantitatif : référence Pinnacle / Betfair sans marge, seuil d'espérance,
+ * Kelly rétréci). Elle reçoit les seuls faits calculés (cote Winamax, probabilité sharp, probabilité de
+ * référence, espérance, mise, motif de « pas de pari », dépendance à un joueur clé) et les confronte à une
+ * actualité sourcée : garder, nuancer ou écarter une sélection validée, expliquer un « pas de pari ».
+ * Les références de recherche montrent que les modèles de langage ne battent pas le marché sur les
+ * probabilités, et que l'actualité récente (compositions, absences) est ce qu'un agent ajoute réellement.
  *
  * Les faits viennent de l'artefact servi par le serveur (forecast/suggestions/index.json), jamais du
  * navigateur, qui n'envoie que des identifiants. La clé Gemini ne quitte jamais le serveur.
@@ -26,7 +29,7 @@ import { NoModelAvailable } from './geminiModels';
 import { FetchHeadlines, Headline, articlesToRead, buildArticlesPrompt, buildHeadlinesPrompt } from './newsFeed';
 import { GenerateText, Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
-export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v2' } as const;
+export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v3' } as const;
 export const BETTING_NEWS_PATH = '/api/ai/betting-news';
 export const BETTING_PLAN_PATH = '/api/ai/betting-plan';
 export const MAX_PLAN_MATCHES = 8;
@@ -44,11 +47,22 @@ const VERDICTS: Verdict[] = ['garder', 'prudence', 'eviter'];
 // ARTEFACT DES SUGGESTIONS (lu sur le disque du serveur)
 // ============================================
 
-interface IndexSuggestion { rank: number; family: string; label: string; odds: number; oddsAt: string; p: number; ev: number; stakeFraction: number; stakeMode: 'kelly' | 'fixed'; reasons?: string[] }
+type StakeMode = 'shrink_kelly' | 'kelly' | 'fixed';
+interface IndexSuggestion {
+  rank: number; family: string; label: string; odds: number; oddsAt: string; p: number; ev: number; stakeFraction: number; stakeMode: StakeMode; reasons?: string[];
+  pSharp?: number | null; pRef?: number; evRef?: number | null; poolW?: number | null; sharpBookmaker?: string | null; warnings?: string[]; verdict?: string;
+}
+interface IndexNoBet { label: string; family: string; odds: number; p: number; pSharp: number | null; evRef: number | null; reasons: string[]; codes: string[] }
+interface IndexTeamFlags { opd?: { matches: number; goalsMinusXg: number; pointsMinusXp: number; overperforming: boolean } | null; dependency?: { player: string; share: number; rapmNet: number | null; strong: boolean } | null; hub?: string | null }
 interface IndexMatch {
   matchId: string; competition: string; date: string; home: string; away: string; status: string; kickoff?: string; oddsStale?: boolean; xg?: [number, number];
   profiles?: Partial<Record<Profile, { suggestions: IndexSuggestion[]; combo: unknown }>>;
+  noBet?: IndexNoBet | null; sharpCoverage?: number | null; teams?: { home: IndexTeamFlags; away: IndexTeamFlags };
 }
+const WARNING_TEXT: Record<string, string> = {
+  dependance_joueur_cle: 'composition inconnue, équipe dépendante d\'un joueur clé : plafond de mise réduit',
+  limite_inconnue: 'limite de mise du bookmaker de référence inconnue',
+};
 interface FamilyBlock { bets: number; hitRate: number | null; returnFlat: number | null }
 export interface SuggestionsIndexFile {
   generatedAt: string; season: string; bookmaker: string; matches: IndexMatch[];
@@ -72,13 +86,24 @@ export function indexLoader(dataDir: string): LoadIndex {
   };
 }
 
-/** Suggestion telle que le modèle la reçoit : une référence stable `matchId#rang` et les chiffres du moteur */
-/** Probabilité et espérance en pourcentages à une décimale : le modèle les recopie lisiblement (« 78,7 % ») */
-export interface FactSuggestion { ref: string; label: string; family: string; odds: number; probabilityPct: number; expectedValuePct: number; stakeMode: 'kelly' | 'fixed'; reasons: string[] }
+/** Suggestion telle que le modèle la reçoit : une référence stable `matchId#rang` et les chiffres calculés par le
+ * moteur Python (probabilité du moteur, probabilité sharp sans marge, probabilité de référence, espérance face à
+ * elle sur la cote Winamax, mise en pour cent de la bankroll). Pourcentages à une décimale : le modèle les
+ * recopie lisiblement (« 78,7 % »). */
+export interface FactSuggestion {
+  ref: string; label: string; family: string; odds: number; engineProbabilityPct: number; sharpProbabilityPct: number | null; referenceProbabilityPct: number;
+  expectedValuePct: number; stakePct: number; stakeMode: StakeMode; sharpBookmaker: string | null; warnings: string[]; verdict: 'bet'; reasons: string[];
+}
+/** Match sans sélection : la meilleure idée du moteur et les motifs calculés du refus */
+export interface FactNoBet { label: string; odds: number; engineProbabilityPct: number; sharpProbabilityPct: number | null; expectedValuePct: number | null; reasons: string[] }
 export interface MatchFacts {
   matchId: string; competition: string; kickoff: string; home: string; away: string;
   expectedGoals: [number, number] | null; oddsStale: boolean;
+  engineVerdict: 'bet' | 'no_bet';
   suggestions: FactSuggestion[];
+  noBet: FactNoBet | null;
+  keyPlayerDependency: { home: string | null; away: string | null };
+  recentOverperformance: { home: boolean; away: boolean };
   context?: MatchContext | null;
 }
 const pct = (v: number) => Math.round(v * 1000) / 10;
@@ -92,13 +117,25 @@ const findMatch = (index: SuggestionsIndexFile, matchId: string) => index.matche
 
 export function matchFacts(m: IndexMatch, profile: Profile): MatchFacts {
   const list = m.profiles?.[profile]?.suggestions ?? [];
+  const nb = m.noBet ?? null;
+  const hub = (side: 'home' | 'away') => m.teams?.[side]?.hub ?? (m.teams?.[side]?.dependency?.strong ? m.teams[side].dependency!.player : null);
   return {
     matchId: m.matchId, competition: m.competition, kickoff: m.kickoff ?? m.date, home: m.home, away: m.away,
     expectedGoals: m.xg ?? null, oddsStale: !!m.oddsStale,
+    engineVerdict: list.length ? 'bet' : 'no_bet',
     suggestions: list.map(s => ({
-      ref: `${m.matchId}#${s.rank}`, label: s.label, family: s.family, odds: s.odds, probabilityPct: pct(s.p), expectedValuePct: pct(s.ev), stakeMode: s.stakeMode,
+      ref: `${m.matchId}#${s.rank}`, label: s.label, family: s.family, odds: s.odds, engineProbabilityPct: pct(s.p),
+      sharpProbabilityPct: s.pSharp === null || s.pSharp === undefined ? null : pct(s.pSharp), referenceProbabilityPct: pct(s.pRef ?? s.p),
+      expectedValuePct: pct(s.evRef ?? s.ev), stakePct: pct(s.stakeFraction), stakeMode: s.stakeMode, sharpBookmaker: s.sharpBookmaker ?? null,
+      warnings: (s.warnings ?? []).map(w => WARNING_TEXT[w] ?? w), verdict: 'bet',
       reasons: (s.reasons ?? []).slice(0, 4),
     })),
+    noBet: list.length || !nb ? null : {
+      label: nb.label, odds: nb.odds, engineProbabilityPct: pct(nb.p), sharpProbabilityPct: nb.pSharp === null ? null : pct(nb.pSharp),
+      expectedValuePct: nb.evRef === null ? null : pct(nb.evRef), reasons: nb.reasons,
+    },
+    keyPlayerDependency: { home: hub('home'), away: hub('away') },
+    recentOverperformance: { home: !!m.teams?.home?.opd?.overperforming, away: !!m.teams?.away?.opd?.overperforming },
   };
 }
 
@@ -363,20 +400,20 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
 };
 
 export function buildPlanPrompt(facts: PlanFacts, news: Record<string, string>): string {
-  return `You are the decision assistant of the ScoutVision betting lab. Write every text field in French.
-The statistical engine already computed, for each match, a few bet suggestions (profile "${facts.profile}") with its own probability, the bookmaker odds (${facts.bookmaker}) and the expected value. The engine knows team strength in expected goals, recent form at home/away and head-to-head; it does NOT know team news (absences, doubts, rotation).
-Your job: confront each suggestion with the pre-match news below, then build a short plan for the day.
+  return `You are the news analyst of the ScoutVision betting lab. Write every text field in French.
+A deterministic Python engine has already decided everything numerical. For each match it either validated a few bets (profile "${facts.profile}") or decided "no bet". A validated bet carries: the ${facts.bookmaker} odds (where the bet is placed), the engine probability, the sharp-market probability (Pinnacle or Betfair Exchange, margin removed with Shin's method), the reference probability used for the decision, the expected value of the ${facts.bookmaker} odds against that reference, and the stake (percent of bankroll, shrunk Kelly). A "no bet" match carries the engine's best idea and the computed reasons it was refused (no sharp reference, expected value under the threshold, suspicious gap, contrary sharp move, over-performing favourite).
+Your only job: confront each validated bet with the pre-match news below (absences, doubts, rotation, line-ups), which the engine cannot see, and write a short factual plan.
 
 Hard rules:
-- Only use suggestions listed in the facts, referenced by their "ref". Never invent a bet, a market, a line or a match.
-- Never compute, estimate or change a probability, odds, expected value or stake. Write only numbers that appear in the facts or in the news.
-- Verdict per suggestion: "garder" when nothing in the news contradicts it; "prudence" when the news adds an uncertainty the engine cannot see (key absence that concerns this market, probable rotation, unclear line-up, news missing); "eviter" when the news directly undermines the selection. Each reason is one sentence that cites the news item (or says that no news was found).
-- Be humble: over the season the bookmaker odds were better calibrated than the engine in every bet family, and "familyRecord" gives the replayed record of each family; a large expected value is more often an engine error than a bargain. Prefer fewer, safer picks.
-- "picks": at most ${MAX_PICKS} refs among suggestions you kept ("garder" or "prudence"), best first, one sentence each. "combo": 2 or 3 refs from different matches, all "garder", or an empty refs list. "avoid": matches to skip today, with the reason.
-- "discipline": one sentence on stake discipline (stakes stay those of the engine, never chase losses).
+- The engine's verdict is final. Never present a "no bet" match as worth betting, never suggest a selection, market or line that is not listed, never say a validated bet is "value" because of your own reasoning: the value was computed, you only check the news.
+- Never compute, estimate or adjust a probability, odds, expected value or stake. Write only numbers that appear in the facts or in the news, as written there (percentages like "78,7 %").
+- Verdict per validated bet: "garder" when nothing in the news contradicts it; "prudence" when the news adds an uncertainty the engine cannot see (a key absence that concerns this market, probable rotation, unclear line-up, no news found, or a "keyPlayerDependency" player whose presence is unknown); "eviter" only when the news directly undermines the selection (the player the market depends on is out, a line-up that changes the match). Each reason is one sentence that cites the news item or the fact used.
+- For a "no bet" match, do not give verdicts; in "avoid", restate the engine's reasons in one plain sentence and add any news that confirms the caution. Never argue against the refusal.
+- "picks": at most ${MAX_PICKS} refs among validated bets you kept ("garder" or "prudence"), best first, one sentence each. "combo": always an empty refs list (combined bets are disabled). "avoid": the "no bet" matches and any validated bet you marked "eviter", with the reason.
+- "discipline": one sentence: stakes stay those of the engine, never chase losses, place nothing before checking the official line-ups when a warning says the line-up is unknown.
 
-Each match also carries "context", the ScoutVision statistics of both teams (season to date): model and no-vig market 1X2 probabilities, expected goals, league standings with title / top 4 / relegation probabilities, "seasonStakes" (how much this result moves the team's season objective), team profiles per competition (xG and xGA per 90, shots, goals, possession, field tilt, PPDA, pressing and style), usual system and XI, and "keyPlayers" (most used players: share of minutes, goals, assists, xG, xA, rating, VAEP per 90, RAPM net impact).
-Use this context to judge how much a reported absence matters (a regular with a large share of minutes, goals or impact weighs much more than a squad player), whether a team may rotate (low "seasonStakes", bigger match soon), and whether a suggestion fits both teams' profiles. Cite the statistic you rely on, with its value as written in the facts. Probabilities and expected values are in percent: write them like "78,7 %".
+Each match also carries "context", the ScoutVision statistics of both teams (season to date): model and no-vig market 1X2 probabilities, expected goals, league standings with title / top 4 / relegation probabilities, "seasonStakes" (how much this result moves the team's season objective), team profiles per competition, usual system and XI, and "keyPlayers" (most used players over the whole season: share of minutes, goals, assists, xG, xA, rating, VAEP per 90, RAPM net impact). A player with a single match is not a regular, whatever his share of minutes in that match.
+Use this context to judge how much a reported absence matters and whether a team may rotate (low "seasonStakes", bigger match soon). Cite the statistic you rely on, with its value as written in the facts.
 
 **FACTS (JSON) — engine output and team context:**
 ${JSON.stringify(facts)}
@@ -385,15 +422,28 @@ ${JSON.stringify(facts)}
 ${facts.matches.map(m => `[${m.matchId}] ${m.home} – ${m.away}\n${news[m.matchId] ?? 'Actualité non recherchée.'}`).join('\n\n')}`;
 }
 
-export interface PlanPick { ref: string; matchId: string; match: string; label: string; family: string; odds: number; probability: number; expectedValue: number; stakeFraction: number; stakeMode: 'kelly' | 'fixed'; verdict: Verdict; why: string }
+export interface PlanPick {
+  ref: string; matchId: string; match: string; label: string; family: string; odds: number;
+  probability: number;                 // probabilité de référence du moteur (sharp, ou pool) : celle qui a décidé le pari
+  engineProbability: number; sharpProbability: number | null; sharpBookmaker: string | null;
+  expectedValue: number; stakeFraction: number; stakeMode: StakeMode; warnings: string[]; verdict: Verdict; why: string;
+}
+export interface PlanAvoid { matchId: string; match: string; why: string; source: 'moteur' | 'ia' }
 export interface PlanResponse {
   summary: string;
-  matches: { matchId: string; match: string; kickoff: string; news: NewsEntry | null; verdicts: { ref: string; label: string; verdict: Verdict | 'non_evalue'; reason: string }[] }[];
+  matches: { matchId: string; match: string; kickoff: string; engineVerdict: 'bet' | 'no_bet'; news: NewsEntry | null; verdicts: { ref: string; label: string; verdict: Verdict | 'non_evalue'; reason: string }[] }[];
   picks: PlanPick[];
   combo: { refs: string[]; labels: string[]; why: string } | null;
-  avoid: { matchId: string; match: string; why: string }[];
+  avoid: PlanAvoid[];
   discipline: string;
   warnings: string[];
+}
+
+/** « Pas de pari » du moteur en une phrase, pour la liste « à éviter » (jamais rédigée par le modèle) */
+export function engineAvoidReason(m: MatchFacts): string {
+  if (!m.noBet) return 'Aucune sélection ne passe le coupe-circuit du moteur.';
+  const sharp = m.noBet.sharpProbabilityPct === null ? 'sans référence sharp' : `marché sharp ${String(m.noBet.sharpProbabilityPct).replace('.', ',')} %`;
+  return `Pas de pari selon le moteur : meilleure idée ${m.noBet.label} à ${m.noBet.odds.toFixed(2).replace('.', ',')} (${sharp}), refusée : ${m.noBet.reasons.join(' ; ')}.`;
 }
 
 /** Retire d'un texte les phrases qui citent un nombre absent des faits et de l'actualité */
@@ -441,30 +491,29 @@ export function validatePlan(raw: unknown, facts: PlanFacts, news: Record<string
     if (!v || v.verdict === 'eviter') continue;
     const { s, m } = byRef.get(p.ref)!;
     const src = source(s.ref);
-    picks.push({ ref: s.ref, matchId: m.matchId, match: matchName(m), label: s.label, family: s.family, odds: s.odds, probability: src?.p ?? s.probabilityPct / 100,
-      expectedValue: src?.ev ?? s.expectedValuePct / 100, stakeFraction: src?.stakeFraction ?? 0, stakeMode: s.stakeMode, verdict: v.verdict, why: say(p.why) });
+    picks.push({ ref: s.ref, matchId: m.matchId, match: matchName(m), label: s.label, family: s.family, odds: s.odds,
+      probability: src?.pRef ?? src?.p ?? s.referenceProbabilityPct / 100, engineProbability: src?.p ?? s.engineProbabilityPct / 100,
+      sharpProbability: src?.pSharp ?? (s.sharpProbabilityPct === null ? null : s.sharpProbabilityPct / 100), sharpBookmaker: s.sharpBookmaker,
+      expectedValue: src?.evRef ?? src?.ev ?? s.expectedValuePct / 100, stakeFraction: src?.stakeFraction ?? 0, stakeMode: s.stakeMode, warnings: s.warnings,
+      verdict: v.verdict, why: say(p.why) });
   }
 
-  // Combiné : 2 ou 3 suggestions « garder » de matchs différents, sinon aucun
-  let combo: PlanResponse['combo'] = null;
-  if (isObject(plan.combo) && Array.isArray(plan.combo.refs)) {
-    const refs = [...new Set(plan.combo.refs.filter((r): r is string => typeof r === 'string'))];
-    const matches = new Set(refs.map(r => byRef.get(r)?.m.matchId));
-    const ok = refs.length >= 2 && refs.length <= 3 && refs.every(r => byRef.has(r) && verdictOf.get(r)?.verdict === 'garder') && matches.size === refs.length;
-    if (ok) combo = { refs, labels: refs.map(r => `${matchName(byRef.get(r)!.m)} : ${byRef.get(r)!.s.label}`), why: say(plan.combo.why) };
-    else if (refs.length) warnings.push('Combiné proposé écarté (sélections non gardées, en double ou d\'un même match).');
-  }
+  // Combiné : désactivé par le moteur (corrélation intra-match non mesurable face au marché) ; une proposition est écartée
+  const combo: PlanResponse['combo'] = null;
+  if (isObject(plan.combo) && Array.isArray(plan.combo.refs) && plan.combo.refs.length) warnings.push('Combiné proposé écarté : les combinés sont désactivés.');
 
+  // À éviter : d'abord les « pas de pari » du moteur (raison calculée, jamais rédigée), puis les matchs écartés par l'IA
   const known = new Map(facts.matches.map(m => [m.matchId, m]));
-  const avoid = (Array.isArray(plan.avoid) ? plan.avoid : [])
-    .filter((a): a is Record<string, unknown> => isObject(a) && typeof a.matchId === 'string' && known.has(a.matchId))
-    .filter((a, i, all) => all.findIndex(b => b.matchId === a.matchId) === i)
-    .map(a => ({ matchId: a.matchId as string, match: matchName(known.get(a.matchId as string)!), why: say(a.why) }));
+  const avoid: PlanAvoid[] = facts.matches.filter(m => m.engineVerdict === 'no_bet').map(m => ({ matchId: m.matchId, match: matchName(m), why: engineAvoidReason(m), source: 'moteur' as const }));
+  for (const a of Array.isArray(plan.avoid) ? plan.avoid : []) {
+    if (!isObject(a) || typeof a.matchId !== 'string' || !known.has(a.matchId) || avoid.some(x => x.matchId === a.matchId)) continue;
+    avoid.push({ matchId: a.matchId, match: matchName(known.get(a.matchId)!), why: say(a.why), source: 'ia' });
+  }
 
   const response: PlanResponse = {
     summary: say(plan.summary),
     matches: facts.matches.map(m => ({
-      matchId: m.matchId, match: matchName(m), kickoff: m.kickoff, news: news[m.matchId] ?? null,
+      matchId: m.matchId, match: matchName(m), kickoff: m.kickoff, engineVerdict: m.engineVerdict, news: news[m.matchId] ?? null,
       verdicts: m.suggestions.map(s => ({ ref: s.ref, label: s.label, verdict: verdictOf.get(s.ref)?.verdict ?? 'non_evalue', reason: verdictOf.get(s.ref)?.reason ?? '' })),
     })),
     picks, combo, avoid,
@@ -487,9 +536,17 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
   const now = deps.now?.() ?? new Date();
   const facts = buildPlanFacts(index, ids, profile, today(now), deps.loadContext);
   if (!facts.matches.length) return { status: 404, body: { error: 'Aucun de ces matchs n\'a de suggestions publiées.' } };
-  if (!facts.matches.some(m => m.suggestions.length)) return { status: 422, body: { error: 'Aucune suggestion admissible pour ce profil sur ces matchs.' } };
   const news: Record<string, NewsEntry | undefined> = Object.fromEntries(facts.matches.map(m => [m.matchId, deps.news.get(m.matchId)?.value]));
   const newsText = Object.fromEntries(Object.entries(news).filter(([, n]) => n).map(([id, n]) => [id, n!.text]));
+  const meta = (model: string) => ({ model, requestedModel: resolveGeminiModel(deps.model), generatedAt: now.toISOString(), suggestionsAt: index.generatedAt });
+  if (!facts.matches.some(m => m.suggestions.length)) {
+    // « pas de pari » partout : le plan est entièrement calculé, le modèle n'est pas appelé
+    const plan = validatePlan({ summary: '', matches: [], picks: [], combo: { refs: [], why: '' }, avoid: [], discipline: '' }, facts, news, index);
+    plan.summary = `Pas de pari aujourd'hui sur ${facts.matches.length === 1 ? 'ce match' : `ces ${facts.matches.length} matchs`} : aucune sélection ne passe le coupe-circuit du moteur (profil ${profile}).`;
+    plan.discipline = 'Ne rien miser : une journée sans pari est le résultat normal d\'un marché efficient.';
+    deps.log?.(`[betting-plan] ${facts.matches.length} match(s), aucune sélection validée : plan sans appel au modèle`);
+    return { status: 200, body: { ...plan, profile, meta: meta('moteur'), promptVersion: BETTING_PROMPT_VERSIONS.plan } };
+  }
 
   try {
     const g = await withRetry(() => deps.generateJson(buildPlanPrompt(facts, newsText), PLAN_SCHEMA), deps.sleep);
@@ -503,7 +560,7 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
       status: 200,
       body: {
         ...plan, profile,
-        meta: { model: g.modelVersion?.trim() || resolveGeminiModel(deps.model), requestedModel: resolveGeminiModel(deps.model), generatedAt: now.toISOString(), suggestionsAt: index.generatedAt },
+        meta: meta(g.modelVersion?.trim() || resolveGeminiModel(deps.model)),
         promptVersion: BETTING_PROMPT_VERSIONS.plan,
       },
     };
