@@ -398,6 +398,55 @@ plus de saisons) et sera réévalué : à la fin de 2025-26 (GER et NED passeron
 l'arrivée du handicap asiatique dans le dataset football-data, et après toute variante du modèle qui
 améliore son log-loss propre en recherche (`docs/forecast-research.md`).
 
+## Marchés secondaires : audit de l'offre Winamax et fraîcheur des cotes (5 novembre 2026)
+
+Point de départ de la phase « tous les marchés pertinents d'une feuille de match » : ce que l'archive contient
+réellement, classé en cinq grandes familles (`scripts/betting/markets_catalog.py`, audit écrit dans
+`.research/betting/phase2/markets_audit.json` par `python3 -m betting.markets_catalog`), et la correction des
+rejets « cote trop ancienne ».
+
+### Les 132 marchés Winamax de l'archive (969 rencontres 2026-27)
+
+| Grande famille | Marchés | Modélisés | Part des relevés | Catégorie de validation (A / B / C) |
+| --- | --- | --- | --- | --- |
+| Résultats & handicaps (1N2, double chance, DNB, handicaps asiatiques, écart de buts) | 27 | 27 | 9 % | 24 / 2 / 1 |
+| Buts & équipes (plus/moins toutes lignes, par équipe, BTTS, clean sheet, scores exacts, 1er / dernier but) | 44 | 44 | 62 % | 17 / 23 / 4 |
+| Mi-temps & périodes (1N2, buts, scores et handicaps de 1re mi-temps, mi-temps / fin de match) | 55 | 55 | 29 % | 0 / 50 / 5 |
+| Statistiques d'équipe & discipline (corners, cartons) | 6 | 0 | 0 % (une seule rencontre) | 0 / 6 / 0 |
+| Marchés joueurs | 0 | 0 | 0 % | — |
+
+Catégories : **A** marché principal couvert par la référence sharp (1N2, plus/moins et handicap asiatique du
+temps réglementaire) ; **B** marché fermé à deux ou trois issues, ou à ligne, sans référence sharp (la
+probabilité dé-viguée de Winamax lui-même servira de référence dans la porte de validation) ; **C** issues
+multiples ou unilatérales (score exact, mi-temps / fin de match, écart de buts, joueurs), validation sur
+l'historique seulement.
+
+Deux constats qui bornent la phase :
+
+- **Aucun marché joueur dans l'archive** : l'option « player props » n'est pas dans le plan OddsPapi
+  (`has_player_props = false` sur Winamax FR, lu dans le compte), alors que la feuille de match Winamax en
+  propose des dizaines (buteur, passeur, joueur décisif, buteur multiple, premier / dernier buteur, type de but,
+  duos et trios, « serial player »). Les corners et cartons ne sont présents que sur une rencontre. Les sous-
+  modèles joueurs et statistiques d'équipe peuvent être construits et validés sur l'historique PitchAPI, mais
+  aucune espérance ne peut être calculée face à une cote tant que ces marchés ne sont pas relevés.
+- **La feuille de match Winamax** (`/paris-sportifs/match/<id>`, application chargée par socket.io) affiche
+  aussi, pour chaque issue, la part des mises du public : un signal de biais du public à relever le jour où une
+  source de cotes couvrira ces marchés. Rien n'est lu sur le site de Winamax par le Labo.
+
+### Fraîcheur des cotes : les 23 % de « cote trop ancienne »
+
+Cause mesurée : `/odds-by-tournaments` ne renvoie pas toute la fenêtre de sept jours (56 rencontres sous 72 h le
+5 novembre, 90 sous 127 h le 3). Les rencontres au-delà gardaient le relevé d'un passage antérieur (jusqu'à
+49 h), toutes leurs issues étaient évaluées puis rejetées une à une pour ancienneté, ce qui gonflait le compte
+des « issues évaluées » sans rien analyser. Deux corrections :
+
+- `fetch upcoming --refresh-stale 2 --max-requests 60` : après le passage par tournoi, les rencontres de la
+  fenêtre sans relevé Winamax depuis 2 h sont relevées match par match (`/historical-odds`, non décompté du
+  quota, environ 6,5 s chacune) ;
+- à l'export, une rencontre dont le dernier relevé Winamax a plus de 2 h n'est plus évaluée (statut sans
+  cotes, `oddsStale`), et une issue absente du dernier passage est exclue comme `marche_retire` (ligne
+  déplacée ou marché retiré) au lieu de compter comme une cote périmée.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans

@@ -293,6 +293,17 @@ class SuggestMatchTests(unittest.TestCase):
         self.assertTrue(all(o["odds"] in (1.85, 2.05, 3.90, 5.00, 1.80, 1.95) for o in outcomes))        # jamais une cote Pinnacle jouée
         return product.suggest_match(self.sims, outcomes, KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B", snaps=snaps, cat=CAT, quant=self.quant, team_ids=("tA", "tB"))
 
+    def test_outcome_missing_from_the_latest_winamax_pull_is_withdrawn(self):
+        snaps = self.archive()
+        older = KO - pd.Timedelta(hours=3)                                            # une ligne vue au passage précédent seulement
+        snaps = pd.concat([snaps, frame([snap("winamax.fr", 201, 211, 1.70, older)])], ignore_index=True)
+        snaps.loc[(snaps["bookmaker"] == "winamax.fr") & (snaps["outcome_id"] == 211) & (snaps["created_at"] > older), "created_at"] = older   # dernier relevé de 211 = passage précédent
+        outcomes = product.outcomes_from_snapshots(snaps, CAT, pd.Timestamp(self.now), "Club A", "Club B")
+        flags = {o["outcome_id"]: o["withdrawn"] for o in outcomes}
+        self.assertTrue(flags[211]); self.assertFalse(flags[101]); self.assertFalse(flags[212])
+        res = product.suggest_match(self.sims, outcomes, KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B", snaps=snaps, cat=CAT, quant=self.quant, team_ids=("tA", "tB"))
+        self.assertEqual(res["excluded"].get("marche_retire"), 1)
+
     def test_winamax_late_on_pinnacle_is_a_bet_with_sharp_probability(self):
         res = self.run_match(self.archive(winamax_home=2.05, pinnacle_home=1.72))      # Winamax paie 2,05 un favori que Pinnacle met à 1,72
         sug = res["profiles"]["equilibre"]["suggestions"]

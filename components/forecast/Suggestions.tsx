@@ -138,7 +138,9 @@ const NoBetNote: React.FC<{ match: SuggestionMatch }> = ({ match }) => {
 export const SuggestionsBlock: React.FC<{ match: SuggestionMatch | undefined; profile: SuggestionProfile; bankroll: number | null; bilan?: BilanProfile; open: boolean; now: Date }> =
   ({ match, profile, bankroll, bilan, open, now }) => {
     if (!match || match.status !== 'ok' || !match.profiles) {
-      return <div className="px-4 pb-2 text-2xs text-ink-4">Cotes Winamax non disponibles pour ce match.</div>;
+      // cotes relevées mais non rafraîchies depuis plus de 2 h : le moteur n'évalue rien (une cote périmée n'est pas une cote)
+      const stale = match?.oddsStale && match.oddsAt ? `Cotes Winamax non rafraîchies depuis le ${new Date(match.oddsAt).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} : match non évalué.` : null;
+      return <div className="px-4 pb-2 text-2xs text-ink-4">{stale ?? 'Cotes Winamax non disponibles pour ce match.'}</div>;
     }
     const block = match.profiles[profile];
     const list = block?.suggestions ?? [];

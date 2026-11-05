@@ -74,6 +74,10 @@ class SelectionTests(unittest.TestCase):
         old = NOW - dt.timedelta(hours=2, minutes=1)
         cands = sg.evaluate_candidates(self.sims, market_1x2(1.70, 3.80, 5.50, at=old), KO, NOW)
         self.assertTrue(all(c.excluded == "cote_ancienne" for c in cands))
+        gone = market_1x2(1.70, 3.80, 5.50)
+        gone[1]["withdrawn"] = True                                                 # issue absente du dernier relevé Winamax
+        gone_cands = sg.evaluate_candidates(self.sims, gone, KO, NOW)
+        self.assertEqual([c.excluded for c in gone_cands], [None, "marche_retire", None])
         self.assertEqual(sg.rank(cands, "sur"), [])
         after_ko = sg.evaluate_candidates(self.sims, market_1x2(1.70, 3.80, 5.50, at=KO + dt.timedelta(minutes=1)), KO, KO + dt.timedelta(minutes=2))
         self.assertTrue(all(c.excluded for c in after_ko))

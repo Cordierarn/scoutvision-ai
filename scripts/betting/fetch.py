@@ -5,6 +5,7 @@ Ligne de commande du Labo paris, phase 1 (tout sous .research/betting/, ignoré 
   python3 -m betting.fetch status [--account]              compteur local du quota (et compteur serveur, 1 requête)
   python3 -m betting.fetch fixtures --from 2026-07-01 --to 2026-11-10
                                                            rencontres Big 5 (1 requête par fenêtre de 10 jours)
+  python3 -m betting.fetch upcoming --days 7 --refresh-stale 2 --max-requests 60   # + match par match pour les rencontres non rafraîchies
   python3 -m betting.fetch history --max-requests 20 [--since 2026-10-01] [--competitions ENG,ESP] [--refresh-players | --refresh-sharp]
                                                            historique Winamax complet des matchs terminés non archivés,
                                                            du plus récent au plus ancien (1 requête par match) ;
@@ -209,7 +210,50 @@ def cmd_upcoming(args) -> int:
     added = buffer.flush()
     print(f"{kept} rencontres à venir sous {args.days} jours avec cotes ({len(COMPETITIONS)} tournois, un appel chacun), "
           f"{added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
+    if args.refresh_stale is not None:
+        _refresh_stale(client, args)
     return 0
+
+
+def stale_fixtures(fixtures: pd.DataFrame, last_seen: pd.Series, now: pd.Timestamp, days: int, hours: float) -> pd.DataFrame:
+    """Rencontres à venir sous `days` jours dont le dernier relevé Winamax (`last_seen`, indexée par fixture_id) date de
+    plus de `hours` heures, ou qui n'ont jamais été relevées. `/odds-by-tournaments` ne renvoie pas toute la fenêtre
+    (constaté : 56 rencontres sous 72 h le 5 novembre 2026, 90 sous 127 h le 3) : les autres resteraient périmées."""
+    todo = fixtures[(fixtures["status_id"] == 0) & (fixtures["start_time"] >= now) & (fixtures["start_time"] <= now + pd.Timedelta(days=days))]
+    if last_seen.empty:
+        return todo.sort_values("start_time")
+    fresh = todo["fixture_id"].map(last_seen).ge(now - pd.Timedelta(hours=hours)).fillna(False)
+    return todo[~fresh].sort_values("start_time")
+
+
+def last_winamax_snapshot(competitions=COMPETITIONS) -> pd.Series:
+    """Date du dernier relevé Winamax par rencontre (colonnes minimales : l'archive est volumineuse)."""
+    frames = [pd.read_parquet(p, columns=["fixture_id", "bookmaker", "created_at"]) for c in competitions for p in sorted((ODDS / c).glob("*.parquet"))] if ODDS.exists() else []
+    if not frames:
+        return pd.Series(dtype="datetime64[ns, UTC]")
+    df = pd.concat(frames, ignore_index=True)
+    return df[df["bookmaker"] == BOOKMAKER].groupby("fixture_id")["created_at"].max()
+
+
+def _refresh_stale(client: OddsPapiClient, args) -> None:
+    now = pd.Timestamp.now(tz="UTC")
+    todo = stale_fixtures(load_fixtures(), last_winamax_snapshot(), now, args.days, args.refresh_stale)
+    if todo.empty:
+        print(f"Toutes les rencontres sous {args.days} jours ont un relevé Winamax de moins de {args.refresh_stale:g} h")
+        return
+    fetched, buffer = 0, SnapshotBuffer()
+    print(f"{len(todo)} rencontres sous {args.days} jours sans relevé Winamax depuis {args.refresh_stale:g} h : relevé match par match (environ 6,5 s chacune)", flush=True)
+    for f in todo.head(args.max_requests).itertuples(index=False):
+        try:
+            payload = client.historical_odds(f.fixture_id, list(BOOKMAKERS))
+        except QuotaExceeded as exc:
+            print(str(exc)); break
+        fetched += 1
+        if payload is None:
+            continue
+        buffer.add(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+    added = buffer.flush()
+    print(f"{fetched} rencontres périmées relevées, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
 
 
 def _upcoming_per_fixture(client: OddsPapiClient, args) -> int:
@@ -307,7 +351,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("fixtures"); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True); p.set_defaults(fn=cmd_fixtures)
     p = sub.add_parser("history"); p.add_argument("--max-requests", type=int, default=10); p.add_argument("--since"); p.add_argument("--competitions"); p.add_argument("--refresh-players", action="store_true"); p.add_argument("--refresh-sharp", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("snapshot"); p.set_defaults(fn=cmd_snapshot)
-    p = sub.add_parser("upcoming"); p.add_argument("--days", type=int, default=7); p.add_argument("--max-requests", type=int, default=200); p.add_argument("--per-fixture", action="store_true"); p.set_defaults(fn=cmd_upcoming)
+    p = sub.add_parser("upcoming"); p.add_argument("--days", type=int, default=7); p.add_argument("--max-requests", type=int, default=200); p.add_argument("--per-fixture", action="store_true")
+    p.add_argument("--refresh-stale", type=float, metavar="HEURES", help="après le passage par tournoi, relève match par match les rencontres de la fenêtre sans relevé Winamax depuis HEURES heures (non décompté)")
+    p.set_defaults(fn=cmd_upcoming)
     p = sub.add_parser("views"); p.set_defaults(fn=cmd_views)
     p = sub.add_parser("match"); p.set_defaults(fn=cmd_match)
     args = parser.parse_args(argv)
