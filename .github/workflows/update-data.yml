@@ -83,7 +83,7 @@ jobs:
           python3 -m betting.adjust
           python3 -m betting.gate --write || echo "porte de validation non calculée (clôture Pinnacle indisponible) : poids du pool à 0"
           cd ..
-          tar -czf "$RUNNER_TEMP/betting-seed.tar.gz" .research/forecast/predictions .research/forecast/replay_pitchapi.parquet .research/forecast/replay_pitchapi.meta.json .research/betting/results.parquet .research/betting/phase2
+          tar -czf "$RUNNER_TEMP/betting-seed.tar.gz" .research/forecast/predictions .research/forecast/replay_pitchapi.parquet .research/forecast/replay_pitchapi.meta.json $(ls .research/forecast/replay_market.parquet 2>/dev/null) .research/betting/results.parquet .research/betting/phase2
           gh release view betting-odds -R "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds -R "$DATA_REPO" --latest=false --prerelease --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (amorce, cotes Winamax FR via OddsPapi, journal, historique des soirées)."
           gh release upload betting-odds "$RUNNER_TEMP/betting-seed.tar.gz" -R "$DATA_REPO" --clobber
 

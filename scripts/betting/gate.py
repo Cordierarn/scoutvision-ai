@@ -514,9 +514,15 @@ def main(argv=None) -> int:
     parser.add_argument("--write", action="store_true", help="écrit pool_weights.json (segments validés seulement)")
     parser.add_argument("--skip-b", action="store_true", help="sans la catégorie B (archive Winamax absente)")
     args = parser.parse_args(argv)
-    d = shin_columns(load_closing())
-    d = model_columns(d, [args.validation, args.test])
-    a = run_gate(d, args.validation, args.test)
+    if REPLAY_MARKET.exists():
+        d = shin_columns(load_closing())
+        d = model_columns(d, [args.validation, args.test])
+        a = run_gate(d, args.validation, args.test)
+    else:
+        # workflow quotidien sans le dataset de la recherche : la catégorie A garde les verdicts du dernier calcul complet
+        print(f"{REPLAY_MARKET.name} absent : catégorie A reprise du rapport précédent")
+        previous = json.loads(GATE_REPORT.read_text(encoding="utf-8")) if GATE_REPORT.exists() else {}
+        a = previous.get("categoryA") or {"validationSeason": args.validation, "testSeason": args.test, "segments": []}
     rows_b = pd.DataFrame() if args.skip_b else load_rows_b()
     b = run_gate_b(rows_b)
     variant = frozen_variant()
