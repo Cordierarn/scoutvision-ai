@@ -1,6 +1,6 @@
 /**
  * ScoutVision - Rapports de scouting : espace de travail local
- * Joueur → snapshot des données → synthèse ScoutVision (Gemini, versionnée) → observations
+ * Joueur → snapshot des données → synthèse ScoutVision (IA, versionnée) → observations
  * humaines → statut → export PDF. Dossiers stockés dans le navigateur (localStorage), export et
  * import JSON pour la sauvegarde. Liste à gauche et dossier à droite à partir de 1 280 px ;
  * en dessous, liste puis dossier avec retour.
@@ -148,7 +148,7 @@ const ScoutReport: React.FC<{ data: PlayerData[]; onSelectPlayer?: (player: Play
               </div>
             </div>
             {records.length === 0 ? (
-              <EmptyState icon={ClipboardList} title="Aucun dossier pour l'instant.">Cherchez un joueur ci-dessus : son dossier s'ouvre avec ses données figées, même sans Gemini.</EmptyState>
+              <EmptyState icon={ClipboardList} title="Aucun dossier pour l'instant.">Cherchez un joueur ci-dessus : son dossier s'ouvre avec ses données figées, même sans IA.</EmptyState>
             ) : (
               <ReportList records={records} filters={filters} onFilters={patch => setFilters(f => ({ ...f, ...patch }))} selectedId={selectedId ?? undefined} onSelect={select} listRef={listRef} />
             )}

@@ -749,7 +749,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
 
         {/* Rapport IA : fonctionnalité secondaire, en appui des statistiques ScoutVision */}
         <Panel className="xl:col-span-3 flex flex-col" bodyClassName="flex-1 min-h-0 flex flex-col" title="Rapport rédigé" icon={FileText}
-          subtitle="Synthèse textuelle générée par IA (Gemini) à partir des statistiques de cette fiche. À relire : elle ne remplace pas l'analyse."
+          subtitle="Synthèse textuelle générée par IA à partir des statistiques de cette fiche. À relire : elle ne remplace pas l'analyse."
           right={(
             <button ref={generateRef} onClick={handleGenerateReport} disabled={loadingReport} className="sv-btn sv-btn-secondary sv-btn-sm">
               {loadingReport ? <span className="w-3 h-3 border-2 border-ink-4 border-t-ink rounded-full animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}

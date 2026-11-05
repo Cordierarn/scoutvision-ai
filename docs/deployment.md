@@ -1,12 +1,12 @@
 # Private deployment
 
 ScoutVision runs online as a **private, single-user** instance. The repository is public; the
-PitchAPI data, the Gemini key and the credentials are not. One Node server sits in front of
+PitchAPI data, the AI keys and the credentials are not. One Node server sits in front of
 everything and refuses every private resource without a valid session.
 
 ## Host: Heroku, one Basic dyno
 
-- The app needs a **Node server** in front of `dist/`, `/data/`, `/cdn/` and `/api/` (Gemini key,
+- The app needs a **Node server** in front of `dist/`, `/data/`, `/cdn/` and `/api/` (AI keys,
   private data, image proxy). Heroku runs it as a plain `web` process: no Docker, no serverless
   rewrite, no move to Next.js. ScoutVision stays React + Vite + Node.
 - HTTPS on `<app>.herokuapp.com`, Config Vars for the secrets, deploys from GitHub, custom domain
@@ -76,7 +76,7 @@ Browser ──HTTPS──► Heroku router ──► node dist-server/production
                                           ├─ /, /assets/* (application)            dist/
                                           ├─ /data/*.json                          public/data (downloaded at boot, outside dist/)
                                           ├─ /cdn/images/(players|teams)/<id>.webp cdn.pitchapi.dev (fetched server side)
-                                          └─ /api/scout-report, /api/ai/*          Gemini (key server side)
+                                          └─ /api/scout-report, /api/ai/*, /api/betting/*  Claude (ANTHROPIC_API_KEY), Gemini as fallback
 ```
 
 - `npm run build` produces `dist/` (application + login page, **no data**: `copyPublicDir` is
@@ -155,8 +155,11 @@ Never prefix any of these with `VITE_`: the build refuses it. All are read by th
 | `SCOUTVISION_AUTH_PASSWORD_HASH` | yes | scrypt hash from `npm run auth:secret` |
 | `SCOUTVISION_SESSION_SECRET` | yes | 32 random bytes (base64url) signing the sessions |
 | `PITCHAPI_DATA_TOKEN` | yes | fine-grained GitHub token, read-only access to the releases of `Cordierarn/PitchApi-big-5` |
-| `GEMINI_API_KEY` | yes | AI reports; absent: the AI functions answer "not configured" |
-| `GEMINI_MODEL` | no | optional, model of the AI reports |
+| `ANTHROPIC_API_KEY` | yes (one AI key) | Claude writes every AI text (reports, grounded summaries, betting assistant); absent with no Gemini key: the AI functions answer "not configured" |
+| `CLAUDE_MODEL` | no | Claude model, default `claude-opus-5-5` |
+| `CLAUDE_EFFORT` | no | Claude effort, default `low` |
+| `GEMINI_API_KEY` | no | Gemini: alone, or fallback behind Claude |
+| `GEMINI_MODEL` | no | optional, first Gemini model of the writing chain |
 
 `NODE_ENV=production` and `PORT` are set by Heroku; the Node version comes from `engines.node`.
 
@@ -186,7 +189,7 @@ same name has write access to publish the data and should not be reused on the s
 4. **Create the app**: New → Create new app, region Europe. *Resources*: dyno type **Basic**.
 5. **Config Vars** (*Settings* → *Reveal Config Vars*): `SCOUTVISION_AUTH_USER` (`arnaud`),
    `SCOUTVISION_AUTH_PASSWORD_HASH`, `SCOUTVISION_SESSION_SECRET`, `PITCHAPI_DATA_TOKEN`,
-   `GEMINI_API_KEY`, `GEMINI_MODEL`. Nothing goes into the repository.
+   `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`, `GEMINI_API_KEY`). Nothing goes into the repository.
 6. **GitHub**: *Deploy* → Deployment method **GitHub** → connect `Cordierarn/scoutvision-ai` →
    *Enable Automatic Deploys* from `main` (every push to `main` deploys), or *Deploy Branch* for a
    manual deploy. No Heroku secret is needed in the repository or in GitHub Actions.
@@ -232,7 +235,7 @@ it in the shell history, so prefer the dashboard for the secret values.
 - After each dyno restart (at least daily, on deploys and Config Var changes), private data is
   unavailable for the few seconds of the download; a failing GitHub release keeps it unavailable
   until a retry succeeds (30 s, 1, 2, 4… up to 15 minutes between attempts).
-- An AI request is cut at 25 s by the server (30 s by the Heroku router): a very slow Gemini
+- An AI request is cut at 25 s by the server (30 s by the Heroku router): a very slow model
   answer is reported as unavailable instead of timing out silently.
 - Data kept in the browser by the app (scouting dossiers, watchlist, saved filters) stays in that
   browser's `localStorage` after logout; it is the user's own data on the user's own device.

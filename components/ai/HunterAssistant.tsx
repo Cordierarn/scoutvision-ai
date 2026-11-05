@@ -67,7 +67,7 @@ export const HunterAssistant: React.FC<{
     <div id={`${uid}-assistant`} className="rounded-md border border-line bg-raised/40 p-2.5 space-y-2">
       <label htmlFor={`${uid}-query`} className="sv-label flex items-center gap-1">
         Profil recherché, en langage naturel
-        <InfoTip text="Gemini traduit votre phrase en filtres du Chasseur (rôle, âge, minutes, valeur, contrat, compétition, critères) et ne calcule aucun score : les candidats sont toujours classés par ScoutVision. Les filtres proposés s'affichent avant d'être appliqués et restent modifiables." />
+        <InfoTip text="L'IA traduit votre phrase en filtres du Chasseur (rôle, âge, minutes, valeur, contrat, compétition, critères) et ne calcule aucun score : les candidats sont toujours classés par ScoutVision. Les filtres proposés s'affichent avant d'être appliqués et restent modifiables." />
       </label>
       <textarea id={`${uid}-query`} value={query} onChange={e => setQuery(e.target.value.slice(0, MAX_QUERY))} rows={2} maxLength={MAX_QUERY}
         className="sv-input !h-auto py-1.5 resize-y normal-case tracking-normal font-normal block w-full"

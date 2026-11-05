@@ -329,7 +329,7 @@ export const ReportDossier: React.FC<ReportDossierProps> = ({
 
       {/* F. Synthèse ScoutVision */}
       <SectionBlock letter="F" title="Synthèse ScoutVision"
-        help={<InfoTip text="Texte rédigé par Gemini à partir des seuls faits du snapshot, contrôlé puis conservé tel quel. Chaque génération ajoute une version ; l'ancienne reste consultable avec sa date, son modèle et sa version de prompt." />}
+        help={<InfoTip text="Texte rédigé par l'IA à partir des seuls faits du snapshot, contrôlé puis conservé tel quel. Chaque génération ajoute une version ; l'ancienne reste consultable avec sa date, son modèle et sa version de prompt." />}
         right={<>
           {summaries.length > 1 && (
             <label className="sv-label">
