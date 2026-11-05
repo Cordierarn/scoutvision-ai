@@ -157,7 +157,7 @@ export interface GroundedGeneration extends Generation { sources: Source[]; quer
 export type GenerateGrounded = (prompt: string) => Promise<GroundedGeneration>;
 export type GenerateJson = (prompt: string, schema: Record<string, unknown>) => Promise<Generation>;
 
-const TRANSIENT = new Set([429, 502, 503]);
+const TRANSIENT = new Set([429, 502, 503, 529]);
 const MAX_ATTEMPTS = 3;
 
 /** Au plus 3 tentatives sur 429 (hors quota journalier), 502 et 503, délai court avec gigue */

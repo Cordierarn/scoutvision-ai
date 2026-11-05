@@ -39,18 +39,30 @@ from a date.
 
 | Variable | Use |
 |---|---|
-| `GEMINI_API_KEY` | Gemini key, read by the endpoint only. Without it, the endpoint answers 503 and the rest of the app works |
-| `GEMINI_MODEL` | Optional model put first in the writing chain (default chain below) |
+| `ANTHROPIC_API_KEY` | Claude key (`server/claudeAi.ts`), read by the endpoints only. When present, Claude writes every AI text; Gemini, if also configured, is only the fallback after a failed Claude call |
+| `CLAUDE_MODEL` | Claude model (default `claude-opus-5-5`) |
+| `CLAUDE_EFFORT` | Claude effort `low` (default) to `max`; low keeps the 25 s Heroku deadline of a report |
+| `GEMINI_API_KEY` | Gemini key. Alone: Gemini writes everything. Without any key, the endpoints answer 503 and the rest of the app works |
+| `GEMINI_MODEL` | Optional Gemini model put first in the writing chain (default chain below) |
 | `GEMINI_TEXT_MODELS` | Writing chain, comma-separated (default `gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash, gemini-2.5-flash-lite`) |
 | `GEMINI_SEARCH_MODELS` | Google Search chain of the betting assistant (default `gemini-2.5-flash, gemini-2.5-flash-lite`) |
 
-Both live in the server environment only (`.env.local` locally, git-ignored). Never prefix them
+All live in the server environment only (`.env.local` locally, git-ignored). Never prefix them
 with `VITE_`: the build stops if a `VITE_` variable looks like a secret.
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-# GEMINI_MODEL=gemini-3.8-flash   # optional, put first in the writing chain
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# CLAUDE_MODEL=claude-opus-5-5     # optional, this is the default
+# GEMINI_API_KEY=...               # optional fallback provider
 ```
+
+Claude adapter (`server/claudeAi.ts`): plain writing for reports and grounded summaries, the server-side
+web search tool (at most 5 searches per news request, sources taken from citations then search results)
+for the betting assistant's news, the server-side URL fetch tool for the article fallback, and structured
+outputs (`json_schema`, schema made strict: `additionalProperties: false`, numeric and length constraints
+dropped, validated afterwards by the handler) for the plan. One model, effort `low`; retries on 429, 502,
+503 and 529 are the handlers' (`generateWithRetry`, `withRetry`); a refusal or a truncated answer is an
+explicit error (502 to the browser).
 
 The footer of the report shows the model that actually wrote it: the model version returned by
 the API (it can differ from the configured one), sent back by the server in the response

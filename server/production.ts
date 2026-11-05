@@ -57,6 +57,7 @@ const handler = createPrivateServer({
   cdn: 'proxy',
   api: scoutReportMiddleware({
     apiKey: env.GEMINI_API_KEY || undefined, model: env.GEMINI_MODEL || undefined,
+    anthropicApiKey: env.ANTHROPIC_API_KEY || undefined, claudeModel: env.CLAUDE_MODEL || undefined, claudeEffort: env.CLAUDE_EFFORT || undefined,
     textModels: env.GEMINI_TEXT_MODELS || undefined, searchModels: env.GEMINI_SEARCH_MODELS || undefined,
     // Routeur Heroku : 30 s au plus avant la première réponse ; le serveur répond avant (25 s)
     deadlineMs: Number(env.SCOUTVISION_AI_DEADLINE_MS) || (onHeroku ? 25_000 : undefined),
@@ -73,7 +74,8 @@ server.headersTimeout = 30_000;
 server.requestTimeout = 120_000;
 server.listen(port, '0.0.0.0', () => {
   console.log(`ScoutVision en écoute sur le port ${port} (cookies ${secureCookies ? 'sécurisés' : 'non sécurisés'}, proxy ${trustProxy ? 'de confiance' : 'ignoré'}).`);
-  if (!env.GEMINI_API_KEY) console.warn('GEMINI_API_KEY absente : les fonctions IA répondront « non configuré ».');
+  if (!env.ANTHROPIC_API_KEY && !env.GEMINI_API_KEY) console.warn('ANTHROPIC_API_KEY et GEMINI_API_KEY absentes : les fonctions IA répondront « non configuré ».');
+  else console.log(`Fonctions IA : ${env.ANTHROPIC_API_KEY ? `Claude (${env.CLAUDE_MODEL || 'claude-opus-5-5'})${env.GEMINI_API_KEY ? ', Gemini en secours' : ''}` : 'Gemini'}.`);
 });
 
 // Données privées : téléchargées au démarrage puis vérifiées à intervalle régulier

@@ -57,7 +57,7 @@ const NewsBlock: React.FC<{ news: MatchNews | BettingPlan['matches'][number]['ne
       )}
       {news.method === 'news-feed' && (
         <div className="text-2xs text-warn" title={news.fallbackReason}>
-          Recherche Google de Gemini indisponible : actualité tirée {news.articlesRead ? `de ${news.articlesRead} article${news.articlesRead > 1 ? 's' : ''} lu${news.articlesRead > 1 ? 's' : ''} et ` : ''}des titres Google News et Bing News des 4 derniers jours.
+          Recherche web de l'IA indisponible : actualité tirée {news.articlesRead ? `de ${news.articlesRead} article${news.articlesRead > 1 ? 's' : ''} lu${news.articlesRead > 1 ? 's' : ''} et ` : ''}des titres Google News et Bing News des 4 derniers jours.
         </div>
       )}
       <div className="text-2xs text-ink-4">Recherche du {dateTime(news.fetchedAt)}</div>

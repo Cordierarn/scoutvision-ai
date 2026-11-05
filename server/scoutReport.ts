@@ -178,11 +178,11 @@ export interface HandlerResult {
 
 // Seuls ces statuts sont relancés (surcharge, quota par minute, passerelle) ; jamais 400, 401, 403, 404,
 // ni un 429 de quota journalier
-const TRANSIENT_STATUSES = new Set([429, 502, 503]);
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 529]);    // 529 : surcharge côté Anthropic
 export const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 600;
 
-/** Statut HTTP d'une erreur du SDK Gemini (propriété `status`, ou code cité dans le message) */
+/** Statut HTTP d'une erreur d'un SDK (Gemini, Anthropic : propriété `status`, ou code cité dans le message) */
 export function errorStatus(error: unknown): number | undefined {
   const status = (error as { status?: unknown })?.status;
   if (typeof status === 'number') return status;

@@ -3,9 +3,11 @@
  *
  * Middleware Node (signature connect : req, res, next), toujours monté DERRIÈRE le garde
  * d'accès de server/privateServer.ts (production, `vite preview` et `vite dev`) : aucune
- * requête n'atteint Gemini sans session valide et origine vérifiée.
- * GEMINI_API_KEY et GEMINI_MODEL sont lues dans l'environnement du serveur ; la clé n'est jamais
- * envoyée au navigateur, qui ne reçoit que le nom du modèle ayant rédigé le rapport.
+ * requête n'atteint un modèle sans session valide et origine vérifiée.
+ * Fournisseurs : Claude (ANTHROPIC_API_KEY, server/claudeAi.ts) en tête quand sa clé est présente, Gemini
+ * (GEMINI_API_KEY) sinon, ou en secours derrière Claude quand les deux clés sont configurées. Les clés sont
+ * lues dans l'environnement du serveur et jamais envoyées au navigateur, qui ne reçoit que le nom du modèle
+ * ayant rédigé le texte.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -17,6 +19,7 @@ import {
 import { ContextLoader, contextLoader } from './bettingContext';
 import { FetchHeadlines, newsFeedFetcher } from './newsFeed';
 import { DEFAULT_SEARCH_MODELS, DEFAULT_TEXT_MODELS, EXTRACT_MODELS, ModelPool, modelChain, takesThinkingLevel, withModelFallback } from './geminiModels';
+import { claudeArticlesReader, claudeGenerator, claudeGroundedGenerator, claudeJsonGenerator, resolveClaudeModel, withFallback } from './claudeAi';
 
 export const SCOUT_REPORT_PATH = '/api/scout-report';
 /** Chemins des tâches d'IA ancrée : /api/ai/compare, /api/ai/opposition, /api/ai/hunter */
@@ -163,7 +166,10 @@ function boundedCall<A extends unknown[], R>(call: (...args: A) => Promise<R>, d
 }
 
 export interface ScoutReportMiddlewareOptions {
-  apiKey: string | undefined;
+  apiKey: string | undefined;              // GEMINI_API_KEY
+  anthropicApiKey?: string;                // ANTHROPIC_API_KEY : Claude en tête, Gemini en secours
+  claudeModel?: string;                    // CLAUDE_MODEL (défaut : claude-opus-5-5)
+  claudeEffort?: string;                   // CLAUDE_EFFORT (défaut : low)
   model?: string;                          // GEMINI_MODEL : placé en tête de la chaîne de rédaction
   textModels?: string;                     // GEMINI_TEXT_MODELS : chaîne de rédaction (virgules)
   searchModels?: string;                   // GEMINI_SEARCH_MODELS : chaîne de recherche Google (virgules)
@@ -207,29 +213,82 @@ export function withDeadline(generate: GenerateText, deadline: number, now: () =
   };
 }
 
+export interface AiProviders {
+  provider: 'claude' | 'gemini' | null;
+  apiKey: string | undefined;              // une clé au moins : les handlers répondent 503 sinon
+  model: string;                           // modèle demandé, renvoyé dans les métadonnées (requestedModel)
+  generate: GenerateText;
+  generateGrounded: GenerateGrounded;
+  generateJson: GenerateJson;
+  readArticles: ReadArticles | undefined;
+  extractText: GenerateText;
+}
+
 /**
- * Middleware de l'endpoint ; les autres chemins passent à `next`
+ * Générateurs selon les clés présentes : Claude seul, Gemini seul, ou Claude avec Gemini en secours (un appel
+ * Claude en échec, hors délai de la requête, est refait sur la chaîne Gemini). Les options `generate*` des
+ * tests remplacent les générateurs correspondants.
  */
-export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
-  const { apiKey, log = message => console.warn(message) } = options;
-  const model = resolveGeminiModel(options.model);
+export function aiProviders(options: ScoutReportMiddlewareOptions, log: (message: string) => void): AiProviders {
+  const { apiKey, anthropicApiKey } = options;
+  const gemini = apiKey ? geminiProviders(apiKey, options, log) : null;
+  const claude = anthropicApiKey ? claudeProviders(anthropicApiKey, options, log) : null;
+  const notFinal = (error: unknown) => error instanceof DeadlineError;
+  const pick = <F extends (...args: never[]) => Promise<unknown>>(primary: F | undefined, secondary: F | undefined, none: F): F => {
+    if (primary && secondary) return withFallback(primary as never, secondary as never, notFinal, log) as unknown as F;
+    return primary ?? secondary ?? none;
+  };
+  const provider = claude ? 'claude' : gemini ? 'gemini' : null;
+  const readArticles = options.readArticles ?? (claude || gemini ? pick(claude?.readArticles, gemini?.readArticles, async () => ({ text: '', read: [] })) : undefined);
+  return {
+    provider,
+    apiKey: anthropicApiKey || apiKey,
+    model: claude ? resolveClaudeModel(options.claudeModel) : resolveGeminiModel(options.model),
+    generate: options.generate ?? pick(claude?.generate, gemini?.generate, async () => ''),
+    generateGrounded: options.generateGrounded ?? pick(claude?.generateGrounded, gemini?.generateGrounded, async () => ({ text: '', sources: [], queries: [] })),
+    generateJson: options.generateJson ?? pick(claude?.generateJson, gemini?.generateJson, async () => ({ text: '' })),
+    readArticles,
+    extractText: options.generate ?? pick(claude?.generate, gemini?.extractText, async () => ''),
+  };
+}
+
+type ProviderSet = Pick<AiProviders, 'generate' | 'generateGrounded' | 'generateJson' | 'readArticles' | 'extractText'>;
+
+function geminiProviders(apiKey: string, options: ScoutReportMiddlewareOptions, log: (message: string) => void): ProviderSet {
   // Chaînes de modèles partagées par toutes les requêtes : un modèle au quota épuisé est mis de côté
   const textPool = new ModelPool(modelChain(options.textModels, DEFAULT_TEXT_MODELS, options.model));
   const searchPool = new ModelPool(modelChain(options.searchModels, DEFAULT_SEARCH_MODELS));
   // Extraction de l'actualité à partir des titres (tâche simple) : Flash Lite d'abord (500 requêtes par jour, moins saturés)
   const extractPool = new ModelPool([...new Set([...EXTRACT_MODELS, ...textPool.models])]);
-  const generate = options.generate ?? (apiKey ? geminiGenerator(apiKey, textPool, log) : async () => '');
+  return {
+    generate: geminiGenerator(apiKey, textPool, log),
+    generateGrounded: geminiGroundedGenerator(apiKey, searchPool, log),
+    generateJson: geminiJsonGenerator(apiKey, textPool, log),
+    readArticles: geminiArticlesReader(apiKey, extractPool, log),
+    extractText: geminiGenerator(apiKey, extractPool, log),
+  };
+}
+
+function claudeProviders(apiKey: string, options: ScoutReportMiddlewareOptions, log: (message: string) => void): ProviderSet {
+  const claude = { apiKey, model: options.claudeModel, effort: options.claudeEffort, log };
+  const generate = claudeGenerator(claude);
+  return { generate, generateGrounded: claudeGroundedGenerator(claude), generateJson: claudeJsonGenerator(claude), readArticles: claudeArticlesReader(claude), extractText: generate };
+}
+
+/**
+ * Middleware de l'endpoint ; les autres chemins passent à `next`
+ */
+export function scoutReportMiddleware(options: ScoutReportMiddlewareOptions) {
+  const { log = message => console.warn(message) } = options;
+  const providers = aiProviders(options, log);
+  const { apiKey, model, generate, generateGrounded, generateJson, readArticles, extractText } = providers;
   const allow = createRateLimiter(options.rateLimit?.limit ?? RATE_LIMIT, options.rateLimit?.windowMs ?? RATE_WINDOW_MS);
   // Assistant du Labo paris : une recherche d'actualité par match puis un plan ; actualité en cache 90 min
   const allowBetting = createRateLimiter(options.bettingRateLimit?.limit ?? BETTING_RATE_LIMIT, options.bettingRateLimit?.windowMs ?? RATE_WINDOW_MS);
   const loadIndex = options.loadIndex ?? (options.dataDir ? indexLoader(options.dataDir) : () => null);
-  const generateGrounded = options.generateGrounded ?? (apiKey ? geminiGroundedGenerator(apiKey, searchPool, log) : async () => ({ text: '', sources: [], queries: [] }));
-  const generateJson = options.generateJson ?? (apiKey ? geminiJsonGenerator(apiKey, textPool, log) : async () => ({ text: '' }));
   const news = new NewsCache();
   const loadContext = options.loadContext ?? (options.dataDir ? contextLoader(options.dataDir) : undefined);
   const fetchHeadlines = options.fetchHeadlines ?? newsFeedFetcher();
-  const readArticles = options.readArticles ?? (apiKey ? geminiArticlesReader(apiKey, extractPool, log) : undefined);
-  const extractText = options.generate ?? (apiKey ? geminiGenerator(apiKey, extractPool, log) : async () => '');
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const path = (req.url ?? '').split('?')[0];

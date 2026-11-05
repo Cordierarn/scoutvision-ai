@@ -171,12 +171,14 @@ npm run data:pull        # private data prepared by CI (~60 MB), no Python neede
 npm run dev               # http://localhost:3000
 ```
 
-The app runs without Gemini; only the report generation then answers "unavailable". To enable
-it, create a git-ignored `.env.local`:
+The app runs without an AI key; only the AI features (reports, grounded summaries, betting
+assistant) then answer "unavailable". To enable them, create a git-ignored `.env.local` with an
+Anthropic key (Claude, default `claude-opus-5-5`), or a Gemini key as the fallback provider:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-# GEMINI_MODEL=gemini-3.5-flash   # optional, this is the default
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# CLAUDE_MODEL=claude-opus-5-5    # optional, this is the default
+# GEMINI_API_KEY=...              # optional: used alone, or as a fallback behind Claude
 ```
 
 Production build: `npm run build && npm start` (Node server: the app, the login page, the data,

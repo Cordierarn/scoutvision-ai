@@ -240,7 +240,7 @@ const TeamAnalysis: React.FC<TeamAnalysisProps> = ({ playerData, teamStats, onSe
                 {/* Briefing d'opposition IA ancré : faits déjà affichés (statistiques, rangs, formation, effectif), résultat non enregistré */}
                 <div className="px-5 pb-5">
                   <GroundedAiPanel title="Briefing d'opposition" resetKey={team}
-                    help="Gemini rédige un briefing à partir des seuls faits d'équipe ScoutVision (statistiques de saison et leur rang dans la compétition, formation principale et titulaires, profil de l'effectif, joueurs les plus utilisés avec leur rôle). Le serveur rejette tout nombre absent des faits, tout sujet non mesuré et toute prédiction. Aucune donnée individuelle brute n'est transmise."
+                    help="L'IA rédige un briefing à partir des seuls faits d'équipe ScoutVision (statistiques de saison et leur rang dans la compétition, formation principale et titulaires, profil de l'effectif, joueurs les plus utilisés avec leur rôle). Le serveur rejette tout nombre absent des faits, tout sujet non mesuré et toute prédiction. Aucune donnée individuelle brute n'est transmise."
                     description="Quatre sections : identité et résultats, style et tendances, forces et vulnérabilités statistiques, points à préparer."
                     disabled={!stats} disabledReason="Aucune statistique d'équipe pour cette compétition : le briefing n'a pas de faits."
                     request={() => aiOpposition(buildOppositionFacts({

@@ -290,7 +290,7 @@ const CandidateDossier: React.FC<CandidateDossierProps> = ({
       {/* H. Synthèse IA ancrée : candidat face au titulaire (ou seul), résultat non enregistré */}
       <div className="px-4 py-3 border-t border-line">
         <GroundedAiPanel title={incumbentPlayer ? 'Synthèse IA face au titulaire' : 'Synthèse IA du candidat'} resetKey={id}
-          help="Gemini compare le candidat au titulaire à partir des seuls faits ScoutVision (percentiles, indices de rôle, valeurs, échantillon) ; le serveur rejette tout nombre absent des faits, tout sujet non mesuré et tout verdict de recrutement. La projection chez nous n'est pas transmise : le texte décrit les profils, il ne tranche pas."
+          help="L'IA compare le candidat au titulaire à partir des seuls faits ScoutVision (percentiles, indices de rôle, valeurs, échantillon) ; le serveur rejette tout nombre absent des faits, tout sujet non mesuré et tout verdict de recrutement. La projection chez nous n'est pas transmise : le texte décrit les profils, il ne tranche pas."
           description={incumbentPlayer ? `${incumbentPlayer.Player} (titulaire) et ${p.Player}, rôle ${roleName}.` : `${p.Player}, rôle ${roleName}, sans titulaire comparable.`}
           disabled={!incumbentPlayer} disabledReason="Sans titulaire au poste, la synthèse comparative n'a pas de point de comparaison."
           request={() => aiCompare([incumbentPlayer!, p].map(x => ({ row: x, bestRoles: rankPresets(x).map(r => ({ role: r.name, normalizedScore: r.index })) })), { framing: 'candidate_vs_incumbent', role: roleName })} />

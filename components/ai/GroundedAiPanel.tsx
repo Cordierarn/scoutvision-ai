@@ -3,7 +3,7 @@
  *
  * Un bouton lance la demande au serveur (/api/ai/*), le texte contrôlé s'affiche avec le modèle
  * réellement utilisé, la version du prompt et la date. Le résultat n'est pas enregistré : il est
- * recalculé à la demande et reste un texte à relire, jamais une évaluation. Sans clé Gemini, le
+ * recalculé à la demande et reste un texte à relire, jamais une évaluation. Sans clé d'IA, le
  * serveur répond 503 et le message s'affiche à la place du texte.
  */
 
@@ -75,7 +75,7 @@ export const GroundedAiPanel: React.FC<{
         </div>
       )}
       {!result && !loading && !error && (
-        <p id={`${uid}-note`} className="text-xs text-ink-4">{disabled && disabledReason ? disabledReason : 'Texte rédigé par Gemini à partir des seuls faits ScoutVision affichés sur cette page, contrôlé par le serveur. À relire : il décrit, il ne décide pas.'}</p>
+        <p id={`${uid}-note`} className="text-xs text-ink-4">{disabled && disabledReason ? disabledReason : 'Texte rédigé par l\'IA à partir des seuls faits ScoutVision affichés sur cette page, contrôlé par le serveur. À relire : il décrit, il ne décide pas.'}</p>
       )}
     </Panel>
   );
