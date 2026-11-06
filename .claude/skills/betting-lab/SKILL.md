@@ -70,6 +70,8 @@ règle, de chiffre ou de comportement.
   (`scoutvision.betting.mytest`, événement `scoutvision-mytest` pour synchroniser les composants) ; export et import JSON ;
   la page le dit.
 - Seuls les paris des profils validés peuvent être suivis (`addBet` refuse un autre profil ; pas de bouton « Suivre » sinon).
+  Les paris déjà enregistrés d'un profil retiré restent affichés (« profil retiré ») et l'import JSON les restaure tels quels :
+  ce sont les données personnelles du propriétaire, jamais effacées.
 - Le bouton « Suivre » de chaque pari du plan de l'IA l'ajoute avec la fraction de mise du moteur appliquée à la bankroll
   disponible (`proposedStake` : 0,10 € au moins, arrondi à 0,10 €, plafonné au disponible). Pas de bouton une fois le match
   commencé ; un pari déjà suivi affiche « Suivi dans Mon test ».

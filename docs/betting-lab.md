@@ -699,7 +699,7 @@ modifiables tant que le pari n'est pas réglé. Règlement automatique par l'ide
 l'historique publié, mémorisé dans le pari (l'historique ne garde que 14 jours) ; réglage manuel en secours. Données
 dans le stockage du navigateur uniquement (`scoutvision.betting.mytest`), export et import JSON. Depuis le 6 novembre 2026,
 Mon test ne suit que les paris des profils validés (`addBet` refuse un autre profil, le bouton « Suivre » n'apparaît pas).
-Un pari déjà enregistré d'un profil retiré reste affiché (« profil retiré ») ; il ne se règle plus automatiquement que si
+Un pari déjà enregistré d'un profil retiré reste affiché (« profil retiré »), et l'import JSON restaure un export tel quel ; il ne se règle plus automatiquement que si
 son règlement avait été mémorisé, ou si la même sélection figure dans l'historique d'un profil validé ; sinon, réglage manuel.
 
 ## Retrait des profils non validés (6 novembre 2026)
@@ -708,14 +708,16 @@ Décision du propriétaire, après la re-mesure de l'audit du 6 novembre (règle
 
 - **Ancien moteur** : retiré partout. Résultat : rejeu nettement négatif, intervalle entièrement sous zéro ; les soirées
   gagnantes qui l'avaient motivé venaient du règlement faux des mi-temps.
-- **Exploratoire**, avec ses combinés du jour : retiré de la publication, de l'affichage et du prompt de l'IA. Résultat :
+- **Exploratoire**, avec ses combinés du jour : retiré de la publication, de l'affichage et du prompt de l'IA ; en
+  pratique, comme l'Ancien moteur, il n'est plus ni journalisé ni exporté, et Mon test le refuse. Résultat :
   rejeu négatif, CLV négatif de l'ordre de la marge.
 - **Sûr, Équilibré, Grosse cote** : conservés, inchangés. **Mon test** : conservé, limité aux paris de ces profils.
 
 Mise en œuvre :
 
 - Pipeline : seuls `suggest.PROFILES` (`product.VALIDATED_PROFILES`) sont calculés, journalisés, rejoués et exportés. Le
-  journal déjà écrit reste **immuable** : ses lignes des profils retirés ne sont ni réécrites ni effacées, mais
+  journal déjà écrit reste **immuable** : ses lignes des profils retirés ne sont ni réécrites ni effacées (seules leurs colonnes dérivées, règlement, clôture et
+  CLV, continuent d'être calculées comme pour toute ligne), mais
   `product.playable`, `journal_summary` et `history` les ignorent ; le journal des combinés du jour
   (`journal/combos.parquet`) n'est plus ni lu ni écrit et reste publié tel quel avec l'archive. Le moteur ayant changé,
   son empreinte aussi : le bilan est recalculé au passage suivant (`replay --if-stale`).

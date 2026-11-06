@@ -142,6 +142,12 @@ describe('plan du jour', () => {
     expect(prompt).not.toContain('exploratoire');
     expect(prompt).not.toContain('old engine');
     expect(prompt).toContain(`profile "${facts.profile}"`);
+    // même avec un profil retiré forcé (ancien bundle, faits forgés), plus aucune règle de profil non validé n'existe
+    for (const retired of ['exploratoire', 'ancien']) {
+      const forced = buildPlanPrompt({ ...facts, profile: retired as unknown as typeof facts.profile }, {});
+      expect(forced).not.toContain('NOT validated');
+      expect(forced).not.toContain('old engine');
+    }
   });
 
   it('refuse un profil retiré (Ancien moteur, Exploratoire) ou inconnu ; le profil absent reste Équilibré', async () => {
