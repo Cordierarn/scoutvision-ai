@@ -5,7 +5,7 @@ import {
 } from './savedFilters';
 
 class MemoryStorage implements StorageLike { map = new Map<string, string>(); getItem(k: string) { return this.map.get(k) ?? null; } setItem(k: string, v: string) { this.map.set(k, v); } }
-const players = { searchTerm: 'mbap', positionFilter: 'ST', sortField: 'xG per 90', sortOrder: 'desc' as const, conditions: [{ key: 'Age', min: 18, max: 23 }, { key: 'Minutes played', min: 500, max: '' as const }] };
+const players = { searchTerm: 'dupo', positionFilter: 'ST', sortField: 'xG per 90', sortOrder: 'desc' as const, conditions: [{ key: 'Age', min: 18, max: 23 }, { key: 'Minutes played', min: 500, max: '' as const }] };
 const hunter = { role: 'Renard des surfaces', strictness: 0.9, constraints: { ageMax: 23, minutesMin: 300, valueMax: 20_000_000, contractMonths: 12, estimateAboveMarket: true, competition: 'FRA' } };
 const similar = { samePosition: true, ageMax: 26, minMinutes: 450, competition: '', tier: 1 };
 
@@ -58,7 +58,7 @@ describe('lien de partage', () => {
     expect(sharedFromHash('#autre=1&partage=' + code)?.page).toBe('players');
     expect(sharedFromHash('#rien')).toBeNull();
     expect(shareUrl({ page: 'hunter', data: hunter }, 'https://exemple.test/app')).toBe(`https://exemple.test/app#partage=${encodeShare({ page: 'hunter', data: hunter })}`);
-    expect(code).not.toContain('Mbapp');   // seulement des réglages, aucune donnée joueur en clair n'est attendue ici
+    expect(code).not.toContain('Dupont');   // seulement des réglages, aucune donnée joueur en clair n'est attendue ici
   });
   it('le filtre partagé est consommé une seule fois, par la bonne page', () => {
     setPendingSharedFilters({ page: 'hunter', data: hunter });

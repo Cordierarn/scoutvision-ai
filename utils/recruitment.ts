@@ -997,7 +997,7 @@ export interface PositionDataCheck {
 }
 
 // Mesuré sur 1 934 équipes-saisons (2021-22, 2024-25, 2025-26, 2026-27) : 0 contradiction partout,
-// sauf Radnički Niš 2024-25 (17 sur 21) et Crvena Zvezda 2026-27 (15 sur 17), dont les joueurs
+// sauf deux équipes-saisons de la ligue SRB (2024-25 : 17 sur 21 ; 2026-27 : 15 sur 17), dont les joueurs
 // de champ sont enregistrés gardiens. Le seuil de 2 écarte une erreur isolée.
 export const POSITION_CONTRADICTIONS_MIN = 2;
 

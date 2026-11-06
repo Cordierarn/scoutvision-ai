@@ -182,7 +182,7 @@ def _side_score(name: str, candidate: str, aliases: dict[str, str]) -> float:
 def match_fixture(event: dict, fixtures: pd.DataFrame, competition: str, aliases: dict[str, str] | None = None) -> pd.Series | None:
     """Rencontre OddsPapi de la même compétition, coup d'envoi à ± 2 h : les deux noms similaires (seuil 0,5,
     ou alias appris), sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau ; l'autre nom
-    est alors appris dans `aliases` (« Red Star Belgrade » → le nom OddsPapi). None sans candidat net."""
+    est alors appris dans `aliases` (« Club Delta FC » → le nom OddsPapi). None sans candidat net."""
     aliases = aliases if aliases is not None else {}
     start = pd.Timestamp(event["commence_time"])
     f = fixtures[(fixtures["competition"] == competition) & ((fixtures["start_time"] - start).abs() <= KICKOFF_TOLERANCE)]
