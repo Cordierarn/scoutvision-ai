@@ -21,6 +21,10 @@ PitchAPI. Vue d'ensemble : [README](README.md). État des chantiers et décision
 - **Aucun score n'est un verdict.** Un résultat négatif est un résultat valide et reste documenté. Le marché
   de clôture est la référence des prévisions ; la validation est hors échantillon et point-in-time.
 - **Langue.** Interface, commits, PR et docs de travail en français ; nombres au format `fr-FR`.
+  Docs de travail = `docs/roadmap.md`, `docs/betting-lab.md`, `CLAUDE.md`, les skills de `.claude/`. Le README et
+  les docs de méthodologie (`docs/methodology.md`, `tactical-roles.md`, `recruitment-model.md`, `forecast-research.md`,
+  `ai-reports.md`, `deployment.md`, `data-*.md`, `design-system.md`, `laboratory.md`) restent en anglais. On ne traduit
+  pas un document existant d'une langue vers l'autre.
 
 ## Méthode de travail (une page ou un module)
 
@@ -43,7 +47,7 @@ explicitement demandée. Liste à jour : [`.claude/skills/frontend-quality/SKILL
 |---|---|
 | `App.tsx`, `components/`, `hooks/`, `utils/`, `services/` | App React ; `components/ui` = primitives partagées |
 | `server/` | Serveur privé (session, `/data`, `/cdn`, `/api/*`), fonctions IA (Claude en tête, Gemini en secours) |
-| `scripts/` | Pipeline Python : `prepare_data.py`, `models.py`, `lab.py`, `backtest/` (prévisions), `betting/` (Labo paris) |
+| `scripts/` | Pipeline Python : `prepare_data.py`, `models.py`, `lab.py`, `backtest/` (prévisions), `betting/` (Labo paris), `tests/` (unittest) |
 | `docs/` | Méthodologie, modèles, déploiement, Labo paris |
 | `.github/workflows/` | Données (lundi et vendredi), cotes de recherche, cycle quotidien du Labo paris |
 

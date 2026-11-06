@@ -1,7 +1,7 @@
 # Data pipeline
 
 ScoutVision does not ship any data. The source data comes from the private repository
-[`Cordierarn/PitchApi-big-5`](https://github.com/Cordierarn/PitchApi-big-5) (PitchAPI, 35
+[`Cordierarn/PitchApi-big-5`](https://github.com/Cordierarn/PitchApi-big-5) (PitchAPI, 75
 competitions, 2021-22 → current season, updated twice a week). It is prepared by CI and
 published to a **private** release; this public repository never contains it.
 

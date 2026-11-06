@@ -1,18 +1,19 @@
 # AI scout reports
 
-The player profile can generate an optional written summary of ScoutVision's analyses with
-Gemini. Gemini **summarises**: it does not compute any ScoutVision model, index or projection,
+The player profile can generate an optional written summary of ScoutVision's analyses with an
+AI provider: Claude when `ANTHROPIC_API_KEY` is set, Gemini otherwise or as fallback (see the
+variables below). The AI **summarises**: it does not compute any ScoutVision model, index or projection,
 and it may only use the structured facts that ScoutVision sends. ScoutVision works fully
 without it.
 
 ## Architecture
 
-The browser never calls Gemini. The "Générer" button of the player profile (and of a scouting
+The browser never calls the AI provider. The "Générer" button of the player profile (and of a scouting
 dossier) posts the player row and the computed indicators to `POST /api/scout-report`; the
-server validates the input, builds the prompt and calls Gemini with `GEMINI_API_KEY`.
+server validates the input, builds the prompt and calls Claude (`ANTHROPIC_API_KEY`) or Gemini (`GEMINI_API_KEY`).
 
 ```
-Frontend (PlayerCard, Rapports) → POST /api/scout-report (server/) → Gemini API
+Frontend (PlayerCard, Rapports) → POST /api/scout-report (server/) → Claude API (Gemini as fallback)
                                 ← { content, meta, facts, promptVersion }
 ```
 
@@ -28,7 +29,7 @@ from a date.
 | `server/scoutReport.ts` | input validation, model resolution, retry, handler |
 | `server/reportFacts.ts` | structured facts and prompt |
 | `server/reportAudit.ts` | deterministic check of the generated text |
-| `server/scoutReportPlugin.ts` | Node middleware `(req, res, next)`, Vite plugin, Gemini call |
+| `server/scoutReportPlugin.ts` | Node middleware `(req, res, next)`, Vite plugin, provider call (Claude, then Gemini) |
 | `services/scoutReportService.ts` | client: request, cache, footer label |
 | `services/scoutReportStore.ts` | local scouting dossiers (localStorage), JSON export/import |
 | `components/reports/generateReport.ts` | generation shared by the profile and the Rapports page, stored as a new version |

@@ -20,7 +20,8 @@
 | Rapports de scouting | V1 livrée ; direction artistique du PDF en pause | [ai-reports](ai-reports.md#scouting-dossiers-local-v1) |
 | Laboratoire | Stand-by | [laboratory](laboratory.md) |
 | Liste de suivi | Stand-by | — |
-| Identité visuelle « Tessera » | Stand-by (essai conservé sur une branche, jamais fusionné) | — |
+| Identité visuelle « Tessera » | Stand-by (essai jamais fusionné, conservé dans l'historique du tag `archive/claude/pensive-bardeen-m1ytw6`, commit 0a744e4) | — |
+| Page « Labo marché » (expériences « battre le marché », `components/lab/MarketLabPage.tsx`, `scripts/prepare_market_lab.py`) | Stand-by (jamais fusionnée, conservée à la pointe du tag `archive/claude/pensive-bardeen-m1ytw6`) | [laboratory](laboratory.md) |
 
 Le Labo paris n'a pas encore suivi la méthode complète (audit, fermeture, gel) : c'est la prochaine étape
 avant de le considérer comme stable.
