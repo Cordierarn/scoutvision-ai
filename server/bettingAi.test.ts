@@ -5,7 +5,7 @@
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
+import { BETTING_PROMPT_VERSIONS,
   BETTING_NEWS_PATH, BETTING_PLAN_PATH, BettingDeps, GenerateGrounded, GenerateJson, NEWS_REFRESH_MIN_MS, NewsCache, SuggestionsIndexFile,
   auditText, buildNewsPrompt, buildPlanFacts, buildPlanPrompt, cleanNews, handleBettingNews, handleBettingPlan, matchFacts, newsErrorMessage, parseGrounding, planErrorMessage, validatePlan,
 } from './bettingAi';
@@ -135,11 +135,41 @@ describe('plan du jour', () => {
     expect(buildPlanPrompt(withContext, {})).toContain('percentages like "78,7 %"');
   });
 
-  it('ajoute les règles du profil exploratoire au prompt, et seulement pour lui', () => {
-    const expl = { ...buildPlanFacts(INDEX, ['m1'], 'equilibre', '2026-11-07'), profile: 'exploratoire' as const };
-    expect(buildPlanPrompt(expl, {})).toContain('were NOT validated by the engine');
-    expect(buildPlanPrompt(facts, {})).not.toContain('were NOT validated by the engine');
-    expect(buildPlanPrompt({ ...expl, profile: 'ancien' as const }, {})).toContain('the old engine, before the circuit breaker');
+  it('prompt du plan v4 : profils validés seulement, plus aucune règle de profil non validé', () => {
+    expect(BETTING_PROMPT_VERSIONS.plan).toBe('ai-betting-plan-v4');
+    const prompt = buildPlanPrompt(facts, {});
+    expect(prompt).not.toContain('NOT validated');
+    expect(prompt).not.toContain('exploratoire');
+    expect(prompt).not.toContain('old engine');
+    expect(prompt).toContain(`profile "${facts.profile}"`);
+    // même avec un profil retiré forcé (ancien bundle, faits forgés), plus aucune règle de profil non validé n'existe
+    for (const retired of ['exploratoire', 'ancien']) {
+      const forced = buildPlanPrompt({ ...facts, profile: retired as unknown as typeof facts.profile }, {});
+      expect(forced).not.toContain('NOT validated');
+      expect(forced).not.toContain('old engine');
+    }
+  });
+
+  it('refuse un profil retiré (Ancien moteur, Exploratoire) ou inconnu ; le profil absent reste Équilibré', async () => {
+    for (const profile of ['exploratoire', 'ancien', 'inconnu', null]) {
+      const out = await handleBettingPlan({ matchIds: ['m1'], profile }, deps({ generateJson: async () => { throw new Error('le modèle ne doit pas être appelé'); } }));
+      expect(out.status).toBe(400);
+      expect((out.body as { error: string }).error).toContain('Rechargez la page');
+    }
+    const none = await handleBettingPlan({ matchIds: ['m2'] }, deps({ generateJson: async () => ({ text: JSON.stringify(GOOD_PLAN), modelVersion: 'modele-test' }) }));
+    expect((none.body as { profile?: string }).profile).toBe('equilibre');
+  });
+
+  it('ignore les blocs des profils retirés d\'un artefact ancien encore servi (références m1#1 en collision)', async () => {
+    const retired = { suggestions: [sug(1, 'Sélection retirée', 'résultat', 3.1, 0.4, 0.2)], combo: null };
+    const old = JSON.parse(JSON.stringify(INDEX)) as SuggestionsIndexFile;
+    (old.matches[0].profiles as Record<string, unknown>).exploratoire = retired;
+    (old.matches[0].profiles as Record<string, unknown>).ancien = retired;
+    const f = buildPlanFacts(old, ['m1'], 'equilibre', '2026-11-07');
+    expect(JSON.stringify(f)).not.toContain('Sélection retirée');
+    const out = await handleBettingPlan({ matchIds: ['m1', 'm2'], profile: 'equilibre' }, deps({ loadIndex: () => old, generateJson: async () => ({ text: JSON.stringify(GOOD_PLAN), modelVersion: 'modele-test' }) }));
+    expect(out.status).toBe(200);
+    expect(JSON.stringify(out.body)).not.toContain('Sélection retirée');
   });
 
   it('transmet un « pas de pari » du moteur avec ses motifs, sans suggestion', () => {

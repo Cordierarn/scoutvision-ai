@@ -4,23 +4,18 @@
  * la bankroll saisie, l'âge d'une cote et les libellés.
  */
 
-import type { BetStatus, BilanBlock, BilanProfile, ComboHistoryEntry, HistoryBet, HistoryDay, StakeMode, SuggestionProfile } from '../../services/replayData';
+import type { BetStatus, BilanBlock, BilanProfile, HistoryBet, HistoryDay, StakeMode, SuggestionProfile } from '../../services/replayData';
 
-export const PROFILE_ORDER: SuggestionProfile[] = ['sur', 'equilibre', 'grosse_cote', 'exploratoire', 'ancien'];
-export const PROFILE_LABELS: Record<SuggestionProfile, string> = { sur: 'Sûr', equilibre: 'Équilibré', grosse_cote: 'Grosse cote', exploratoire: 'Exploratoire', ancien: 'Ancien moteur' };
+/** Profils validés par le coupe-circuit, les seuls publiés (« Ancien moteur » et « Exploratoire » retirés le 6 novembre 2026). */
+export const PROFILE_ORDER: SuggestionProfile[] = ['sur', 'equilibre', 'grosse_cote'];
+export const PROFILE_LABELS: Record<SuggestionProfile, string> = { sur: 'Sûr', equilibre: 'Équilibré', grosse_cote: 'Grosse cote' };
 export const PROFILE_HINTS: Record<SuggestionProfile, string> = {
   sur: 'Probabilité de référence la plus forte, cote minimale 1,30.',
   equilibre: 'Score = probabilité de référence × (1 + espérance) : la probabilité pondérée par le multiplicateur attendu de la mise.',
   grosse_cote: 'Cote de 3,00 ou plus, meilleure espérance face au marché sharp.',
-  exploratoire: 'Hors coupe-circuit : cotes de 1,60 à 6,00 que le moteur juge au moins aussi probables que le marché, classées par espérance face au marché sans marge (souvent négative). Mise symbolique de 0,5 %.',
-  ancien: 'Le classement Équilibré d\'avant le coupe-circuit, sur la seule probabilité du moteur : suivi pour mesurer son CLV et l\'effet de la cote du matin, jamais recommandé.',
 };
-/** Profil hors coupe-circuit : suggestions non validées, espérance face au marché généralement négative. */
-export const isExploratory = (p: SuggestionProfile) => p === 'exploratoire';
-/** Profils hors coupe-circuit (exploratoire, ancien moteur) : jamais des paris validés. */
-export const isUnvalidated = (p: SuggestionProfile) => p === 'exploratoire' || p === 'ancien';
-export const LEGACY_NOTE = 'Ancien moteur : le classement d\'avant le coupe-circuit, sur la seule probabilité du moteur, publié pour mesurer s\'il bat la clôture de Pinnacle (CLV) et si la cote du matin est meilleure que celle de la clôture. Ce ne sont pas des paris validés.';
-export const EXPLORE_NOTE = 'Profil exploratoire : sélections hors coupe-circuit, publiées pour suivre le moteur chaque soir. Ce ne sont pas des paris validés : face au marché sans marge, leur espérance est le plus souvent négative. Mise fixe symbolique de 0,5 % de la bankroll.';
+/** Profil validé (publié) ; un profil retiré ou inconnu ne l'est pas, même s'il figure encore dans un artefact ou un stockage ancien. */
+export const isValidatedProfile = (p: string): p is SuggestionProfile => (PROFILE_ORDER as string[]).includes(p);
 /** Formulation partagée du principe du coupe-circuit (Matchs à venir, Suivi des paris). */
 export const CIRCUIT_NOTE = 'Référence : Pinnacle ou Betfair Exchange sans marge (méthode de Shin). Une sélection n\'apparaît que si sa cote Winamax dépasse cette référence d\'au moins 2,5 à 4 % d\'espérance ; sinon, pas de pari.';
 export const DEFAULT_PROFILE: SuggestionProfile = 'equilibre';
@@ -135,19 +130,4 @@ export function historySummary(days: HistoryDay[], profile: SuggestionProfile, b
     bets, settled, won, hitRate: decided ? won / decided : null, staked: Math.round(staked * 100) / 100, net: Math.round(net * 100) / 100,
     clvBets, meanClv: clvBets ? clvSum / clvBets : null, clvBeatRate: clvBets ? clvBeat / clvBets : null,
   };
-}
-
-/** Bilan des combinés du jour réglés (hors remboursés pour la mise) : nombre, gagnés, misé et net en euros. */
-export function comboSummary(combos: ComboHistoryEntry[], bankroll: number | null): { settled: number; won: number; staked: number; net: number } {
-  let settled = 0, won = 0, staked = 0, net = 0;
-  for (const c of combos) {
-    if (c.status === 'pending' || c.realised === null) continue;
-    settled++;
-    if (c.realised > 0) won++;
-    if (bankroll === null || c.status === 'void') continue;
-    const stake = stakeEuros(bankroll, c.stakeFraction);
-    staked += stake;
-    net += Math.round(stake * c.realised * 100) / 100;
-  }
-  return { settled, won, staked: Math.round(staked * 100) / 100, net: Math.round(net * 100) / 100 };
 }

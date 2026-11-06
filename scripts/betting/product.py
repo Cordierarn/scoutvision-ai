@@ -4,7 +4,7 @@ journal immuable des suggestions publiées et export de l'artefact privé lu par
 
   cd scripts
   python3 -m betting.product replay [--if-stale]   rejeu 2026-27 (cotes du dernier relevé avant coup d'envoi, données
-                                           antérieures au match seulement) → bilan par profil (les cinq), famille,
+                                           antérieures au match seulement) → bilan par profil validé, famille,
                                            compétition, daté du moteur ; --if-stale : seulement si le moteur a changé
   python3 -m betting.product suggest       suggestions des rencontres à venir (archive des cotes, âge ≤ 2 h),
                                            journal, règlement des suggestions passées
@@ -38,8 +38,10 @@ from .phase2 import OUT as PHASE2, frozen_variant, load_results as _pitchapi_res
 from .results import half_share
 
 JOURNAL = RESEARCH / "journal" / "suggestions.parquet"
-COMBO_JOURNAL = RESEARCH / "journal" / "combos.parquet"     # combinés du jour du profil exploratoire
-COMBO_COLUMNS = ["combo_id", "published_at", "date", "legs", "odds", "joint_p", "joint_model", "ev", "stake_fraction", "status", "realised", "settled_at"]
+# Profils publiés : les seuls validés par le coupe-circuit. « Ancien moteur » et « Exploratoire » ont été retirés le
+# 6 novembre 2026 (docs/betting-lab.md) ; leurs lignes déjà écrites restent dans le journal (immuable), et celui des
+# combinés du jour (`journal/combos.parquet`) n'est plus ni lu ni écrit, mais aucune n'est plus résumée ni exportée.
+VALIDATED_PROFILES = sg.PROFILES
 BILAN = RESEARCH / "product" / "bilan.json"
 EXPORT_DIR = ROOT / "public" / "data" / "forecast" / "suggestions"
 SEASON = "2026-27"
@@ -205,63 +207,12 @@ def _assessment_fields(c: sg.Candidate) -> dict:
 
 # ----- suggestion d'un match -----
 
-def _legacy_block(ranked: list, refs: dict, ctx: dict, home: str, away: str) -> list[dict]:
-    """Profil « Ancien moteur » : classement Équilibré sur la seule probabilité du modèle, sans coupe-circuit (comme avant
-    l'étape 1), avec la probabilité sharp du marché quand elle est connue, pour le CLV. Jamais recommandé."""
-    out = []
-    for s in ranked:
-        c = s.candidate
-        ref = refs.get(c.market_id)
-        p_sharp = ref.shin.get(c.outcome_id) if ref is not None else None
-        out.append({"rank": s.rank, "marketId": c.market_id, "outcomeId": c.outcome_id, "family": c.family, "label": c.label, "odds": round(c.odds, 2),
-                    "oddsAt": c.odds_at.isoformat(), "p": round(c.p, 4), "ev": round(c.ev, 4), "stakeFraction": s.stake_fraction, "stakeMode": s.stake_mode,
-                    "pSharp": None if p_sharp is None else round(p_sharp, 4), "pRef": round(c.p, 4),
-                    "evRef": None if p_sharp is None else round(p_sharp * c.odds - 1.0, 4), "poolW": None, "sharpBookmaker": ref.bookmaker if ref is not None else None,
-                    "sharpAt": None, "warnings": [], "verdict": "ancien", "reasons": reasons(c, ctx, home, away)})
-    return out
-
-
-BOOKMAKER_NAMES = {"pinnacle": "Pinnacle", "betfair-ex": "Betfair Exchange", BOOKMAKER: "Winamax sans marge"}
-
-
-def _explore_block(cands: list, snaps: pd.DataFrame | None, cat, before: pd.Timestamp, refs: dict | None, ctx: dict, home: str, away: str) -> list[dict]:
-    """Profil exploratoire (suggest.EXPLORE_PROFILE) : issues que le coupe-circuit refuse faute d'espérance, classées
-    par espérance face au marché sans marge (sharp si coté, sinon Winamax complet par la méthode de Shin). Vide sans
-    archive (tests, diagnostics) : jamais une probabilité de marché inventée."""
-    if snaps is None or cat is None or refs is None:
-        return []
-    winamax: dict[int, sharp.Reference | None] = {}
-
-    def market_probability(c):
-        ref = refs.get(c.market_id)
-        if ref is None:
-            if c.market_id not in winamax:
-                winamax[c.market_id] = sharp.market_reference(snaps, cat, c.market_id, before, bookmakers=(BOOKMAKER,))
-            ref = winamax[c.market_id]
-        if ref is None or c.outcome_id not in ref.shin:
-            return None
-        return ref.shin[c.outcome_id], ref.bookmaker
-
-    out = []
-    picks = sg.explore(cands, market_probability)
-    for i, (c, p_mkt, ev_mkt, ref) in enumerate(picks, start=1):
-        name = BOOKMAKER_NAMES.get(ref, ref)
-        why = (f"Hors coupe-circuit : marché {name} {p_mkt * 100:.1f} %, moteur {c.p * 100:.1f} %, cote {c.odds:.2f} → espérance face au marché "
-               f"{ev_mkt * 100:+.1f} %").replace(".", ",")
-        out.append({"rank": i, "marketId": c.market_id, "outcomeId": c.outcome_id, "family": c.family, "label": c.label, "odds": round(c.odds, 2),
-                    "oddsAt": c.odds_at.isoformat(), "p": round(c.p, 4), "ev": round(c.ev, 4), "stakeFraction": sg.EXPLORE_STAKE, "stakeMode": "fixed",
-                    "pSharp": round(p_mkt, 4), "pRef": round(p_mkt, 4), "evRef": round(ev_mkt, 4), "poolW": None, "sharpBookmaker": ref,
-                    "sharpAt": None, "warnings": [], "verdict": "exploratoire", "reasons": [why] + reasons(c, ctx, home, away)})
-    return out
-
-
 def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime, now: dt.datetime, competition: str, excluded: set, ctx: dict,
                   home: str, away: str, snaps: pd.DataFrame | None = None, cat=None, quant: Quant | None = None,
                   team_ids: tuple[str | None, str | None] = (None, None)) -> dict:
     """Sélections d'un match par profil, après le coupe-circuit quand l'archive (`snaps`, tous bookmakers) et le
     catalogue sont fournis ; sinon classement sur le seul modèle (tests, diagnostics)."""
     cands = sg.evaluate_candidates(sims, outcomes, kickoff, now, excluded, competition)
-    legacy = sg.rank(sg.evaluate_candidates(sims, outcomes, kickoff, now, excluded, competition), "equilibre")   # ancien moteur, sans coupe-circuit
     before = pd.Timestamp(min(now, kickoff))
     flags, coverage, refs = None, None, {}
     if snaps is not None and cat is not None:
@@ -301,11 +252,7 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
                             for s in ranked],
             "combo": None,   # combinés désactivés : la corrélation entre sélections d'un même match n'est pas mesurable face au marché sharp
         }
-    # pas de combiné d'un même match : ses sélections sont liées et Winamax ne paie pas le produit des cotes (MyMatch) ;
-    # les combinés exploratoires se font entre matchs différents (explore_day_combos, à l'export)
-    profiles[sg.LEGACY_PROFILE] = {"suggestions": _legacy_block(legacy, refs, ctx, home, away), "combo": None}
-    profiles[sg.EXPLORE_PROFILE] = {"suggestions": _explore_block(cands, snaps, cat, before, refs if snaps is not None and cat is not None else None, ctx, home, away),
-                                    "combo": None}
+    # pas de combiné d'un même match : ses sélections sont liées et Winamax ne paie pas le produit des cotes (MyMatch)
     excluded_counts: dict[str, int] = {}
     for c in cands:
         if c.excluded:
@@ -412,7 +359,6 @@ def bankroll_curve(bets: pd.DataFrame, start: float = START_BANKROLL) -> tuple[l
 CI_LEVEL = 0.95
 CI_BOOT = 2000
 CI_SEED = 11
-ALL_PROFILES = (*sg.PROFILES, sg.EXPLORE_PROFILE, sg.LEGACY_PROFILE)
 
 
 def cluster_ci(values, groups, level: float = CI_LEVEL, n_boot: int = CI_BOOT, seed: int = CI_SEED) -> tuple[float | None, float | None]:
@@ -484,7 +430,7 @@ def summarise(tab: pd.DataFrame) -> dict:
     if tab.empty:
         tab = pd.DataFrame(columns=["match_id", "competition", "kickoff_utc", "profile", "kind", "rank", "family", "odds", "p", "ev", "stake_fraction", "stake_mode",
                                     "p_sharp", "p_ref", "ev_ref", "clv", "settled", "realised"])
-    for profile in ALL_PROFILES:
+    for profile in VALIDATED_PROFILES:
         g = tab[tab["profile"] == profile]
         simple = g[g["kind"] == "simple"]
         curve, final, dd = bankroll_curve(simple)
@@ -498,10 +444,12 @@ def summarise(tab: pd.DataFrame) -> dict:
 def playable(journal: pd.DataFrame) -> pd.DataFrame:
     """Paris jouables du journal : pour chaque match et profil, la dernière publication strictement avant le coup d'envoi
     (celle que l'on pouvait jouer). Les republications antérieures et les publications d'après le coup d'envoi ne sont
-    pas des paris : les compter gonflerait les effectifs et biaiserait le rendement."""
+    pas des paris : les compter gonflerait les effectifs et biaiserait le rendement. Profils validés seulement : les
+    lignes déjà écrites des profils retirés restent dans le journal sans être comptées."""
     if journal.empty:
         return journal
     j = journal[journal["kind"] == "simple"] if "kind" in journal else journal
+    j = j[j["profile"].isin(VALIDATED_PROFILES)]
     kick = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
     pub = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
     j = j[pub < kick]
@@ -513,7 +461,8 @@ def playable(journal: pd.DataFrame) -> pd.DataFrame:
 
 def journal_summary(journal: pd.DataFrame) -> dict:
     """Résumé du journal sur les seuls paris jouables (`playable`) : par profil, paris réglés, réussite, rendement à mise
-    fixe et CLV avec intervalle par grappes de match, effet « cote du matin »."""
+    fixe et CLV avec intervalle par grappes de match, effet « cote du matin ». Totaux sur les profils validés seulement."""
+    journal = journal[journal["profile"].isin(VALIDATED_PROFILES)] if not journal.empty else journal
     play = playable(journal)
     settled = play[play["settled"].notna()]
     by = {}
@@ -590,6 +539,8 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
         if e.get("status") != "ok":
             continue
         for profile, block in e["profiles"].items():
+            if profile not in VALIDATED_PROFILES:          # profils retirés : plus jamais journalisés
+                continue
             for s in block["suggestions"]:
                 sid = hashlib.sha1(f"{e['matchId']}|{profile}|{s['marketId']}|{s['outcomeId']}|{s['oddsAt']}".encode()).hexdigest()[:16]
                 rows.append({"suggestion_id": sid, "published_at": published_at.isoformat(), "match_id": e["matchId"], "fixture_id": e.get("fixtureId"), "competition": e["competition"],
@@ -678,85 +629,6 @@ def resettle(journal: pd.DataFrame, results: pd.DataFrame, cat, at: dt.datetime)
 
 
 HISTORY_DAYS = 14
-# règlement d'une sélection dans un combiné (règles Winamax) : facteur appliqué à la cote du combiné
-LEG_FACTOR = {1.0: lambda o: o, 0.5: lambda o: (1.0 + o) / 2.0, -2.0: lambda o: 1.0, -0.5: lambda o: 0.5, 0.0: lambda o: 0.0}
-
-
-def settle_combo(legs: list[dict], results: pd.DataFrame, cat) -> tuple[str, float] | None:
-    """Statut et gain net pour 1 € d'un combiné quand tous ses matchs sont terminés et réglables, None sinon. Sélection perdue : combiné
-    perdu ; remboursée : sa cote sort du combiné ; demi-gagnée / demi-perdue : (1 + cote) / 2 ou 0,5 (règle Winamax)."""
-    res = results.drop_duplicates("match_id").set_index("match_id")
-    factor = 1.0
-    codes = []
-    for leg in legs:
-        if leg["matchId"] not in res.index or leg.get("marketId") is None:
-            return None
-        result = mk.result_from_row(res.loc[leg["matchId"]].to_dict())
-        spec = cat[int(leg["marketId"])].spec(int(leg["outcomeId"]))
-        if not mk.settleable(spec, result):
-            return None                       # mi-temps ou ordre des buts inconnus : le combiné attend
-        settled = mk.settle(spec, result)
-        code = -2.0 if settled is None else float(settled)
-        codes.append(code)
-        factor *= LEG_FACTOR[code](float(leg["odds"]))
-    realised = round(factor - 1.0, 4)
-    if 0.0 in codes:
-        return "lost", -1.0
-    if all(c == -2.0 for c in codes):
-        return "void", 0.0
-    if all(c in (1.0, -2.0) for c in codes):
-        return "won", realised
-    return ("half_won" if realised > 0 else "half_lost"), realised
-
-
-def combo_journal_append(entries: list[dict], published_at: dt.datetime, results: pd.DataFrame, cat) -> pd.DataFrame:
-    """Ajoute au journal des combinés ceux du jour publiés avant le premier coup d'envoi de leurs sélections (clé = date et
-    sélections : un même combiné republié n'est pas dupliqué), puis règle (ou règle à nouveau) ceux dont tous les matchs
-    sont terminés et réglables."""
-    existing = pd.read_parquet(COMBO_JOURNAL) if COMBO_JOURNAL.exists() else pd.DataFrame(columns=COMBO_COLUMNS)
-    rows = []
-    for day in explore_day_combos(entries):
-        for c in day["combos"]:
-            first = min(pd.Timestamp(l["kickoff"]) for l in c["legs"])
-            if first <= pd.Timestamp(published_at):
-                continue
-            key = "|".join(sorted(f"{l['matchId']}:{l['marketId']}:{l['outcomeId']}" for l in c["legs"]))
-            cid = hashlib.sha1(f"{day['date']}|{key}".encode()).hexdigest()[:16]
-            rows.append({"combo_id": cid, "published_at": published_at.isoformat(), "date": day["date"], "legs": json.dumps(c["legs"], ensure_ascii=False),
-                         "odds": c["odds"], "joint_p": c["jointP"], "joint_model": c["jointModel"], "ev": c["ev"], "stake_fraction": c["stakeFraction"],
-                         "status": None, "realised": None, "settled_at": None})
-    new = pd.DataFrame(rows, columns=COMBO_COLUMNS)
-    new = new[~new["combo_id"].isin(existing["combo_id"])]
-    journal = pd.concat([existing, new], ignore_index=True) if len(new) else existing.copy()
-    for i in journal.index:                    # règlement dérivé du résultat courant : un score corrigé le remplace
-        out = settle_combo(json.loads(journal.at[i, "legs"]), results, cat)
-        status, realised = out if out is not None else (None, None)
-        if status == (journal.at[i, "status"] if isinstance(journal.at[i, "status"], str) else None) and (status is None or realised == journal.at[i, "realised"]):
-            continue
-        journal.at[i, "status"], journal.at[i, "realised"] = status, realised
-        journal.at[i, "settled_at"] = None if status is None else published_at.isoformat()
-    COMBO_JOURNAL.parent.mkdir(parents=True, exist_ok=True)
-    journal.to_parquet(COMBO_JOURNAL, index=False)
-    return journal
-
-
-def combo_history(journal: pd.DataFrame, now: dt.datetime, days: int = HISTORY_DAYS) -> list[dict]:
-    """Combinés du jour des `days` derniers jours (et à venir), le plus récent d'abord ; pour une même date et un même
-    nombre de sélections, la dernière version publiée."""
-    if journal.empty:
-        return []
-    j = journal.copy()
-    j["n"] = j["legs"].map(lambda x: len(json.loads(x)))
-    j = j[pd.to_datetime(j["date"]) >= pd.Timestamp(now.date()) - pd.Timedelta(days=days)]
-    j = j.sort_values("published_at").groupby(["date", "n"], as_index=False).last()
-    out = []
-    for r_ in j.sort_values(["date", "n"], ascending=[False, True]).itertuples(index=False):
-        out.append({"date": r_.date, "legs": json.loads(r_.legs), "odds": float(r_.odds), "jointP": float(r_.joint_p), "ev": float(r_.ev),
-                    "stakeFraction": float(r_.stake_fraction), "status": r_.status if isinstance(r_.status, str) else "pending",
-                    "realised": None if r_.realised is None or pd.isna(r_.realised) else float(r_.realised)})
-    return out
-
-
 SETTLED_STATUS = {1.0: "won", 0.0: "lost", 0.5: "half_won", -0.5: "half_lost", -2.0: "void"}
 EVENING_STATUS = {"gagné": "won", "perdu": "lost", "remboursé": "void", "moitié gagnée": "half_won", "moitié perdue": "half_lost"}
 
@@ -773,10 +645,10 @@ def match_names(results: pd.DataFrame) -> dict[str, tuple[str, str]]:
 
 def history(journal: pd.DataFrame, results: pd.DataFrame, names: dict, now: dt.datetime, days: int = HISTORY_DAYS) -> list[dict]:
     """Suggestions des matchs commencés ces `days` derniers jours, par jour (UTC) puis par match : pour chaque
-    profil, la dernière publication avant le coup d'envoi (celle qu'on pouvait jouer) et son règlement."""
+    profil validé, la dernière publication avant le coup d'envoi (celle qu'on pouvait jouer) et son règlement."""
     if journal.empty:
         return []
-    j = journal[journal["kind"] == "simple"].copy()
+    j = journal[(journal["kind"] == "simple") & journal["profile"].isin(VALIDATED_PROFILES)].copy()
     j["kick"] = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
     j["pub"] = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
     now = pd.Timestamp(now)
@@ -820,21 +692,6 @@ def evening_details(evening: dict, names: dict) -> list[dict]:
     return out
 
 
-def explore_day_combos(entries: list[dict]) -> list[dict]:
-    """Combinés du jour du profil exploratoire, par date de coup d'envoi (heure de Paris) : la meilleure sélection
-    exploratoire de chaque match, combinée entre matchs différents (suggest.day_combos)."""
-    by_day: dict[str, list[dict]] = {}
-    for e in entries:
-        block = (e.get("profiles") or {}).get(sg.EXPLORE_PROFILE) or {}
-        top = (block.get("suggestions") or [None])[0]
-        if e.get("status") != "ok" or not top or top.get("pRef") is None or not e.get("kickoff"):
-            continue
-        day = pd.Timestamp(e["kickoff"]).tz_convert("Europe/Paris").strftime("%Y-%m-%d")
-        by_day.setdefault(day, []).append({"matchId": e["matchId"], "match": f"{e['home']} – {e['away']}", "label": top["label"], "odds": top["odds"],
-                                           "pRef": top["pRef"], "p": top["p"], "kickoff": e["kickoff"], "marketId": top.get("marketId"), "outcomeId": top.get("outcomeId")})
-    return [{"date": d, "combos": sg.day_combos(legs)} for d, legs in sorted(by_day.items()) if len(legs) >= 2]
-
-
 def early_block(journal: pd.DataFrame) -> dict:
     """Effet « parier tôt » : écart moyen entre la cote publiée et la cote Winamax de clôture (> 0 : la cote du moment de
     la publication était meilleure), et part des paris dont la cote a baissé ensuite."""
@@ -845,8 +702,17 @@ def early_block(journal: pd.DataFrame) -> dict:
     return {"closeBets": int(len(j)), "earlyEdge": round(float(ratio.mean()), 4), "oddsDroppedRate": round(float((ratio > 0).mean()), 4)}
 
 
+def _validated_only(entry: dict) -> dict:
+    """Rencontre exportée avec ses seuls profils validés (défense contre une entrée produite par un moteur antérieur)."""
+    if not entry.get("profiles"):
+        return entry
+    return {**entry, "profiles": {p: b for p, b in entry["profiles"].items() if p in VALIDATED_PROFILES}}
+
+
 def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     bilan = json.loads(BILAN.read_text(encoding="utf-8")) if BILAN.exists() else None
+    if bilan and isinstance(bilan.get("profiles"), dict):
+        bilan = {**bilan, "profiles": {p: v for p, v in bilan["profiles"].items() if p in VALIDATED_PROFILES}}
     journal = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
     for col in JOURNAL_COLUMNS:
         if col not in journal.columns:
@@ -864,18 +730,17 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
             evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
                              "bankroll": e.get("bankroll"), "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")),
                              "details": evening_details(e, names)})
-    payload = {"schemaVersion": "1.1.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
-               "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in (*sg.PROFILES, sg.EXPLORE_PROFILE, sg.LEGACY_PROFILE)], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
+    # 2.0.0 : profils « exploratoire » et « ancien » retirés, avec exploreCombos, comboHistory et rules.explore
+    payload = {"schemaVersion": "2.0.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
+               "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in VALIDATED_PROFILES], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
                "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kappa": circuit.KAPPA, "capPerBet": circuit.CAP_PER_BET,
                          "capPerMatch": circuit.CAP_PER_MATCH, "capHighOdds": circuit.CAP_HIGH_ODDS, "highOdds": circuit.HIGH_ODDS, "evMin": circuit.EV_MIN,
                          "evMinLowMargin": circuit.EV_MIN_LOW_MARGIN, "evMax": circuit.EV_MAX, "edgeMax": circuit.EDGE_MAX, "favoriteOdds": circuit.FAVORITE_ODDS,
-                         "lineupHours": circuit.LINEUP_HOURS, "combos": False,
-                         "explore": {"minOdds": sg.EXPLORE_MIN_ODDS, "maxOdds": sg.EXPLORE_MAX_ODDS, "maxPerMatch": sg.EXPLORE_MAX, "stake": sg.EXPLORE_STAKE}},
+                         "lineupHours": circuit.LINEUP_HOURS, "combos": False},
                "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights, "calibrationMargins": sharp.PoolWeights.load().margins,
                              "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
-               "matches": entries, "exploreCombos": explore_day_combos(entries), "bilan": bilan, "journal": js, "evenings": evenings[-30:],
-               "history": history(journal, results, names, generated_at),
-               "comboHistory": combo_history(pd.read_parquet(COMBO_JOURNAL) if COMBO_JOURNAL.exists() else pd.DataFrame(columns=COMBO_COLUMNS), generated_at)}
+               "matches": [_validated_only(e) for e in entries], "bilan": bilan, "journal": js, "evenings": evenings[-30:],
+               "history": history(journal, results, names, generated_at)}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = EXPORT_DIR / "index.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
@@ -902,7 +767,6 @@ def main(argv=None) -> int:
         entries = upcoming_suggestions(now)
         snaps = pd.concat([pd.read_parquet(p) for c in COMPETITIONS for p in sorted((RESEARCH / "odds" / c).glob("*.parquet"))], ignore_index=True)
         journal_append(entries, now, load_results(), load_catalogue(), snaps)
-        combo_journal_append(entries, now, load_results(), load_catalogue())
         ok = [e for e in entries if e.get("status") == "ok"]
         print(f"{len(entries)} rencontres à venir, {len(ok)} avec cotes et suggestions")
         if args.cmd in ("export", "all"):

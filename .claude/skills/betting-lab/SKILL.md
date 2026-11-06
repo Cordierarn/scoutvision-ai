@@ -37,10 +37,11 @@ règle, de chiffre ou de comportement.
   « pas de pari » du moteur. Tout changement de prompt incrémente `BETTING_PROMPT_VERSIONS` et ajoute un cas de test.
 - **Règlement** : mi-temps et ordre des buts inconnus restent inconnus (`markets.Result` à `None`), jamais 0-0 ; la sélection
   qui en dépend reste en attente. Le règlement est dérivé du résultat courant à chaque passage (`product.resettle`).
-- **Mesure** : un pari = la dernière publication d'un match et d'un profil avant le coup d'envoi (`product.playable`) ; rendement
+- **Mesure** : un pari = la dernière publication d'un match et d'un profil validé avant le coup d'envoi (`product.playable`) ; rendement
   et CLV avec intervalle à 95 % par grappes de match (`cluster_ci`) ; bilan daté du moteur (`engine_fingerprint`), recalculé
   quand il change ; soirées suivies sur la bankroll courante, jamais plus (`evening.rebuild`).
-- **Un résultat négatif est un résultat** : il s'affiche tel quel (profils non validés, porte à poids nul, espérance négative).
+- **Un résultat négatif est un résultat** : il s'affiche tel quel (porte à poids nul, espérance négative) ; les profils retirés
+  restent documentés avec leur résultat dans `docs/betting-lab.md`.
 
 ## Règles d'interface
 
@@ -50,16 +51,11 @@ règle, de chiffre ou de comportement.
 
 - **Sûr**, **Équilibré**, **Grosse cote** : seules les sélections qui passent le coupe-circuit face à la référence sharp
   (Pinnacle ou Betfair Exchange sans marge, méthode de Shin) ; sinon « pas de pari », avec le motif.
-- **Exploratoire** et **Ancien moteur** : publiés et journalisés, **explicitement non validés** (`isUnvalidated`) : bandeau
-  d'avertissement (`EXPLORE_NOTE`, `LEGACY_NOTE`), bilan du rejeu masqué, exclus des totaux qui somment les profils validés.
-  L'assistant IA les accepte, son prompt le précise (`EXPLORATORY_RULES`).
-- **Exploratoire** : sélections refusées par le coupe-circuit pour espérance insuffisante ou faute de référence sharp seulement ;
-  cote de 1,60 à 6,00 ; moteur au moins d'accord avec le marché ; classées par espérance face au marché sans marge, la moins
-  négative d'abord ; trois au plus par match ; mise fixe symbolique de 0,5 % de la bankroll. Combinés du jour entre matchs
-  différents seulement (jamais deux sélections d'un même match : espérance artificielle), cote de 2,00 à 12,00.
-- **Ancien moteur** (`suggest.LEGACY_PROFILE = "ancien"`) : classement Équilibré sur la seule probabilité du moteur, calculé
-  avant le coupe-circuit. La probabilité sharp de Shin, quand elle existe, est exportée (`pSharp`, `evRef`) pour mesurer le CLV ;
-  le verdict vaut `ancien`.
+- **Ancien moteur** et **Exploratoire** (avec ses combinés du jour) : **retirés le 6 novembre 2026** (décision du
+  propriétaire, `docs/betting-lab.md`, « Retrait des profils non validés »). Ne pas les réintroduire sans décision écrite :
+  ni publication, ni journalisation, ni export, ni interface, ni prompt. Le journal déjà écrit reste immuable ; les fonctions
+  de mesure ignorent ses lignes (`product.VALIDATED_PROFILES`), et l'interface n'affiche que `PROFILE_ORDER`
+  (`isValidatedProfile`), même avec un artefact ancien.
 
 ### Suivi des paris : clôture et effet « cote du matin »
 
@@ -73,6 +69,9 @@ règle, de chiffre ou de comportement.
 - Bankroll personnelle du propriétaire, partie de 20 € (réglable), **dans le stockage du navigateur uniquement**
   (`scoutvision.betting.mytest`, événement `scoutvision-mytest` pour synchroniser les composants) ; export et import JSON ;
   la page le dit.
+- Seuls les paris des profils validés peuvent être suivis (`addBet` refuse un autre profil ; pas de bouton « Suivre » sinon).
+  Les paris déjà enregistrés d'un profil retiré restent affichés (« profil retiré ») et l'import JSON les restaure tels quels :
+  ce sont les données personnelles du propriétaire, jamais effacées.
 - Le bouton « Suivre » de chaque pari du plan de l'IA l'ajoute avec la fraction de mise du moteur appliquée à la bankroll
   disponible (`proposedStake` : 0,10 € au moins, arrondi à 0,10 €, plafonné au disponible). Pas de bouton une fois le match
   commencé ; un pari déjà suivi affiche « Suivi dans Mon test ».

@@ -10,7 +10,7 @@ import type { BetStatus, SuggestionsIndex } from '../../services/replayData';
 import { EmptyState, LoadError, Panel, Skeleton, Stat, StatStrip } from '../ui';
 import { MyTest as MyTestData, SettledBet, byEvening, emptyTest, parseAmount, parseMyTest, removeBet, saveMyTest, settle, summarise, updateBet } from './myTestLogic';
 import { useMyTest } from './useMyTest';
-import { PROFILE_LABELS, STATUS_LABELS, formatEuros, formatOdds, formatSignedEuros, statusClass } from './suggestionsLogic';
+import { PROFILE_LABELS, STATUS_LABELS, formatEuros, formatOdds, formatSignedEuros, isValidatedProfile, statusClass } from './suggestionsLogic';
 import { RESPONSIBLE_GAMBLING } from './assistantLogic';
 
 const signedTone = (v: number): 'pos' | 'neg' | 'default' => (v > 0 ? 'pos' : v < 0 ? 'neg' : 'default');
@@ -42,7 +42,7 @@ const BetRow: React.FC<{ bet: SettledBet; test: MyTestData }> = ({ bet, test }) 
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div className="min-w-0">
           <div className="text-sm text-ink"><span className="text-ink-4 num text-2xs mr-2">{time(bet.kickoff)}</span>{bet.match}</div>
-          <div className="text-xs text-ink-2">{bet.label} <span className="text-ink-4">· {PROFILE_LABELS[bet.profile as keyof typeof PROFILE_LABELS] ?? bet.profile}</span></div>
+          <div className="text-xs text-ink-2">{bet.label} <span className="text-ink-4">· {isValidatedProfile(bet.profile) ? PROFILE_LABELS[bet.profile] : 'profil retiré'}</span></div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <label className="flex items-center gap-1 text-ink-3">cote

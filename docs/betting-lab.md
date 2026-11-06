@@ -198,14 +198,14 @@ Gains réels mais faibles : l'essentiel de l'information est déjà dans la base
   directes, part de 1re mi-temps pour les marchés de mi-temps.
 - Rejeu 2026-27 (`product replay`) : prévisions figées, features point-in-time, dernier relevé avant le
   coup d'envoi, bankroll de 300 € par profil misée sur la bankroll courante, arrondie au centime. Depuis l'audit du
-  6 novembre 2026, le bilan couvre les cinq profils, porte l'empreinte du moteur qui l'a calculé (`engine`, sources
+  6 novembre 2026, le bilan couvre les trois profils validés (cinq jusqu'au retrait du même jour), porte l'empreinte du moteur qui l'a calculé (`engine`, sources
   des modules et paramètres figés) et est recalculé dès qu'elle change (`replay --if-stale`) : un bilan d'un ancien
   moteur n'est plus affiché comme celui du moteur courant. Rendement et CLV ont un intervalle à 95 % par bootstrap des
   matchs (`cluster_ci`, `returnLow`/`returnHigh`, `clvLow`/`clvHigh`) : les paris d'un même match sont liés.
 - Journal (`.research/betting/journal/suggestions.parquet`) : chaque suggestion publiée est enregistrée
   avec l'horodatage du relevé et n'est jamais réécrite ; réglée après le match (remboursements et
   demi-gains compris). Le résumé exporté (`journal`, `product.journal_summary`) ne compte que les **paris jouables**
-  (`product.playable`) : pour chaque match et profil, la dernière publication avant le coup d'envoi ; les
+  (`product.playable`) : pour chaque match et profil validé, la dernière publication avant le coup d'envoi ; les
   republications d'une même sélection et les publications d'après le coup d'envoi ne sont pas des paris.
 - Export `public/data/forecast/suggestions/index.json` (artefact privé) : rencontres à venir, profils,
   bilan du rejeu, résumé du journal.
@@ -295,8 +295,8 @@ une seconde fois alors qu'ESPN les crédite déjà à l'équipe bénéficiaire (
   mi-temps ou de l'ordre des buts reste **en attente** ; les marchés du temps réglementaire se règlent normalement.
 - **Temps réglementaire seulement** : une rencontre terminée au-delà de la deuxième période (prolongation, tirs au but)
   n'est pas réglée depuis ESPN (`regulation`).
-- **Re-règlement** : le règlement est dérivé du résultat courant à chaque passage (`product.resettle`, combinés et soirées
-  des 7 derniers jours compris) ; un score corrigé remplace l'ancien règlement, la publication n'est jamais réécrite.
+- **Re-règlement** : le règlement est dérivé du résultat courant à chaque passage (`product.resettle`, et soirées
+  des 7 derniers jours) ; un score corrigé remplace l'ancien règlement, la publication n'est jamais réécrite.
   `results_web --refresh-incomplete 14` relit les dates dont une rencontre terminée n'a pas de mi-temps reconstruite ; une
   relecture ne perd jamais un appariement connu. Dans Mon test, une sélection publiée de nouveau en attente efface le
   statut mémorisé.
@@ -368,7 +368,8 @@ sélections validées, sur p_ref.
   battent la clôture (Buchdahl : le CLV juge une sélection bien plus vite que le résultat, bruité par le hasard).
 - Export : `pSharp`, `pRef`, `evRef`, `poolW`, `sharpBookmaker`, `warnings`, `verdict` par suggestion ;
   `noBet` par match (meilleure idée du moteur et motifs du refus), `sharpCoverage`, `teams` (OPD,
-  dépendance) ; `rules` et `reference` (bookmakers, méthode, poids, libellés) ; `schemaVersion` 1.1.0.
+  dépendance) ; `rules` et `reference` (bookmakers, méthode, poids, libellés) ; `schemaVersion` 1.1.0, puis 2.0.0 au retrait des profils
+  non validés (6 novembre 2026).
 - Interface : colonnes Moteur / Sharp / Espérance (face à la référence) / Mise ; « Pas de pari » avec la
   meilleure idée refusée et ses motifs ; CLV par pari et CLV moyen dans le Suivi des paris.
 - Assistant IA : reçoit les seuls faits calculés (cote Winamax, probabilités moteur / sharp / référence,
@@ -595,6 +596,10 @@ l'archive 2026-27 grandit (150 matchs par partie et par compétition vers févri
 
 ## Profil exploratoire (5 novembre 2026)
 
+**Retiré le 6 novembre 2026** (décision du propriétaire, voir « Retrait des profils non validés ») : rejeu négatif, CLV
+négatif de l'ordre de la marge. Ses combinés du jour sont retirés avec lui. La description ci-dessous est conservée comme
+trace de ce qui a été essayé.
+
 À la demande du propriétaire, un quatrième profil, **Exploratoire**, s'ajoute à Sûr, Équilibré et Grosse cote dans
 Matchs à venir et dans le Suivi des paris. Les trois profils validés restent inchangés : ils n'affichent que ce qui
 passe le coupe-circuit, donc le plus souvent « pas de pari ». Le profil exploratoire montre chaque soir quelque chose
@@ -629,9 +634,9 @@ retenus sur la meilleure espérance face au marché, mise symbolique de 0,5 %. M
 sélections sont liées, le produit des cotes affichait jusqu'à +72 % d'espérance, un artefact que Winamax ne paie pas
 (MyMatch cote lui-même ces combinaisons).
 
-L'assistant IA accepte le profil exploratoire : son prompt précise alors que les sélections ne sont pas validées, que
-leur espérance face au marché est le plus souvent négative et qu'elles servent à suivre le moteur. La recherche
-d'actualité de Claude peut désormais ouvrir jusqu'à trois articles en entier (outil serveur de lecture d'URL) quand
+Jusqu'au retrait, l'assistant IA acceptait le profil exploratoire : son prompt précisait que les sélections n'étaient pas
+validées, que leur espérance face au marché était le plus souvent négative et qu'elles servaient à suivre le moteur. La
+recherche d'actualité de Claude, qui reste active, peut ouvrir jusqu'à trois articles en entier (outil serveur de lecture d'URL) quand
 l'extrait d'un résultat ne suffit pas à confirmer une absence ou une composition ; les pages lues passent en tête des
 sources.
 
@@ -664,6 +669,11 @@ par partie. Relecture quotidienne automatique dans `betting-odds.yml` à mesure 
 
 ## Suivi de l'ancien moteur et onglet « Mon test » (6 novembre 2026)
 
+**Ancien moteur retiré le 6 novembre 2026** (décision du propriétaire, voir « Retrait des profils non validés ») : rejeu
+nettement négatif, intervalle entièrement sous zéro ; les soirées gagnantes qui l'avaient motivé venaient du règlement faux
+des mi-temps. Les mesures de clôture Winamax et de cote du matin décrites ici restent en place pour les profils validés ;
+Mon test aussi, limité à ces profils.
+
 Les soirées des 3 au 5 novembre ont été gagnantes avec des suggestions publiées par le moteur d'avant le coupe-circuit,
 alors que le rejeu de la saison reste négatif. Deux hypothèses à départager sur des données réelles : la chance, ou une
 cote du matin meilleure que celle de la clôture. D'où un cinquième profil publié et journalisé, sans validation :
@@ -679,15 +689,45 @@ cote du matin meilleure que celle de la clôture. D'où un cinquième profil pub
   `journal.byProfile`) : cote prise ÷ clôture Winamax − 1 en moyenne, et part des paris dont la cote a baissé ensuite.
   Affiché dans le Suivi des paris pour chaque profil.
 
-L'assistant IA accepte le profil Ancien moteur : son prompt précise que ce sont les sélections d'avant le coupe-circuit,
-non validées.
+Jusqu'au retrait, l'assistant IA acceptait le profil Ancien moteur : son prompt précisait que c'étaient les sélections
+d'avant le coupe-circuit, non validées.
 
 **Mon test** (onglet de Pronostics, `components/forecast/MyTest.tsx`, `myTestLogic.ts`, `useMyTest.ts`) : la bankroll
 personnelle du propriétaire, partie de 20 € (réglable). Le bouton « Suivre » de chaque pari du plan de l'IA l'ajoute avec la
 fraction de mise du moteur appliquée à la bankroll disponible (0,10 € au moins, arrondi à 0,10 €). Cote et mise restent
 modifiables tant que le pari n'est pas réglé. Règlement automatique par l'identifiant match:marché:issue retrouvé dans
 l'historique publié, mémorisé dans le pari (l'historique ne garde que 14 jours) ; réglage manuel en secours. Données
-dans le stockage du navigateur uniquement (`scoutvision.betting.mytest`), export et import JSON.
+dans le stockage du navigateur uniquement (`scoutvision.betting.mytest`), export et import JSON. Depuis le 6 novembre 2026,
+Mon test ne suit que les paris des profils validés (`addBet` refuse un autre profil, le bouton « Suivre » n'apparaît pas).
+Un pari déjà enregistré d'un profil retiré reste affiché (« profil retiré »), et l'import JSON restaure un export tel quel ; il ne se règle plus automatiquement que si
+son règlement avait été mémorisé, ou si la même sélection figure dans l'historique d'un profil validé ; sinon, réglage manuel.
+
+## Retrait des profils non validés (6 novembre 2026)
+
+Décision du propriétaire, après la re-mesure de l'audit du 6 novembre (règlement des mi-temps corrigé) :
+
+- **Ancien moteur** : retiré partout. Résultat : rejeu nettement négatif, intervalle entièrement sous zéro ; les soirées
+  gagnantes qui l'avaient motivé venaient du règlement faux des mi-temps.
+- **Exploratoire**, avec ses combinés du jour : retiré de la publication, de l'affichage et du prompt de l'IA ; en
+  pratique, comme l'Ancien moteur, il n'est plus ni journalisé ni exporté, et Mon test le refuse. Résultat :
+  rejeu négatif, CLV négatif de l'ordre de la marge.
+- **Sûr, Équilibré, Grosse cote** : conservés, inchangés. **Mon test** : conservé, limité aux paris de ces profils.
+
+Mise en œuvre :
+
+- Pipeline : seuls `suggest.PROFILES` (`product.VALIDATED_PROFILES`) sont calculés, journalisés, rejoués et exportés. Le
+  journal déjà écrit reste **immuable** : ses lignes des profils retirés ne sont ni réécrites ni effacées (seules leurs colonnes dérivées, règlement, clôture et
+  CLV, continuent d'être calculées comme pour toute ligne), mais
+  `product.playable`, `journal_summary` et `history` les ignorent ; le journal des combinés du jour
+  (`journal/combos.parquet`) n'est plus ni lu ni écrit et reste publié tel quel avec l'archive. Le moteur ayant changé,
+  son empreinte aussi : le bilan est recalculé au passage suivant (`replay --if-stale`).
+- Export : `schemaVersion` 2.0.0, sans `exploreCombos`, `comboHistory` ni `rules.explore` ; profils, rencontres et bilan
+  limités aux profils validés, même si une entrée ou un bilan antérieur en contient d'autres.
+- Interface : trois profils (`PROFILE_ORDER`, `isValidatedProfile`) ; un artefact ancien encore servi n'affiche jamais les
+  profils retirés ; un profil retiré mémorisé dans le navigateur revient à Équilibré. Les paris déjà enregistrés dans Mon
+  test restent affichés tels quels (données personnelles du propriétaire).
+- Serveur : l'assistant IA refuse un profil retiré ou inconnu (400) au lieu de le remplacer en silence ; règles des
+  profils non validés retirées du prompt du plan (`BETTING_PROMPT_VERSIONS.plan` en v4 ; prompt d'actualité inchangé).
 
 ## Phases suivantes
 
@@ -707,9 +747,10 @@ Ce qui a été suggéré et ce que cela a donné, lu dans l'export (`history`, `
 - **Soirées suivies** : profil Équilibré, mises du moteur sur la bankroll courante, plafonnées à cette bankroll
   (`evening.rebuild`, bankroll de chaque soirée exportée en `bankroll`) ; chaque soirée se déplie pari par pari
   (match, sélection, cote, mise, résultat, net), combinés compris ; gagnés et en attente comptés pari par pari.
-- **Suggestions publiées et résultats** : 14 derniers jours, matchs commencés ; pour chaque match et profil,
+- **Suggestions publiées et résultats** : 14 derniers jours, matchs commencés ; pour chaque match et profil validé,
   la dernière publication avant le coup d'envoi (`product.history`), réglée sur le score réel au passage du
   matin (`won`, `lost`, `void`, `half_won`, `half_lost`, `pending`). Le navigateur ne calcule que la mise et
   le net en euros sur la bankroll saisie (`betNet`, `historySummary`) ; réussite hors remboursements.
-- Les combinés ne sont pas journalisés : ils ne figurent que dans les soirées.
+- Les combinés ne sont pas journalisés : ils ne figurent que dans les soirées. Le journal des combinés du jour de
+  l'Exploratoire (`journal/combos.parquet`) reste dans l'archive, immuable, mais n'est plus ni lu ni écrit depuis le retrait.
 

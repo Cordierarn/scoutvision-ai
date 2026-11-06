@@ -3,9 +3,9 @@ import type { HistoryDay } from '../../services/replayData';
 import { addBet, betId, byEvening, emptyTest, netPerUnit, parseAmount, parseMyTest, proposedStake, publishedStatus, recordAuto, removeBet, settle, summarise, updateBet } from './myTestLogic';
 
 const bet = (over: Partial<import('./myTestLogic').MyBet>) => ({ id: 'm1:101:101', addedAt: '2026-11-06T10:00:00Z', kickoff: '2026-11-06T19:00:00Z', matchId: 'm1', match: 'A – B', label: 'A gagne',
-  marketId: 101, outcomeId: 101, odds: 2.0, stake: 1, profile: 'exploratoire', ...over });
+  marketId: 101, outcomeId: 101, odds: 2.0, stake: 1, profile: 'equilibre', ...over });
 const history: HistoryDay[] = [{ date: '2026-11-06', matches: [{ matchId: 'm1', competition: 'ENG', kickoff: '2026-11-06T19:00:00Z', home: 'A', away: 'B', score: [2, 0],
-  profiles: { exploratoire: [{ label: 'A gagne', family: 'résultat', odds: 1.9, p: 0.5, ev: 0, stakeFraction: 0.005, stakeMode: 'fixed', status: 'won', realised: 0.9, marketId: 101, outcomeId: 101 }] } }] }];
+  profiles: { equilibre: [{ label: 'A gagne', family: 'résultat', odds: 1.9, p: 0.5, ev: 0, stakeFraction: 0.005, stakeMode: 'fixed', status: 'won', realised: 0.9, marketId: 101, outcomeId: 101 }] } }] }];
 
 describe('myTestLogic', () => {
   it('règle automatiquement un pari suivi par la même sélection de l\'historique, avec la cote et la mise de l\'utilisateur', () => {
@@ -46,12 +46,23 @@ describe('myTestLogic', () => {
 
   it('oublie un règlement mémorisé quand la sélection publiée repasse en attente (score corrigé, mi-temps inconnue)', () => {
     const memorised = { start: 20, startedAt: '', bets: [bet({ autoStatus: 'won' })] };
-    const pending: HistoryDay[] = [{ ...history[0], matches: [{ ...history[0].matches[0], profiles: { exploratoire: [{ ...history[0].matches[0].profiles.exploratoire![0], status: 'pending', realised: null }] } }] }];
+    const pending: HistoryDay[] = [{ ...history[0], matches: [{ ...history[0].matches[0], profiles: { equilibre: [{ ...history[0].matches[0].profiles.equilibre![0], status: 'pending', realised: null }] } }] }];
     expect(settle(memorised, pending)[0]).toMatchObject({ status: 'pending', net: null, auto: false });
     const cleared = recordAuto(memorised, pending);
     expect(cleared?.bets[0].autoStatus).toBeUndefined();
     expect(recordAuto(cleared!, pending)).toBeNull();
     expect(settle(memorised, [])[0]).toMatchObject({ status: 'won' });          // absente de l'historique (14 jours) : le mémorisé reste
+  });
+
+  it('garde le règlement mémorisé d\'un pari déjà enregistré sous un profil retiré, absent de l\'historique publié', () => {
+    const stored = { start: 20, startedAt: '', bets: [bet({ profile: 'exploratoire', autoStatus: 'won' })] };
+    expect(settle(stored, [])[0]).toMatchObject({ status: 'won', net: 1, auto: true });
+    expect(recordAuto(stored, [])).toBeNull();                                   // rien d'effacé
+  });
+
+  it('refuse un pari hors des profils validés', () => {
+    for (const profile of ['exploratoire', 'ancien', 'inconnu']) expect(addBet(emptyTest(), bet({ profile })).bets).toHaveLength(0);
+    for (const profile of ['sur', 'equilibre', 'grosse_cote']) expect(addBet(emptyTest(), bet({ profile })).bets).toHaveLength(1);
   });
 
   it('ajoute sans doublon, modifie, retire, et lit les montants à la française', () => {

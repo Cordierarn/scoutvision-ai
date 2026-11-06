@@ -36,6 +36,7 @@ import pandas as pd
 
 from . import RESEARCH
 from . import markets as mk
+from .suggest import PROFILES
 
 EVENINGS = RESEARCH / "product" / "evenings.json"
 
@@ -255,7 +256,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add"); a.add_argument("--date", required=True); a.add_argument("--bets", type=Path, required=True)
-    au = sub.add_parser("rebuild"); au.add_argument("--profile", default="equilibre"); au.add_argument("--bankroll", type=float, default=START_BANKROLL)
+    au = sub.add_parser("rebuild"); au.add_argument("--profile", default="equilibre", choices=PROFILES); au.add_argument("--bankroll", type=float, default=START_BANKROLL)
     s = sub.add_parser("settle"); s.add_argument("--date"); s.add_argument("--scores", type=Path); s.add_argument("--pending", action="store_true")
     sub.add_parser("show")
     args = p.parse_args(argv)

@@ -59,14 +59,16 @@ describe('BetHistory (rendu statique)', () => {
     expect(sur).not.toContain('Club C – Club D');  // aucun pari Sûr sur ce match
   });
 
-  it('affiche les combinés du jour en profil exploratoire, réglés sur la bankroll', () => {
-    const withCombos = { ...index, comboHistory: [{ date: '2026-11-06', legs: [{ matchId: 'a', match: 'Club A – Club B', label: 'Club A gagne', odds: 1.8 }, { matchId: 'b', match: 'Club C – Club D', label: 'Match nul', odds: 3.5 }],
-      odds: 6.3, jointP: 0.13, ev: -0.18, stakeFraction: 0.005, status: 'won' as const, realised: 5.3 }] };
-    const html = renderToStaticMarkup(<BetHistory index={withCombos} {...props} profile="exploratoire" />);
-    expect(html).toContain('Combinés du jour · Exploratoire');
-    expect(html).toContain('6,30');
-    expect(html).toContain('+7,95'); // 1,50 € × 5,3
-    expect(renderToStaticMarkup(<BetHistory index={withCombos} {...props} profile="equilibre" />)).not.toContain('Combinés du jour · Exploratoire');
+  it('ne montre ni les profils retirés ni leurs combinés, même encore présents dans l\'historique publié', () => {
+    const day = index.history![0];
+    const old = { ...index, history: [{ ...day, matches: day.matches.map(m => ({ ...m, profiles: { ...m.profiles, exploratoire: [bet('Sélection retirée', 'won', 1)], ancien: [bet('Sélection retirée', 'lost', -1)] } })) }],
+      comboHistory: [{ date: '2026-11-07', legs: [{ matchId: 'a', match: 'Club A – Club B', label: 'Club A gagne', odds: 1.8 }, { matchId: 'b', match: 'Club C – Club D', label: 'Nul', odds: 3.4 }],
+        odds: 6.12, jointP: 0.12, ev: -0.2, stakeFraction: 0.005, status: 'won', realised: 5.12 }] } as unknown as SuggestionsIndex;
+    for (const profile of ['sur', 'equilibre', 'grosse_cote'] as const) {
+      const html = renderToStaticMarkup(<BetHistory index={old} {...props} profile={profile} />);
+      expect((html.match(/role="radio"/g) ?? []).length).toBe(3);
+      expect(html).not.toContain('Sélection retirée'); expect(html).not.toContain('Combinés du jour'); expect(html).not.toContain('Exploratoire');
+    }
   });
 
   it('affiche le message de jeu responsable dans tous les états de l\'onglet', () => {

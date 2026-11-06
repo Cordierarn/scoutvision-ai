@@ -294,7 +294,9 @@ Gemini 3+ calls ask for a low thinking level; 2.x models get no thinking setting
 Panel « Assistant IA du jour » in Pronostics › Matchs à venir (`components/forecast/BettingAssistant.tsx`,
 server `server/bettingAi.ts`). It reads the betting suggestions already published by the pipeline
 (`forecast/suggestions/index.json` in the server data folder); the browser only sends match ids and the
-profile.
+profile. Only the validated profiles (`sur`, `equilibre`, `grosse_cote`) are accepted: since 6 November 2026 a
+retired or unknown profile gets a 400 instead of a silent fallback to `equilibre` (a missing profile still means
+`equilibre`).
 
 Design, from the research done on 3 November 2026:
 
