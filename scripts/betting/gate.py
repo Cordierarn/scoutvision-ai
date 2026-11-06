@@ -637,7 +637,8 @@ def summary_lines(report: dict) -> list[str]:
                 if band["judged"]:
                     line += " " + ", ".join(f"{k}:{v.get('verdict', '-')}" for k, v in sides.items() if v.get("judged"))
             out.append(line + f"  → {s['verdict']}")
-    out.append(f"Segments validés : {len(report['weights'])} ({', '.join(f'{k} w={v} ece={report['margins'][k]:.3f}' for k, v in report['weights'].items()) or 'aucun'})")
+    validated = ", ".join(f"{k} w={v} ece={report['margins'][k]:.3f}" for k, v in report["weights"].items()) or "aucun"
+    out.append(f"Segments validés : {len(report['weights'])} ({validated})")
     return out
 
 
