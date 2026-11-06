@@ -237,18 +237,6 @@ export interface ShotStats {
 // ANALYSIS & SCORING TYPES
 // ============================================
 
-/**
- * Définition d'un rôle avec ses métriques pondérées
- */
-export interface RoleDefinition {
-  name: string;
-  category: RoleCategory;
-  positions: string[];
-  metrics: Record<string, number>;
-  minThresholds?: Record<string, number>;
-  description?: string;
-}
-
 export type RoleCategory = 'goalkeeper' | 'defender' | 'midfielder' | 'attacker';
 
 /**
@@ -260,22 +248,6 @@ export interface RolePreset {
   metrics: Record<string, number>;
   custom?: boolean;
   createdAt?: string;
-}
-
-/**
- * Résultat de scoring pour un joueur
- */
-export interface RoleScoreResult {
-  role: string;
-  rawScore: number;
-  normalizedScore: number;
-  percentile: number;
-  breakdown: {
-    metric: string;
-    value: number;
-    weight: number;
-    contribution: number;
-  }[];
 }
 
 // ============================================
@@ -320,16 +292,6 @@ export type ComparisonMode = 'all' | 'position' | 'team' | 'league';
 // ============================================
 // UTILITY TYPES
 // ============================================
-
-/**
- * Bornes min/max pour normalisation
- */
-export interface MetricBounds {
-  min: number;
-  max: number;
-  mean: number;
-  stdDev: number;
-}
 
 
 /**
