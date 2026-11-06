@@ -123,14 +123,14 @@ class RoleIndexTest(unittest.TestCase):
 class LineupTest(unittest.TestCase):
     def test_counts_name_variants_as_one_player(self) -> None:
         rows = []
-        for match, name in enumerate(["Inigo Cordoba", "Iñigo Córdoba", "Inigo Cordoba"]):
+        for match, name in enumerate(["Inigo Cordon", "Iñigo Córdon", "Inigo Cordon"]):
             rows.append({"role": "starter", "formation": "4-3-3", "position_id": 7, "team_id": "t", "match_id": match,
                          "player_id": "p_a", "player_name": name, "pitch_x": 0.8, "pitch_y": 0.1})
         rows.append({"role": "starter", "formation": "4-3-3", "position_id": 7, "team_id": "t", "match_id": 9,
                      "player_id": "p_b", "player_name": "B", "pitch_x": 0.8, "pitch_y": 0.1})
         lineups = prepare_data.build_lineups(pd.DataFrame(rows))
         slot = lineups["t"]["formations"][0]["slots"][0]
-        self.assertEqual(slot["players"], [["p_a", "Inigo Cordoba", 3], ["p_b", "B", 1]])
+        self.assertEqual(slot["players"], [["p_a", "Inigo Cordon", 3], ["p_b", "B", 1]])
 
 
 class PassNetworkTest(unittest.TestCase):
