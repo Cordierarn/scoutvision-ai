@@ -90,9 +90,9 @@ describe('placeEleven : optimalité', () => {
   it('additionne les titularisations d\'un joueur listé sous deux graphies', () => {
     const placed = placeEleven([{
       slot: 1, x: 0.5, y: 0.5,
-      players: [['a', 'Inigo Cordoba', 6], ['b', 'B', 8], ['a', 'Iñigo Córdoba', 5]],
+      players: [['a', 'Inigo Cordon', 6], ['b', 'B', 8], ['a', 'Iñigo Córdon', 5]],
     }]);
-    expect(placed[0].starter).toEqual({ id: 'a', name: 'Inigo Cordoba', starts: 11 });
+    expect(placed[0].starter).toEqual({ id: 'a', name: 'Inigo Cordon', starts: 11 });
     expect(placed[0].backups.map(b => b.id)).toEqual(['b']);
   });
 });

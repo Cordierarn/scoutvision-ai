@@ -33,11 +33,11 @@ describe('coordonnées des cases', () => {
 });
 
 describe('doublons de position_id', () => {
-  it('Racing Club 2025-26, 3-4-1-2 : 18 cases, deux grilles aux mêmes coordonnées → 11 postes', () => {
-    const racing: [number, number, number][] = [[11, 0.1, 0.5], [37, 0.29, 0.21], [35, 0.29, 0.5], [33, 0.29, 0.79], [68, 0.49, 0.13], [76, 0.49, 0.13],
+  it('équipe de 2025-26, 3-4-1-2 : 18 cases, deux grilles aux mêmes coordonnées → 11 postes', () => {
+    const grid: [number, number, number][] = [[11, 0.1, 0.5], [37, 0.29, 0.21], [35, 0.29, 0.5], [33, 0.29, 0.79], [68, 0.49, 0.13], [76, 0.49, 0.13],
       [66, 0.49, 0.38], [74, 0.49, 0.38], [58, 0.49, 0.63], [64, 0.49, 0.63], [52, 0.49, 0.88], [62, 0.49, 0.88], [85, 0.68, 0.5], [95, 0.68, 0.5],
       [106, 0.87, 0.3], [116, 0.87, 0.3], [104, 0.87, 0.7], [114, 0.87, 0.7]];
-    const f = normalizeFormation({ formation: '3-4-1-2', matches: 6, slots: racing.map(([n, x, y]) => slot(n, x, y, [[n === 76 ? 'p68' : `p${n}`, 'J', n > 70 ? 4 : 2]])) });
+    const f = normalizeFormation({ formation: '3-4-1-2', matches: 6, slots: grid.map(([n, x, y]) => slot(n, x, y, [[n === 76 ? 'p68' : `p${n}`, 'J', n > 70 ? 4 : 2]])) });
     expect(f.slots).toHaveLength(11);
     expect(f.mergedSlots).toBe(7);
     expect(f.status).toBe('complete');

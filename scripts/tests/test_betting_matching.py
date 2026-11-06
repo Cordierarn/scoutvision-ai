@@ -80,13 +80,13 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(matching.normalize(float("nan")), set())
 
     def test_normalisation(self):
-        self.assertEqual(matching.normalize("Śląsk Wrocław FC"), {"slask", "wroclaw"})
-        self.assertGreaterEqual(matching.similarity("Bodø/Glimt", "Bodoe/Glimt"), 0.9)
-        self.assertGreaterEqual(matching.similarity("Bayern Munich", "Bayern München"), 0.9)
-        self.assertGreaterEqual(matching.similarity("Real Sociedad San Sebastian", "Real Sociedad"), 0.9)
-        self.assertLess(matching.similarity("Real Madrid", "Atlético Madrid"), 0.5)
-        self.assertLess(matching.similarity("Manchester City", "Manchester United"), 0.5)
-        self.assertEqual(matching.similarity("Athletic Club", "Athletic Club"), 1.0)
+        self.assertEqual(matching.normalize("Źółty Klub FC"), {"zolty", "klub"})
+        self.assertGreaterEqual(matching.similarity("Fjørd/Storm", "Fjoerd/Storm"), 0.9)
+        self.assertGreaterEqual(matching.similarity("Sportklub Nordhafen", "Sportklub Nordhaven"), 0.9)
+        self.assertGreaterEqual(matching.similarity("Union Vallée Haute Rive", "Union Vallée"), 0.9)
+        self.assertLess(matching.similarity("Real Ville", "Atlético Ville"), 0.5)
+        self.assertLess(matching.similarity("Rivière City", "Rivière United"), 0.5)
+        self.assertEqual(matching.similarity("Sporting Club", "Sporting Club"), 1.0)
 
 
 if __name__ == "__main__":

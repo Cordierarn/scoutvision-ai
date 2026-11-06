@@ -77,7 +77,7 @@ describe('rang : source unique teamRank', () => {
 describe('totaux d\'équipe', () => {
   it('buts de toute l\'équipe depuis team_season, null si inconnus', () => {
     // PSG 2026-27 : 1,833 but par 90 sur 6 matchs = 11 (somme des joueurs suivis : 10)
-    expect(teamTotals(team('psg', { Matches: 6, 'Goals per 90': 1.833, 'Goals against per 90': 1.333 }))).toEqual({ matches: 6, goalsFor: 11, goalsAgainst: 8 });
+    expect(teamTotals(team('t', { Matches: 6, 'Goals per 90': 1.833, 'Goals against per 90': 1.333 }))).toEqual({ matches: 6, goalsFor: 11, goalsAgainst: 8 });
     expect(teamTotals(team('x', { Matches: 6 }))).toEqual({ matches: 6, goalsFor: null, goalsAgainst: null });
     expect(teamTotals(null)).toEqual({ matches: null, goalsFor: null, goalsAgainst: null });
   });
@@ -150,22 +150,22 @@ describe('part de variance affichée sous la carte des styles', () => {
 });
 
 describe('carte des styles : une équipe-saison par point', () => {
-  const lens = (season: string, Style: string, x = 1) => team('lens', { team: 'Lens', season, league: `Ligue 1 ${season}`, Style, 'Style x': x, 'Style y': 0 });
-  const teams = [lens('2023-24', 'High press'), lens('2024-25', 'Patient build-up', 2), lens('2025-26', 'Patient build-up', 3),
-    team('psg', { season: '2025-26', Style: 'Patient build-up', 'Style x': 4, 'Style y': 1 }),
-    team('om', { season: '2024-25', league: 'Ligue 1 2024-25', Style: 'High press', 'Style x': 0, 'Style y': 0 }),
+  const clubA = (season: string, Style: string, x = 1) => team('a', { team: 'Club A', season, league: `Ligue 1 ${season}`, Style, 'Style x': x, 'Style y': 0 });
+  const teams = [clubA('2023-24', 'High press'), clubA('2024-25', 'Patient build-up', 2), clubA('2025-26', 'Patient build-up', 3),
+    team('b', { season: '2025-26', Style: 'Patient build-up', 'Style x': 4, 'Style y': 1 }),
+    team('c', { season: '2024-25', league: 'Ligue 1 2024-25', Style: 'High press', 'Style x': 0, 'Style y': 0 }),
     team('ucl', { competition: 'UCL', Style: 'High press', 'Style x': 0, 'Style y': 0 }),
     team('kas', { season: '2025-26', Style: undefined })];
-  it('Toutes les saisons : Lens 2023-24, 2024-25 et 2025-26 sont trois points distincts', () => {
+  it('Toutes les saisons : Club A 2023-24, 2024-25 et 2025-26 sont trois points distincts', () => {
     const pop = styleMapPopulation(teams[2], teams, true);
-    expect(pop.filter(p => p.team.team_id === 'lens').map(p => `${p.team.season}:${p.kind}`)).toEqual(['2023-24:club', '2024-25:club', '2025-26:selected']);
-    expect(pop.find(p => p.team.team_id === 'psg')?.kind).toBe('same');
+    expect(pop.filter(p => p.team.team_id === 'a').map(p => `${p.team.season}:${p.kind}`)).toEqual(['2023-24:club', '2024-25:club', '2025-26:selected']);
+    expect(pop.find(p => p.team.team_id === 'b')?.kind).toBe('same');
     expect(pop.some(p => p.team.competition === 'UCL')).toBe(false);
     expect(pop.some(p => p.team.team_id === 'kas')).toBe(false);          // sans coordonnées
   });
   it('saison sélectionnée : seulement cette saison, aucun mélange', () => {
     const pop = styleMapPopulation(teams[2], teams, false);
-    expect(pop.map(p => p.team.team_id)).toEqual(['lens', 'psg']);
+    expect(pop.map(p => p.team.team_id)).toEqual(['a', 'b']);
     expect(pop.every(p => p.team.season === '2025-26')).toBe(true);
   });
 });

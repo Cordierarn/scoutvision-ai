@@ -695,21 +695,30 @@ describe('qualité des données de poste (signal, jamais une correction)', () =>
     expect(checkPositionData([view], []).checked).toBe(0);
   });
 
-  it.skipIf(!existsSync(lineupsDir('2026-27')))('données réelles 2026-27 : Crvena Zvezda signalée, PSG et Lazio non', () => {
+  it.skipIf(!existsSync(`${lineupsDir('2026-27')}/SRB.json`))('données réelles 2026-27 : chaque équipe SRB dont toutes les lignes sont en GK est signalée ; les équipes témoins de FRA et ITA ne le sont pas', ({ skip }) => {
     const rows = realSeason('2026-27');
-    const check = (comp: string, team: string) => {
-      const t = rows.find(p => p.Team === team && p.Competition === comp)!;
-      const file = JSON.parse(readFileSync(`${lineupsDir('2026-27')}/${comp}.json`, 'utf8')) as Record<string, TeamLineups>;
-      return checkPositionData(orderFormations(file[t['Team ID']!]), rows.filter(p => p.Competition === comp && p['Team ID'] === t['Team ID']));
-    };
-    // Données du 30/10/2026 : 6 contradictions sur 15 titulaires vérifiés (15 sur 17 avant la mise à jour de
-    // PitchAPI, qui a corrigé une partie des postes) ; le signal reste, les comptes exacts dépendent de la livraison
-    const zvezda = check('SRB', 'FK Crvena Zvezda');
-    expect(zvezda.suspect).toBe(true);
-    expect(zvezda.contradictions).toBeGreaterThanOrEqual(POSITION_CONTRADICTIONS_MIN);
-    expect(zvezda.checked).toBeGreaterThanOrEqual(zvezda.contradictions);
-    expect(check('FRA', 'Paris Saint-Germain').contradictions).toBe(0);
-    expect(check('ITA', 'Lazio').contradictions).toBe(0);
+    const lineups = (comp: string) => JSON.parse(readFileSync(`${lineupsDir('2026-27')}/${comp}.json`, 'utf8')) as Record<string, TeamLineups>;
+    const check = (comp: string, file: Record<string, TeamLineups>, teamId: string) =>
+      checkPositionData(orderFormations(file[teamId]), rows.filter(p => p.Competition === comp && p['Team ID'] === teamId));
+    const teamIds = (comp: string, file: Record<string, TeamLineups>) => [...new Set(rows.filter(p => p.Competition === comp && p['Team ID'] && file[p['Team ID']]).map(p => p['Team ID']!))];
+    // Défaut connu de la source sur SRB : toutes les lignes d'une équipe en Position = GK, donc tout titulaire de
+    // champ contredit sa place. Propriété vérifiée pour chaque équipe dans ce cas ; sans équipe concernée, le test s'ignore.
+    const srb = lineups('SRB');
+    const allGk = teamIds('SRB', srb).filter(id => rows.filter(p => p.Competition === 'SRB' && p['Team ID'] === id).every(p => p.Position === 'GK'));
+    if (!allGk.length) skip();
+    for (const id of allGk) {
+      const r = check('SRB', srb, id);
+      expect(r.suspect).toBe(true);
+      expect(r.contradictions).toBeGreaterThanOrEqual(POSITION_CONTRADICTIONS_MIN);
+      expect(r.checked).toBeGreaterThanOrEqual(r.contradictions);
+    }
+    // Témoins choisis par une propriété stable : dans chaque ligue, l'équipe dont la formation la plus jouée compte le plus de matchs
+    for (const comp of ['FRA', 'ITA']) {
+      const file = lineups(comp);
+      const witness = teamIds(comp, file).sort((a, b) => (orderFormations(file[b])[0]?.matches ?? 0) - (orderFormations(file[a])[0]?.matches ?? 0))[0];
+      expect(witness).toBeDefined();
+      expect(check(comp, file, witness).contradictions).toBe(0);
+    }
   }, 60_000);
 });
 
@@ -796,8 +805,8 @@ describe('données réelles : formation et poste recherché', () => {
     moved.forEach(([k]) => expect(['FB→W', 'W→FB', 'FB→ST', 'CB→ST']).toContain(k.split(':')[0]));
     // tous les cas gardés concernent un piston
     kept.forEach(([k]) => expect(k.split(':')[0]).toMatch(/WB/));
-    expect(known).toContain('Sunderland:FB→W');
-    expect(known).toContain('FC Dallas:W→FB');
+    expect(known.some(k => k.endsWith(':FB→W'))).toBe(true);
+    expect(known.some(k => k.endsWith(':W→FB'))).toBe(true);
   }, 60_000);
 
   it.skipIf(!existsSync(lineupsDir('2025-26')))('2025-26, toutes les ligues : jamais de gardien dans le champ ni de joueur de champ dans les cages', () => {
@@ -808,24 +817,24 @@ describe('données réelles : formation et poste recherché', () => {
     [...counts].filter(([k]) => k.endsWith('formation')).forEach(([k]) => expect(k.split(':')[0]).not.toMatch(/GK/));
   }, 120_000);
 
-  it.skipIf(!existsSync(`${lineupsDir('2026-27')}/SRB.json`))('Crvena Zvezda 2026-27 : 3-2-4-1 insuffisamment renseignée, besoins sur 4-1-4-1', () => {
+  it.skipIf(!existsSync(`${lineupsDir('2026-27')}/SRB.json`))('SRB 2026-27 : chaque équipe dont la formation la plus jouée est insuffisamment renseignée voit ses besoins calculés sur une formation renseignée', ({ skip }) => {
     const rows = realSeason('2026-27');
-    const team = rows.find(p => p.Team === 'FK Crvena Zvezda' && p.Competition === 'SRB')!;
     const file = JSON.parse(readFileSync(`${lineupsDir('2026-27')}/SRB.json`, 'utf8')) as Record<string, TeamLineups>;
-    const formations = orderFormations(file[team['Team ID']!]);
-    expect(formations[0]).toMatchObject({ formation: '3-2-4-1', matches: 7, status: 'incomplete' });
-    const choice = recruitmentFormation(formations)!;
-    expect(formations[choice.index].formation).toBe('4-1-4-1');
-    expect(choice.fallbackFrom?.formation).toBe('3-2-4-1');
-    const formation = formations[choice.index];
-    const teamRows = rows.filter(p => p.Competition === 'SRB' && p['Team ID'] === team['Team ID']);
-    const needs = slotNeeds(placeEleven(formation.slots), teamRows, rows.filter(p => p.Competition === 'SRB'), { curves: null, transfer: null },
-      null, new Date('2026-10-20'), formationPositions(formation));
-    expect(needs).toHaveLength(11);
-    // Défaut des données SRB (postes enregistrés incohérents, en partie corrigé par PitchAPI le 30/10/2026) :
-    // le signal « hors poste » suit exactement l'écart entre le poste enregistré et la place dans la formation
-    expect(needs.find(n => n.position === 'GK')!.forecast).toBeDefined();
-    needs.filter(n => n.starter).forEach(n => expect(n.flags.includes('outOfPosition')).toBe(isOutOfPosition(n.starter!.Position, n.position)));
-    expect(needs.some(n => n.flags.includes('outOfPosition'))).toBe(true);
+    const league = rows.filter(p => p.Competition === 'SRB');
+    const incomplete = [...new Set(league.map(p => p['Team ID']!))].filter(id => file[id] && orderFormations(file[id])[0]?.status === 'incomplete');
+    if (!incomplete.length) skip();
+    for (const id of incomplete) {
+      const formations = orderFormations(file[id]);
+      const choice = recruitmentFormation(formations)!;
+      expect(formations[choice.index].status).toBe('complete');
+      expect(choice.fallbackFrom).toBe(formations[0]);
+      const formation = formations[choice.index];
+      const teamRows = league.filter(p => p['Team ID'] === id);
+      const needs = slotNeeds(placeEleven(formation.slots), teamRows, league, { curves: null, transfer: null }, null, new Date('2026-10-20'), formationPositions(formation));
+      expect(needs).toHaveLength(11);
+      expect(needs.find(n => n.position === 'GK')!.forecast).toBeDefined();
+      // le signal « hors poste » suit exactement l'écart entre le poste enregistré et la place dans la formation
+      needs.filter(n => n.starter).forEach(n => expect(n.flags.includes('outOfPosition')).toBe(isOutOfPosition(n.starter!.Position, n.position)));
+    }
   }, 60_000);
 });

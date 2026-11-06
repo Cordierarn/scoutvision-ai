@@ -64,12 +64,12 @@ class CoachChangeTest(unittest.TestCase):
 
 class SpellTest(unittest.TestCase):
     def test_short_absence_and_spelling_do_not_split_a_spell(self) -> None:
-        coaches = ["Luis García"] * 6 + ["Adjoint"] * 2 + ["Luis Garcia"] * 6 + ["Nouveau"] * 3 + ["Autre"] * 4
+        coaches = ["José Dupré"] * 6 + ["Adjoint"] * 2 + ["Jose Dupre"] * 6 + ["Nouveau"] * 3 + ["Autre"] * 4
         tm = pd.DataFrame({"match_id": [f"m{i}" for i in range(len(coaches))], "team_id": "t",
                            "date": pd.date_range("2024-08-01", periods=len(coaches), freq="7D")})
         co = lab.coach_by_match(pd.DataFrame({"match_id": tm["match_id"], "team_id": "t", "coach_name": coaches, "role": "starter"}))
         df = lab._with_spells(tm, co)
-        self.assertEqual(df["spell"].nunique(), 3)                          # Garcia (adjoint compris), Nouveau, Autre
+        self.assertEqual(df["spell"].nunique(), 3)                          # Dupré (adjoint compris), Nouveau, Autre
         self.assertEqual(df.loc[df["spell"] == df["spell"].min(), "coach"].nunique(), 1)
 
 
