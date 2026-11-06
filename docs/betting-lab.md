@@ -75,7 +75,7 @@ lignes avec H−1 disponible à 99,5 % (manque surtout sur les scores exacts par
 appariement avec PitchAPI 447/447 après deux alias saisis à la main (Bilbao, Cologne).
 Deux processus ne doivent jamais écrire l'archive en même temps (verrou `.research/betting/.lock`).
 
-Tests sans réseau (`npm run test:data`) : `scripts/test_betting_client.py`, `test_betting_archive.py`,
+Tests sans réseau (`npm run test:data`) : `scripts/tests/test_betting_client.py`, `test_betting_archive.py`,
 `test_betting_matching.py`, sur des réponses synthétiques calquées sur la forme réelle (« Club A »,
 « Joueur 1 »).
 
@@ -366,7 +366,7 @@ voit que le marché sharp (`scripts/betting/gate.py`, `python3 -m betting.gate [
   `.research/betting/phase2/pool_weights.json` ; le fichier est écrit même vide, le produit lit alors w = 0.
   Le rapport complet (tous les segments, log-loss par poids) est dans `gate.json`.
 - **Cycle** : recalcul à chaque amorce du Labo (`update-data.yml`, après `betting.adjust`), fichiers
-  embarqués dans l'archive `betting-seed`. Tests synthétiques dans `scripts/test_betting_gate.py` (un
+  embarqués dans l'archive `betting-seed`. Tests synthétiques dans `scripts/tests/test_betting_gate.py` (un
   modèle qui connaît la vérité face à une clôture bruitée est validé ; un modèle faux ne l'est jamais).
 
 ### Résultat (clôture Pinnacle 2024-25 → 2025-26, 8 ligues du Labo)

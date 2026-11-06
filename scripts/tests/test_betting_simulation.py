@@ -2,7 +2,7 @@
 Tests de la simulation de match et du règlement des marchés (scripts/betting/simulate.py, markets.py),
 sans réseau ni données réelles.
 
-  python3 -m unittest test_betting_simulation -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_simulation -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

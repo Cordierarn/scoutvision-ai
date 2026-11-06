@@ -81,7 +81,7 @@ bet, ROI or CLV is computed in this step (a pure power de-vig helper exists for 
 Both-teams-to-score is not provided by football-data; over/under 2.5 exists in the main files only.
 Eight ScoutVision competitions have no odds (CRO, CZE, KOR, KSA, SRB, UCL, UEL, UECL).
 
-## Anti-leakage tests (`scripts/test_backtest.py`, run by `npm run test:data`)
+## Anti-leakage tests (`scripts/tests/test_backtest.py`, run by `npm run test:data`)
 
 1. current match excluded (changing or removing a match never changes its own features);
 2. future masked (removing all matches after a cutoff changes nothing before it);

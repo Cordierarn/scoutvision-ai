@@ -1,7 +1,7 @@
 """
 Tests de l'appariement OddsPapi ↔ PitchAPI (scripts/betting/matching.py) sur des équipes fictives.
 
-  python3 -m unittest test_betting_matching -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_matching -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

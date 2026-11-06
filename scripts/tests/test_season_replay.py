@@ -4,7 +4,7 @@ Tests de l'étape 3 (règles de compétition, simulation de saison, replay) sur 
 match restant 100/0/0 et 0/100/0, somme des distributions, règles de différence de buts et
 confrontation directe, repli de départage, reproductibilité, validation.
 
-  python3 -m unittest test_season_replay -v        # ou : npm run test:data
+  python3 -m unittest tests.test_season_replay -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

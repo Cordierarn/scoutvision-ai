@@ -2,7 +2,7 @@
 Tests des expériences du Laboratoire (scripts/lab.py) sur données simulées : chaque expérience
 doit retrouver un effet connu, ou son absence.
 
-  python3 -m unittest discover -s scripts -p "test_*.py"      # ou : npm run test:data
+  python3 -m unittest discover -s scripts/tests -t scripts -p "test_*.py"      # ou : npm run test:data
 """
 
 from __future__ import annotations

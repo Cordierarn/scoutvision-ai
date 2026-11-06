@@ -3,7 +3,7 @@ Tests du moteur quantitatif du Labo paris (étape 1) : devigging (proportionnel,
 sharp d'un marché, pool modèle / sharp, mouvement sharp, OPD, dépendance à un joueur clé, coupe-circuit et
 Kelly rétréci. Sans réseau, sans données réelles.
 
-  python3 -m unittest test_betting_quant -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_quant -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

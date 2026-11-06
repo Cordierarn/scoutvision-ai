@@ -1,7 +1,7 @@
 """
 Tests du client OddsPapi (scripts/betting/client.py) sans réseau : HTTP simulé, horloge et sommeil injectés.
 
-  python3 -m unittest test_betting_client -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_client -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

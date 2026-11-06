@@ -3,7 +3,7 @@ Tests de l'étape 2B (benchmark marché) sur fixtures synthétiques : parsing r�
 mappings d'équipes, ambiguïtés, de-vig, repli de clôture, population appariée, pool appris sur la
 validation seulement et figé, aucune cote dans les modèles sportifs, reproductibilité.
 
-  python3 -m unittest test_market_benchmark -v        # ou : npm run test:data
+  python3 -m unittest tests.test_market_benchmark -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

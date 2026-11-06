@@ -2,7 +2,7 @@
 Tests du lecteur de résultats web (scripts/betting/results_web.py) et de l'historique des soirées
 (evening.py) sur des réponses synthétiques, sans réseau.
 
-  python3 -m unittest test_betting_results_web -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_results_web -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

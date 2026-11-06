@@ -4,7 +4,7 @@ registre) sur fixtures synthétiques : invariants des probabilités, fenêtre d'
 ordre des lignes, matchs simultanés, matchs attribués, coupe et championnat distincts, reproduction,
 scoring apparié, classes de calibration, artefact immuable, registre.
 
-  python3 -m unittest test_forecast_models -v        # ou : npm run test:data
+  python3 -m unittest tests.test_forecast_models -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

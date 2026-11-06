@@ -4,7 +4,7 @@ Tests de la référence sharp par The Odds API (scripts/betting/sharpfeed.py) sa
 rencontres), crédits et réserve, sélection des compétitions à relever. Et client OddsPapi : bookmakers hors
 abonnement retirés puis appel repris.
 
-  python3 -m unittest test_betting_sharpfeed -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_sharpfeed -v        # ou : npm run test:data
 """
 
 from __future__ import annotations
