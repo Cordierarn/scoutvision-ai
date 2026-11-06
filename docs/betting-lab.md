@@ -245,7 +245,11 @@ encre neutre.
   relevé match par match reste disponible (`upcoming --per-fixture`, environ 6,5 s par rencontre).
 - **Historiques des matchs terminés** (`/historical-odds`, environ 6,5 s par match, limite d'OddsPapi) :
   au passage du matin seulement, ou tant que l'archive est incomplète. Les relevés sont écrits par lots
-  (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison.
+  (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison. Un match est redemandé tant que son
+  historique ne va pas jusqu'au coup d'envoi (`fetch.history_todo`) : un relevé « à venir » pris quelques heures avant
+  ne suffit pas (correction de l'audit du 6 novembre 2026 : ces matchs n'étaient jamais redemandés, et leur « clôture »
+  était le dernier relevé « à venir »). L'historique est complet quand l'archive contient un relevé Winamax postérieur
+  au coup d'envoi, ou quand il a été demandé après le coup d'envoi (`history_fetched.json`, publié avec l'archive).
 - **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
   (`betting/results_web.py`, sans clé ; voir « Règlement depuis ESPN » plus bas), fusionnés aux
   résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis
@@ -635,8 +639,9 @@ cote du matin meilleure que celle de la clôture. D'où un cinquième profil pub
   calculé avant le coupe-circuit (`product._legacy_block`). La probabilité sharp de Shin, quand elle existe, est
   exportée (`pSharp`, `evRef`) pour mesurer le CLV ; le verdict vaut `ancien` et le bilan du rejeu n'est pas affiché ;
 - **cote de clôture Winamax** (colonne `closing_odds` du journal) : la dernière cote Winamax relevée avant le coup
-  d'envoi, remplie par `journal_append` pour les paris dont le match a commencé, exportée en `closingOdds` dans
-  l'historique avec `marketId` et `outcomeId` ;
+  d'envoi, remplie par `journal_append` pour les paris dont le match a commencé et recalculée pendant 7 jours
+  (`product.update_winamax_closing`), le temps que l'historique complet du match soit archivé ; exportée en
+  `closingOdds` dans l'historique avec `marketId` et `outcomeId` ;
 - **effet « cote du matin »** (`product.early_block`, champs `closeBets`, `earlyEdge`, `oddsDroppedRate` de
   `journal.byProfile`) : cote prise ÷ clôture Winamax − 1 en moyenne, et part des paris dont la cote a baissé ensuite.
   Affiché dans le Suivi des paris pour chaque profil.

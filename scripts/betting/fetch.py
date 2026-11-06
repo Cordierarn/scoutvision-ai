@@ -7,8 +7,9 @@ Ligne de commande du Labo paris, phase 1 (tout sous .research/betting/, ignoré 
                                                            rencontres Big 5 (1 requête par fenêtre de 10 jours)
   python3 -m betting.fetch upcoming --days 7 --refresh-stale 2 --max-requests 60   # + match par match pour les rencontres non rafraîchies
   python3 -m betting.fetch history --max-requests 20 [--since 2026-10-01] [--competitions ENG,ESP] [--refresh-players | --refresh-sharp]
-                                                           historique Winamax complet des matchs terminés non archivés,
-                                                           du plus récent au plus ancien (1 requête par match) ;
+                                                           historique Winamax complet des matchs terminés dont l'archive
+                                                           ne va pas jusqu'au coup d'envoi (un relevé « à venir » ne suffit
+                                                           pas), du plus récent au plus ancien (1 requête par match) ;
                                                            --refresh-players redemande les matchs archivés sans marché joueur
                                                            --refresh-sharp redemande ceux archivés sans Pinnacle ni Betfair (référence, CLV)
   python3 -m betting.fetch snapshot                        relevé courant des rencontres à venir (1 requête décomptée par tournoi)
@@ -39,6 +40,7 @@ FIXTURES = RESEARCH / "fixtures.parquet"
 ODDS = RESEARCH / "odds"
 VIEWS = RESEARCH / "views"
 MATCHES = RESEARCH / "matches.parquet"
+HISTORY_FETCHED = RESEARCH / "history_fetched.json"     # {fixture_id: date de la demande} : historique demandé après le coup d'envoi
 STATUS_FINISHED = 2
 
 
@@ -137,6 +139,29 @@ class SnapshotBuffer:
         return self.added
 
 
+def load_history_fetched(path: Path = HISTORY_FETCHED) -> dict[str, str]:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def save_history_fetched(fetched: dict[str, str], path: Path = HISTORY_FETCHED) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(fetched, ensure_ascii=False, indent=0, sort_keys=True), encoding="utf-8")
+
+
+def history_todo(fixtures: pd.DataFrame, snaps: pd.DataFrame, fetched: dict[str, str], competitions) -> pd.DataFrame:
+    """Matchs terminés dont l'historique Winamax complet (jusqu'au coup d'envoi) n'est pas archivé. Un relevé pris avant le
+    match (`upcoming`, `--refresh-stale`) ne suffit pas : l'historique est complet quand l'archive contient un relevé
+    Winamax postérieur au coup d'envoi (`/historical-odds` les inclut), ou quand il a été demandé après le coup d'envoi
+    (`fetched`, pour ne pas redemander sans fin un match dont l'historique s'arrête avant)."""
+    finished = fixtures[(fixtures["status_id"] == STATUS_FINISHED) & fixtures["competition"].isin(list(competitions))]
+    start = finished.set_index("fixture_id")["start_time"]
+    w = snaps[(snaps["bookmaker"] == BOOKMAKER) & snaps["fixture_id"].isin(start.index)]
+    after = w[pd.to_datetime(w["created_at"], utc=True) >= w["fixture_id"].map(start)]
+    complete = set(after["fixture_id"].unique())
+    complete |= {f for f, at in fetched.items() if f in start.index and pd.Timestamp(at) >= start[f]}
+    return finished[~finished["fixture_id"].isin(complete)]
+
+
 def cmd_history(args) -> int:
     client = OddsPapiClient()
     props = player_props_enabled(client)
@@ -154,14 +179,19 @@ def cmd_history(args) -> int:
         # même requête rapporte les trois bookmakers (le CLV et le rejeu en ont besoin)
         done = set(snaps.loc[snaps["bookmaker"].isin(SHARP_BOOKMAKERS), "fixture_id"].unique())
     else:
-        done = set(snaps["fixture_id"].unique())
-    todo = fx[(fx["status_id"] == STATUS_FINISHED) & fx["competition"].isin(comps) & ~fx["fixture_id"].isin(done)]
+        done = None
+    fetched = load_history_fetched()
+    if done is None:
+        todo = history_todo(fx, snaps, fetched, comps)
+    else:
+        todo = fx[(fx["status_id"] == STATUS_FINISHED) & fx["competition"].isin(comps) & ~fx["fixture_id"].isin(done)]
     if args.since:
         todo = todo[todo["start_time"] >= pd.Timestamp(args.since, tz="UTC")]
     todo = todo.sort_values("start_time", ascending=False)
     budget = min(args.max_requests, client.quota.remaining)
-    print(f"{len(todo)} matchs terminés à archiver, {budget} requêtes autorisées pour cette exécution (environ 6,5 s par match)", flush=True)
-    fetched, missing = 0, 0
+    print(f"{len(todo)} matchs terminés sans historique complet jusqu'au coup d'envoi, {budget} requêtes autorisées pour cette exécution "
+          f"(environ 6,5 s par match)", flush=True)
+    count, missing = 0, 0
     buffer = SnapshotBuffer()
     for f in todo.head(budget).itertuples(index=False):
         try:
@@ -169,15 +199,17 @@ def cmd_history(args) -> int:
         except QuotaExceeded as exc:
             print(str(exc))
             break
-        fetched += 1
-        if fetched % 25 == 0:
-            print(f"  {fetched} matchs archivés…", flush=True)
-        if payload is None:
+        count += 1
+        if count % 25 == 0:
+            print(f"  {count} matchs archivés…", flush=True)
+        if payload is not None:
+            buffer.add(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+        else:
             missing += 1
-            continue
-        buffer.add(archive.flatten_historical(payload), _odds_path(f.competition, f.season))
+        fetched[str(f.fixture_id)] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     added = buffer.flush()
-    print(f"{fetched} matchs demandés, {missing} sans historique Winamax, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
+    save_history_fetched(fetched)          # après l'écriture des relevés : un passage interrompu redemande ses matchs
+    print(f"{count} matchs demandés, {missing} sans historique Winamax, {added} relevés ajoutés ; quota {client.quota.used}/{client.quota.budget}")
     return 0
 
 

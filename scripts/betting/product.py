@@ -524,13 +524,7 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
         kick = pd.to_datetime(journal["kickoff_utc"], utc=True, format="ISO8601")
         todo = journal["clv"].isna() & journal["fixture_id"].notna() & (kick <= pd.Timestamp(published_at))
         # cote Winamax de clôture (dernier relevé avant le coup d'envoi) : mesure de l'effet « parier tôt »
-        todo_close = journal["closing_odds"].isna() & journal["fixture_id"].notna() & (kick <= pd.Timestamp(published_at))
-        wx = snaps[(snaps["bookmaker"] == BOOKMAKER) & snaps["player_id"].isna()] if "player_id" in snaps else snaps[snaps["bookmaker"] == BOOKMAKER]
-        for i in journal[todo_close].index:
-            g = wx[(wx["fixture_id"] == journal.at[i, "fixture_id"]) & (wx["market_id"] == int(journal.at[i, "market_id"])) & (wx["outcome_id"] == int(journal.at[i, "outcome_id"]))
-                   & (pd.to_datetime(wx["created_at"], utc=True) < kick[i])]
-            if len(g):
-                journal.at[i, "closing_odds"] = float(g.sort_values("created_at")["price"].iloc[-1])
+        update_winamax_closing(journal, snaps, pd.Timestamp(published_at))
         for i in journal[todo].index:
             s = snaps[snaps["fixture_id"] == journal.at[i, "fixture_id"]]
             closing = sharp.closing_reference(s, cat, int(journal.at[i, "market_id"]), kick[i]) if not s.empty else None
@@ -541,6 +535,37 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     journal.to_parquet(JOURNAL, index=False)
     return journal
+
+
+CLOSING_WINDOW = pd.Timedelta(days=7)     # l'historique complet d'un match arrive au passage du matin suivant, parfois plus tard
+
+
+def update_winamax_closing(journal: pd.DataFrame, snaps: pd.DataFrame, now: pd.Timestamp) -> int:
+    """Cote Winamax de clôture (dernier relevé strictement avant le coup d'envoi) des suggestions dont le match a commencé :
+    calculée, puis recalculée tant que le coup d'envoi date de moins de `CLOSING_WINDOW`, car l'historique complet du match
+    (relevés jusqu'au coup d'envoi) n'est archivé qu'après le match ; avant, la « clôture » n'est que le dernier relevé
+    « à venir ». Renvoie le nombre de lignes modifiées."""
+    kick = pd.to_datetime(journal["kickoff_utc"], utc=True, format="ISO8601")
+    now = pd.Timestamp(now)
+    todo = journal["fixture_id"].notna() & (kick <= now) & (journal["closing_odds"].isna() | (kick >= now - CLOSING_WINDOW))
+    if not todo.any() or snaps.empty:
+        return 0
+    keys = pd.DataFrame({"i": journal.index[todo], "fixture_id": journal.loc[todo, "fixture_id"].astype(str), "market_id": journal.loc[todo, "market_id"].astype(int),
+                         "outcome_id": journal.loc[todo, "outcome_id"].astype(int), "kick": kick[todo]})
+    wx = snaps[(snaps["bookmaker"] == BOOKMAKER) & snaps["fixture_id"].astype(str).isin(set(keys["fixture_id"]))]
+    if "player_id" in wx:
+        wx = wx[wx["player_id"].isna()]
+    wx = wx[["fixture_id", "market_id", "outcome_id", "created_at", "price"]].astype({"fixture_id": str, "market_id": int, "outcome_id": int})
+    m = keys.merge(wx, on=["fixture_id", "market_id", "outcome_id"])
+    m = m[pd.to_datetime(m["created_at"], utc=True) < m["kick"]].sort_values("created_at")
+    last = m.groupby("i")["price"].last()
+    changed = 0
+    for i, price in last.items():
+        old = journal.at[i, "closing_odds"]
+        if pd.isna(old) or float(old) != float(price):
+            journal.at[i, "closing_odds"] = float(price)
+            changed += 1
+    return changed
 
 
 def resettle(journal: pd.DataFrame, results: pd.DataFrame, cat, at: dt.datetime) -> int:

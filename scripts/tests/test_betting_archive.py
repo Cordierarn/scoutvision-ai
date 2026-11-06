@@ -134,6 +134,18 @@ if __name__ == "__main__":
 
 
 class StaleFixturesTests(unittest.TestCase):
+    def test_finished_fixtures_without_a_complete_history_are_fetched_again(self):
+        # un relevé « à venir » ne vaut pas historique complet : la clôture exige l'historique demandé après le coup d'envoi
+        ko = pd.Timestamp("2026-11-03T19:45:00Z")
+        fx = pd.DataFrame([{"fixture_id": f, "competition": "ENG", "season": "2026-27", "status_id": st, "start_time": ko} for f, st in
+                           [("upcoming_only", 2), ("with_live", 2), ("marked", 2), ("marked_early", 2), ("none", 2), ("not_played", 0)]])
+        snap = lambda f, minutes, bk="winamax.fr": {"fixture_id": f, "bookmaker": bk, "created_at": ko + pd.Timedelta(minutes=minutes)}
+        snaps = pd.DataFrame([snap("upcoming_only", -150), snap("with_live", -150), snap("with_live", 5), snap("marked", -150), snap("marked_early", -150),
+                              snap("upcoming_only", 10, bk="pinnacle")])          # un relevé de référence après le coup d'envoi ne compte pas
+        fetched = {"marked": (ko + pd.Timedelta(hours=11)).isoformat(), "marked_early": (ko - pd.Timedelta(hours=3)).isoformat()}
+        todo = fetch.history_todo(fx, snaps, fetched, ["ENG"])
+        self.assertEqual(sorted(todo["fixture_id"]), ["marked_early", "none", "upcoming_only"])
+
     def test_fixtures_without_a_recent_winamax_snapshot_in_the_window_are_selected(self):
         now = pd.Timestamp("2026-11-05T14:52:00Z")
         fx = pd.DataFrame([

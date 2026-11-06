@@ -358,6 +358,19 @@ class SuggestMatchTests(unittest.TestCase):
         self.assertEqual(out["closeBets"], 2); self.assertAlmostEqual(out["earlyEdge"], (2.0 / 1.8 - 1 + 0) / 2, places=4); self.assertEqual(out["oddsDroppedRate"], 0.5)
         self.assertEqual(product.early_block(pd.DataFrame({"odds": []}))["closeBets"], 0)
 
+    def test_winamax_closing_is_recomputed_when_the_archive_is_completed(self):
+        ko = pd.Timestamp("2026-11-03T19:45:00Z")
+        now = ko + pd.Timedelta(hours=12)
+        row = lambda sid, kick, closing: {"suggestion_id": sid, "fixture_id": "f1", "market_id": 101, "outcome_id": 101, "kickoff_utc": kick.isoformat(), "odds": 2.0, "closing_odds": closing}
+        journal = pd.DataFrame([row("recent", ko, 2.0), row("old", ko - pd.Timedelta(days=30), 2.0), row("future", now + pd.Timedelta(days=1), None)])
+        snap = lambda minutes, price: {"fixture_id": "f1", "bookmaker": "winamax.fr", "market_id": 101, "outcome_id": 101, "player_id": None,
+                                       "created_at": ko + pd.Timedelta(minutes=minutes), "price": price}
+        snaps = pd.DataFrame([snap(-150, 2.0), snap(-8, 1.85), snap(3, 1.2)])   # relevé d'avant-match tardif ; le relevé en direct est ignoré
+        n = product.update_winamax_closing(journal, snaps, now)
+        self.assertEqual(n, 1)
+        self.assertEqual(journal["closing_odds"].tolist()[:2], [1.85, 2.0])       # hors fenêtre de recalcul : inchangée
+        self.assertTrue(pd.isna(journal.iloc[2]["closing_odds"]))                 # match pas commencé
+
     def test_combo_settlement_follows_winamax_rules_and_history_keeps_the_last_version(self):
         res = pd.DataFrame([{"match_id": "a", "ft_home": 2, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
                             {"match_id": "b", "ft_home": 1, "ft_away": 1, "ht_home": 0, "ht_away": 1, "first_goal": "away", "last_goal": "home"}])
