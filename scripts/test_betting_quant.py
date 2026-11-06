@@ -340,6 +340,25 @@ class SuggestMatchTests(unittest.TestCase):
         self.assertEqual(bare["profiles"]["exploratoire"]["suggestions"], [])     # sans archive : aucune probabilité de marché inventée
         self.assertIsNone(res["profiles"]["exploratoire"]["combo"])                  # jamais de combiné d'un même match
 
+    def test_combo_settlement_follows_winamax_rules_and_history_keeps_the_last_version(self):
+        res = pd.DataFrame([{"match_id": "a", "ft_home": 2, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
+                            {"match_id": "b", "ft_home": 1, "ft_away": 1, "ht_home": 0, "ht_away": 1, "first_goal": "away", "last_goal": "home"}])
+        home_a = {"matchId": "a", "marketId": 101, "outcomeId": 101, "odds": 1.8}                 # Club A gagne : gagné
+        home_b = {"matchId": "b", "marketId": 101, "outcomeId": 101, "odds": 2.0}                 # perdu (nul)
+        draw_b = {"matchId": "b", "marketId": 101, "outcomeId": 102, "odds": 3.5}                 # gagné
+        self.assertEqual(product.settle_combo([home_a, draw_b], res, CAT), ("won", round(1.8 * 3.5 - 1, 4)))
+        self.assertEqual(product.settle_combo([home_a, home_b], res, CAT), ("lost", -1.0))
+        self.assertIsNone(product.settle_combo([home_a, {"matchId": "zz", "marketId": 101, "outcomeId": 101, "odds": 2.0}], res, CAT))
+        self.assertEqual(product.LEG_FACTOR[0.5](2.0), 1.5); self.assertEqual(product.LEG_FACTOR[-0.5](2.0), 0.5); self.assertEqual(product.LEG_FACTOR[-2.0](2.0), 1.0)
+        legs = lambda odds: json.dumps([{**home_a, "label": "x", "match": "A"}, {**draw_b, "label": "y", "match": "B", "odds": odds}])
+        j = pd.DataFrame([{"combo_id": "1", "published_at": "2026-11-07T10:00:00+00:00", "date": "2026-11-07", "legs": legs(3.4), "odds": 6.1, "joint_p": 0.12, "joint_model": 0.15, "ev": -0.2,
+                           "stake_fraction": 0.005, "status": None, "realised": None, "settled_at": None},
+                          {"combo_id": "2", "published_at": "2026-11-07T14:00:00+00:00", "date": "2026-11-07", "legs": legs(3.5), "odds": 6.3, "joint_p": 0.12, "joint_model": 0.15, "ev": -0.19,
+                           "stake_fraction": 0.005, "status": "won", "realised": 5.3, "settled_at": "x"}])
+        hist = product.combo_history(j, dt.datetime(2026, 11, 8, tzinfo=dt.timezone.utc))
+        self.assertEqual(len(hist), 1); self.assertEqual((hist[0]["odds"], hist[0]["status"], hist[0]["realised"]), (6.3, "won", 5.3))
+        self.assertEqual(product.combo_history(j.iloc[:1], dt.datetime(2026, 11, 8, tzinfo=dt.timezone.utc))[0]["status"], "pending")
+
     def test_day_combos_join_different_matches_within_odds_bounds_and_best_market_value(self):
         legs = [{"matchId": "a", "match": "A", "label": "x", "odds": 1.8, "pRef": 0.53, "p": 0.6, "kickoff": "2026-11-07T15:00:00Z"},
                 {"matchId": "b", "match": "B", "label": "y", "odds": 2.1, "pRef": 0.45, "p": 0.5, "kickoff": "2026-11-07T17:00:00Z"},

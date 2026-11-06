@@ -37,6 +37,8 @@ from .phase2 import OUT as PHASE2, frozen_variant, load_results as _pitchapi_res
 from .results import half_share
 
 JOURNAL = RESEARCH / "journal" / "suggestions.parquet"
+COMBO_JOURNAL = RESEARCH / "journal" / "combos.parquet"     # combinés du jour du profil exploratoire
+COMBO_COLUMNS = ["combo_id", "published_at", "date", "legs", "odds", "joint_p", "joint_model", "ev", "stake_fraction", "status", "realised", "settled_at"]
 BILAN = RESEARCH / "product" / "bilan.json"
 EXPORT_DIR = ROOT / "public" / "data" / "forecast" / "suggestions"
 SEASON = "2026-27"
@@ -254,7 +256,7 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
                     # catégorie B : segment validé par la porte sur la probabilité dé-viguée de Winamax lui-même ; la
                     # référence est alors le marché Winamax complet (Shin), la cote jouée reste la cote Winamax brute
                     market = cat.get(mid)
-                    fam = next((sp.family for sp in (market.spec(int(o)) for o in market.outcomes) if sp is not None), None) if market is not None else None
+                    fam = next((sp.segment for sp in (market.spec(int(o)) for o in market.outcomes) if sp is not None), None) if market is not None else None
                     if fam and weights.reference(fam, competition) == "winamax" and weights.weight(fam, competition) > 0:
                         ref = sharp.market_reference(snaps, cat, mid, before, bookmakers=(BOOKMAKER,))
                 refs[mid] = ref
@@ -525,6 +527,80 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
 
 
 HISTORY_DAYS = 14
+# règlement d'une sélection dans un combiné (règles Winamax) : facteur appliqué à la cote du combiné
+LEG_FACTOR = {1.0: lambda o: o, 0.5: lambda o: (1.0 + o) / 2.0, -2.0: lambda o: 1.0, -0.5: lambda o: 0.5, 0.0: lambda o: 0.0}
+
+
+def settle_combo(legs: list[dict], results: pd.DataFrame, cat) -> tuple[str, float] | None:
+    """Statut et gain net pour 1 € d'un combiné quand tous ses matchs sont terminés, None sinon. Sélection perdue : combiné
+    perdu ; remboursée : sa cote sort du combiné ; demi-gagnée / demi-perdue : (1 + cote) / 2 ou 0,5 (règle Winamax)."""
+    res = results.drop_duplicates("match_id").set_index("match_id")
+    factor = 1.0
+    codes = []
+    for leg in legs:
+        if leg["matchId"] not in res.index or leg.get("marketId") is None:
+            return None
+        r_ = res.loc[leg["matchId"]]
+        spec = cat[int(leg["marketId"])].spec(int(leg["outcomeId"]))
+        settled = mk.settle(spec, mk.Result(int(r_.ft_home), int(r_.ft_away), int(r_.ht_home), int(r_.ht_away), r_.first_goal, r_.last_goal))
+        code = -2.0 if settled is None else float(settled)
+        codes.append(code)
+        factor *= LEG_FACTOR[code](float(leg["odds"]))
+    realised = round(factor - 1.0, 4)
+    if 0.0 in codes:
+        return "lost", -1.0
+    if all(c == -2.0 for c in codes):
+        return "void", 0.0
+    if all(c in (1.0, -2.0) for c in codes):
+        return "won", realised
+    return ("half_won" if realised > 0 else "half_lost"), realised
+
+
+def combo_journal_append(entries: list[dict], published_at: dt.datetime, results: pd.DataFrame, cat) -> pd.DataFrame:
+    """Ajoute au journal des combinés ceux du jour publiés avant le premier coup d'envoi de leurs sélections (clé = date et
+    sélections : un même combiné republié n'est pas dupliqué), puis règle ceux dont tous les matchs sont terminés."""
+    existing = pd.read_parquet(COMBO_JOURNAL) if COMBO_JOURNAL.exists() else pd.DataFrame(columns=COMBO_COLUMNS)
+    rows = []
+    for day in explore_day_combos(entries):
+        for c in day["combos"]:
+            first = min(pd.Timestamp(l["kickoff"]) for l in c["legs"])
+            if first <= pd.Timestamp(published_at):
+                continue
+            key = "|".join(sorted(f"{l['matchId']}:{l['marketId']}:{l['outcomeId']}" for l in c["legs"]))
+            cid = hashlib.sha1(f"{day['date']}|{key}".encode()).hexdigest()[:16]
+            rows.append({"combo_id": cid, "published_at": published_at.isoformat(), "date": day["date"], "legs": json.dumps(c["legs"], ensure_ascii=False),
+                         "odds": c["odds"], "joint_p": c["jointP"], "joint_model": c["jointModel"], "ev": c["ev"], "stake_fraction": c["stakeFraction"],
+                         "status": None, "realised": None, "settled_at": None})
+    new = pd.DataFrame(rows, columns=COMBO_COLUMNS)
+    new = new[~new["combo_id"].isin(existing["combo_id"])]
+    journal = pd.concat([existing, new], ignore_index=True) if len(new) else existing.copy()
+    for i in journal[journal["status"].isna()].index:
+        out = settle_combo(json.loads(journal.at[i, "legs"]), results, cat)
+        if out is not None:
+            journal.at[i, "status"], journal.at[i, "realised"] = out
+            journal.at[i, "settled_at"] = published_at.isoformat()
+    COMBO_JOURNAL.parent.mkdir(parents=True, exist_ok=True)
+    journal.to_parquet(COMBO_JOURNAL, index=False)
+    return journal
+
+
+def combo_history(journal: pd.DataFrame, now: dt.datetime, days: int = HISTORY_DAYS) -> list[dict]:
+    """Combinés du jour des `days` derniers jours (et à venir), le plus récent d'abord ; pour une même date et un même
+    nombre de sélections, la dernière version publiée."""
+    if journal.empty:
+        return []
+    j = journal.copy()
+    j["n"] = j["legs"].map(lambda x: len(json.loads(x)))
+    j = j[pd.to_datetime(j["date"]) >= pd.Timestamp(now.date()) - pd.Timedelta(days=days)]
+    j = j.sort_values("published_at").groupby(["date", "n"], as_index=False).last()
+    out = []
+    for r_ in j.sort_values(["date", "n"], ascending=[False, True]).itertuples(index=False):
+        out.append({"date": r_.date, "legs": json.loads(r_.legs), "odds": float(r_.odds), "jointP": float(r_.joint_p), "ev": float(r_.ev),
+                    "stakeFraction": float(r_.stake_fraction), "status": r_.status if isinstance(r_.status, str) else "pending",
+                    "realised": None if r_.realised is None or pd.isna(r_.realised) else float(r_.realised)})
+    return out
+
+
 SETTLED_STATUS = {1.0: "won", 0.0: "lost", 0.5: "half_won", -0.5: "half_lost", -2.0: "void"}
 EVENING_STATUS = {"gagné": "won", "perdu": "lost", "remboursé": "void", "moitié gagnée": "half_won", "moitié perdue": "half_lost"}
 
@@ -598,7 +674,7 @@ def explore_day_combos(entries: list[dict]) -> list[dict]:
             continue
         day = pd.Timestamp(e["kickoff"]).tz_convert("Europe/Paris").strftime("%Y-%m-%d")
         by_day.setdefault(day, []).append({"matchId": e["matchId"], "match": f"{e['home']} – {e['away']}", "label": top["label"], "odds": top["odds"],
-                                           "pRef": top["pRef"], "p": top["p"], "kickoff": e["kickoff"]})
+                                           "pRef": top["pRef"], "p": top["p"], "kickoff": e["kickoff"], "marketId": top.get("marketId"), "outcomeId": top.get("outcomeId")})
     return [{"date": d, "combos": sg.day_combos(legs)} for d, legs in sorted(by_day.items()) if len(legs) >= 2]
 
 
@@ -634,7 +710,8 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
                "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights, "calibrationMargins": sharp.PoolWeights.load().margins,
                              "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
                "matches": entries, "exploreCombos": explore_day_combos(entries), "bilan": bilan, "journal": js, "evenings": evenings[-30:],
-               "history": history(journal, results, names, generated_at)}
+               "history": history(journal, results, names, generated_at),
+               "comboHistory": combo_history(pd.read_parquet(COMBO_JOURNAL) if COMBO_JOURNAL.exists() else pd.DataFrame(columns=COMBO_COLUMNS), generated_at)}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = EXPORT_DIR / "index.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
@@ -655,6 +732,7 @@ def main(argv=None) -> int:
         entries = upcoming_suggestions(now)
         snaps = pd.concat([pd.read_parquet(p) for c in COMPETITIONS for p in sorted((RESEARCH / "odds" / c).glob("*.parquet"))], ignore_index=True)
         journal_append(entries, now, load_results(), load_catalogue(), snaps)
+        combo_journal_append(entries, now, load_results(), load_catalogue())
         ok = [e for e in entries if e.get("status") == "ok"]
         print(f"{len(entries)} rencontres à venir, {len(ok)} avec cotes et suggestions")
         if args.cmd in ("export", "all"):

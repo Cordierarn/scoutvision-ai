@@ -4,7 +4,7 @@
  * la bankroll saisie, l'âge d'une cote et les libellés.
  */
 
-import type { BetStatus, BilanBlock, BilanProfile, HistoryBet, HistoryDay, StakeMode, SuggestionProfile } from '../../services/replayData';
+import type { BetStatus, BilanBlock, BilanProfile, ComboHistoryEntry, HistoryBet, HistoryDay, StakeMode, SuggestionProfile } from '../../services/replayData';
 
 export const PROFILE_ORDER: SuggestionProfile[] = ['sur', 'equilibre', 'grosse_cote', 'exploratoire'];
 export const PROFILE_LABELS: Record<SuggestionProfile, string> = { sur: 'Sûr', equilibre: 'Équilibré', grosse_cote: 'Grosse cote', exploratoire: 'Exploratoire' };
@@ -131,4 +131,19 @@ export function historySummary(days: HistoryDay[], profile: SuggestionProfile, b
     bets, settled, won, hitRate: decided ? won / decided : null, staked: Math.round(staked * 100) / 100, net: Math.round(net * 100) / 100,
     clvBets, meanClv: clvBets ? clvSum / clvBets : null, clvBeatRate: clvBets ? clvBeat / clvBets : null,
   };
+}
+
+/** Bilan des combinés du jour réglés (hors remboursés pour la mise) : nombre, gagnés, misé et net en euros. */
+export function comboSummary(combos: ComboHistoryEntry[], bankroll: number | null): { settled: number; won: number; staked: number; net: number } {
+  let settled = 0, won = 0, staked = 0, net = 0;
+  for (const c of combos) {
+    if (c.status === 'pending' || c.realised === null) continue;
+    settled++;
+    if (c.realised > 0) won++;
+    if (bankroll === null || c.status === 'void') continue;
+    const stake = stakeEuros(bankroll, c.stakeFraction);
+    staked += stake;
+    net += Math.round(stake * c.realised * 100) / 100;
+  }
+  return { settled, won, staked: Math.round(staked * 100) / 100, net: Math.round(net * 100) / 100 };
 }
