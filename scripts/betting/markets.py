@@ -40,23 +40,80 @@ SUPPORTED = tuple(FAMILIES)
 
 @dataclass(frozen=True)
 class Result:
-    """Résultat réel : buts par période, équipe du premier et du dernier but ('home', 'away', 'none')."""
+    """Résultat réel : buts par période, équipe du premier et du dernier but ('home', 'away', 'none').
+    Mi-temps (`ht_home`, `ht_away`) et ordre des buts (`first_goal`, `last_goal`) valent None quand la source ne les
+    donne pas de façon fiable : les marchés qui en dépendent ne sont alors pas réglables (jamais une valeur inventée)."""
 
     ft_home: int
     ft_away: int
-    ht_home: int
-    ht_away: int
-    first_goal: str = "none"
-    last_goal: str = "none"
+    ht_home: int | None
+    ht_away: int | None
+    first_goal: str | None = "none"
+    last_goal: str | None = "none"
+
+    @property
+    def has_half_time(self) -> bool:
+        return self.ht_home is not None and self.ht_away is not None
+
+    @property
+    def has_goal_order(self) -> bool:
+        return self.first_goal is not None and self.last_goal is not None
 
     def period(self, period: str) -> tuple[int, int]:
         if period == "fulltime":
             return self.ft_home, self.ft_away
+        if not self.has_half_time:
+            raise MissingResult(f"mi-temps inconnue : période {period} non réglable")
         if period == "p1":
             return self.ht_home, self.ht_away
         if period == "p2":
             return self.ft_home - self.ht_home, self.ft_away - self.ht_away
         raise ValueError(period)
+
+
+class MissingResult(ValueError):
+    """Le résultat connu ne suffit pas à régler la sélection (mi-temps ou ordre des buts absents)."""
+
+
+def _known(v) -> bool:
+    if v is None:
+        return False
+    try:
+        return not math.isnan(float(v))
+    except (TypeError, ValueError):
+        return True
+
+
+def result_from(ft_home, ft_away, ht_home=None, ht_away=None, first_goal=None, last_goal=None) -> Result:
+    """Résultat à partir de valeurs brutes (ligne de tableau, dict) : NaN et None restent inconnus, jamais 0."""
+    ht_ok = _known(ht_home) and _known(ht_away)
+    order_ok = _known(first_goal) and _known(last_goal) and str(first_goal) in ("home", "away", "none") and str(last_goal) in ("home", "away", "none")
+    return Result(int(ft_home), int(ft_away), int(ht_home) if ht_ok else None, int(ht_away) if ht_ok else None,
+                  str(first_goal) if order_ok else None, str(last_goal) if order_ok else None)
+
+
+def result_from_row(r) -> Result:
+    get = (lambda k: r.get(k)) if isinstance(r, dict) else (lambda k: getattr(r, k, None))
+    return result_from(get("ft_home"), get("ft_away"), get("ht_home"), get("ht_away"), get("first_goal"), get("last_goal"))
+
+
+# marchés du temps réglementaire qui se règlent sur le score de chaque mi-temps
+HALF_TIME_TYPES = frozenset({"toscoreinbh-team1", "toscoreinbh-team2", "winbothh-team1", "winbothh-team2", "wineitherh-team1", "wineitherh-team2",
+                             "halftime-fulltime"})
+GOAL_ORDER_TYPES = frozenset({"firstgoal", "lastgoal"})
+
+
+def needs_half_time(spec: "Spec") -> bool:
+    return spec.period != "fulltime" or spec.market_type in HALF_TIME_TYPES
+
+
+def needs_goal_order(spec: "Spec") -> bool:
+    return spec.market_type in GOAL_ORDER_TYPES
+
+
+def settleable(spec: "Spec", result: Result) -> bool:
+    """La sélection peut-elle être réglée avec ce résultat ? Sinon elle reste en attente."""
+    return (result.has_half_time or not needs_half_time(spec)) and (result.has_goal_order or not needs_goal_order(spec))
 
 
 @dataclass(frozen=True)
@@ -170,11 +227,15 @@ def settle_arrays(spec: Spec, h, a, ht_h=None, ht_a=None, first=None, last=None)
 
 
 def settle(spec: Spec, result: Result) -> float | None:
-    """Règlement scalaire sur le résultat réel : 1, 0, 0.5, -0.5 ou None (remboursé)."""
+    """Règlement scalaire sur le résultat réel : 1, 0, 0.5, -0.5 ou None (remboursé). `MissingResult` quand la
+    mi-temps ou l'ordre des buts nécessaires sont inconnus : la sélection reste en attente."""
+    if not settleable(spec, result):
+        raise MissingResult(f"{spec.market_type} ({spec.period}) : mi-temps ou ordre des buts inconnus")
     h, a = result.period(spec.period)
     code = {"home": 1, "away": 2, "none": 0}
-    out = settle_arrays(spec, np.array([h]), np.array([a]), np.array([result.ht_home]), np.array([result.ht_away]),
-                        np.array([code[result.first_goal]]), np.array([code[result.last_goal]]))
+    ht_h, ht_a = (result.ht_home, result.ht_away) if result.has_half_time else (0, 0)       # non lus par les marchés du temps réglementaire
+    first, last = (result.first_goal, result.last_goal) if result.has_goal_order else ("none", "none")
+    out = settle_arrays(spec, np.array([h]), np.array([a]), np.array([ht_h]), np.array([ht_a]), np.array([code[first]]), np.array([code[last]]))
     v = float(out[0])
     return None if math.isnan(v) else v
 

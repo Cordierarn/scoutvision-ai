@@ -190,6 +190,50 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(j4.iloc[0]["settled_at"], j3.iloc[0]["settled_at"])   # réglé une seule fois
 
 
+    def test_journal_is_resettled_and_a_half_time_bet_without_half_time_is_pending(self):
+        from betting import catalogue
+        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]},
+                               {"marketId": 201, "marketType": "totals", "period": "p1", "handicap": 1.5, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 201, "outcomeName": "Over"}, {"outcomeId": 202, "outcomeName": "Under"}]},
+                               {"marketId": 301, "marketType": "firstgoal", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 301, "outcomeName": "1"}, {"outcomeId": 302, "outcomeName": "No Goal"}, {"outcomeId": 303, "outcomeName": "2"}]}])
+        s = lambda r, mid, oid, label: {"rank": r, "marketId": mid, "outcomeId": oid, "family": "x", "label": label, "odds": 2.0, "oddsAt": NOW.isoformat(), "p": 0.5, "ev": 0.0,
+                                        "stakeFraction": 0.01, "stakeMode": "fixed"}
+        entries = [{"status": "ok", "matchId": "m1", "competition": "AAA", "kickoff": KO.isoformat(), "profiles": {"sur": {"suggestions": [
+            s(1, 101, 101, "Club A gagne"), s(2, 201, 202, "Moins de 1,5 but (1re mi-temps)"), s(3, 301, 301, "Club A marque le premier")]}}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            product.JOURNAL = Path(tmp) / "journal.parquet"
+            # ancien règlement : mi-temps 0-0 inventée faute de score de mi-temps
+            wrong = pd.DataFrame([{"match_id": "m1", "ft_home": 3, "ft_away": 0, "ht_home": 0, "ht_away": 0, "first_goal": "none", "last_goal": "none"}])
+            j1 = product.journal_append(entries, NOW, wrong, cat)
+            self.assertEqual(j1["settled"].tolist(), [1.0, 1.0, 0.0])
+            unknown = pd.DataFrame([{"match_id": "m1", "ft_home": 3, "ft_away": 0, "ht_home": None, "ht_away": None, "first_goal": None, "last_goal": None}])
+            j2 = product.journal_append([], NOW + dt.timedelta(days=1), unknown, cat)
+            self.assertEqual(float(j2.iloc[0]["settled"]), 1.0)                      # temps réglementaire : inchangé
+            self.assertEqual(j2.iloc[0]["settled_at"], j1.iloc[0]["settled_at"])
+            self.assertTrue(pd.isna(j2.iloc[1]["settled"]) and pd.isna(j2.iloc[1]["realised"]) and pd.isna(j2.iloc[1]["settled_at"]))   # en attente
+            self.assertTrue(pd.isna(j2.iloc[2]["settled"]))
+            right = pd.DataFrame([{"match_id": "m1", "ft_home": 3, "ft_away": 0, "ht_home": 2, "ht_away": 0, "first_goal": "home", "last_goal": "home"}])
+            j3 = product.journal_append([], NOW + dt.timedelta(days=2), right, cat)
+            self.assertEqual(j3["settled"].tolist(), [1.0, 0.0, 1.0])
+            self.assertEqual(j3["realised"].tolist(), [1.0, -1.0, 1.0])
+            self.assertEqual(j3.iloc[1]["settled_at"], (NOW + dt.timedelta(days=2)).isoformat())
+
+    def test_combo_with_a_leg_lacking_its_half_time_is_not_settled(self):
+        from betting import catalogue
+        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]},
+                               {"marketId": 201, "marketType": "totals", "period": "p1", "handicap": 1.5, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 201, "outcomeName": "Over"}, {"outcomeId": 202, "outcomeName": "Under"}]}])
+        legs = [{"matchId": "m1", "marketId": 101, "outcomeId": 101, "odds": 1.5}, {"matchId": "m2", "marketId": 201, "outcomeId": 202, "odds": 1.6}]
+        res = pd.DataFrame([{"match_id": "m1", "ft_home": 1, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
+                            {"match_id": "m2", "ft_home": 2, "ft_away": 2, "ht_home": None, "ht_away": None, "first_goal": None, "last_goal": None}])
+        self.assertIsNone(product.settle_combo(legs, res, cat))
+        res.loc[1, ["ht_home", "ht_away"]] = [0, 0]
+        self.assertEqual(product.settle_combo(legs, res, cat), ("won", round(1.5 * 1.6 - 1, 4)))
+
+
 class HistoryTests(unittest.TestCase):
     def row(self, mid, profile, rank, published, kick, settled=None, realised=None, label="Club A gagne"):
         return {"suggestion_id": f"{mid}{profile}{rank}{published}", "published_at": published.isoformat(), "match_id": mid, "fixture_id": None, "competition": "AAA",
@@ -225,6 +269,57 @@ class HistoryTests(unittest.TestCase):
         single, combo = product.evening_details(ev, {"m1": ("Club A", "Club B")})
         self.assertEqual((single["match"], single["status"], single["profit"]), ("Club A – Club B", "won", 4.8))
         self.assertEqual((combo["label"], combo["legs"], combo["odds"], combo["status"]), ("x + y", 2, 3.0, "pending"))
+
+
+
+class MeasureTests(unittest.TestCase):
+    """Mesure : paris jouables seulement, intervalles par grappes de match, bilan daté du moteur."""
+
+    def row(self, mid, profile, published, kick, settled=None, realised=None, clv=None, rank=1, sid=None):
+        return {"suggestion_id": sid or f"{mid}{profile}{rank}{published}", "published_at": published.isoformat(), "match_id": mid, "fixture_id": "f" + mid, "competition": "AAA",
+                "kickoff_utc": kick.isoformat(), "profile": profile, "rank": rank, "kind": "simple", "market_id": 101, "outcome_id": 101, "family": "résultat",
+                "label": "Club A gagne", "odds": 2.0, "odds_at": published.isoformat(), "p": 0.5, "ev": 0.0, "stake_fraction": 0.02, "stake_mode": "fixed",
+                "settled": settled, "realised": realised, "settled_at": None, "clv": clv, "closing_odds": None}
+
+    def test_summary_counts_each_playable_bet_once(self):
+        # republiée trois fois avant le coup d'envoi, puis une fois après : un seul pari jouable, la dernière publication d'avant
+        rows = [self.row("m1", "sur", NOW - dt.timedelta(hours=h), KO, settled=1.0, realised=1.0) for h in (6, 3, 1)]
+        rows.append(self.row("m1", "sur", KO + dt.timedelta(minutes=30), KO, settled=0.0, realised=-1.0))
+        rows.append(self.row("m2", "sur", NOW, KO, settled=0.0, realised=-1.0))
+        rows.append(self.row("m3", "sur", NOW, KO))                                   # en attente
+        out = product.journal_summary(pd.DataFrame(rows))
+        sur = out["byProfile"]["sur"]
+        self.assertEqual((out["published"], out["playable"], out["settled"]), (6, 3, 2))
+        self.assertEqual(sur["bets"], 2); self.assertAlmostEqual(sur["returnFlat"], 0.0); self.assertEqual(sur["hitRate"], 0.5)
+        self.assertEqual(sur["matches"], 2)
+
+    def test_cluster_interval_resamples_matches_not_bets(self):
+        values = np.array([1.0] * 10 + [-1.0] * 10)
+        one_match = product.cluster_ci(values, np.array(["a"] * 10 + ["b"] * 10))
+        many = product.cluster_ci(values, np.arange(20).astype(str))
+        self.assertGreater(one_match[1] - one_match[0], many[1] - many[0])         # deux matchs : bien moins d'information que vingt
+        self.assertEqual(product.cluster_ci(values, np.arange(20).astype(str)), many)   # graine fixe
+        self.assertEqual(product.cluster_ci(np.array([0.1]), np.array(["a"])), (None, None))
+
+    def test_clv_block_has_a_match_cluster_interval_on_playable_bets(self):
+        rows = [self.row(f"m{i}", "exploratoire", NOW, KO, clv=c) for i, c in enumerate([-0.12, -0.10, -0.09, -0.11])]
+        rows.append(self.row("m0", "exploratoire", NOW - dt.timedelta(hours=2), KO, clv=0.5))   # republication remplacée : ignorée
+        b = product.journal_summary(pd.DataFrame(rows))["byProfile"]["exploratoire"]
+        self.assertEqual(b["clvBets"], 4); self.assertAlmostEqual(b["meanClv"], -0.105)
+        self.assertLess(b["clvHigh"], 0); self.assertLess(b["clvLow"], b["meanClv"]); self.assertEqual(b["clvMatches"], 4)
+
+    def test_bilan_covers_every_profile_and_records_the_engine(self):
+        tab = pd.DataFrame([{"match_id": f"m{i}", "competition": "AAA", "kickoff_utc": KO + dt.timedelta(days=i), "profile": p, "kind": "simple", "rank": 1, "family": "résultat",
+                             "odds": 2.0, "p": 0.5, "ev": 0.0, "stake_fraction": 0.01, "stake_mode": "fixed", "p_sharp": None, "p_ref": None, "ev_ref": None,
+                             "clv": None, "settled": 1.0, "realised": 1.0} for i in range(3) for p in ("sur", "exploratoire", "ancien")])
+        b = product.summarise(tab)
+        self.assertEqual(set(b["profiles"]), {"sur", "equilibre", "grosse_cote", "exploratoire", "ancien"})
+        self.assertEqual(b["profiles"]["ancien"]["overall"]["bets"], 3)
+        self.assertEqual(b["engine"], product.engine_fingerprint())
+        self.assertIn("returnLow", b["profiles"]["sur"]["overall"])
+        self.assertFalse(product.bilan_is_stale(b))
+        self.assertTrue(product.bilan_is_stale({**b, "engine": "ancien"}))
+        self.assertTrue(product.bilan_is_stale(None))
 
 
 if __name__ == "__main__":

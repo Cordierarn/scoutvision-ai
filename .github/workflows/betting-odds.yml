@@ -1,10 +1,10 @@
 # Labo paris : cycle quotidien des cotes Winamax FR (OddsPapi) et des suggestions de paris.
 #
-# - Le soir (10 h, 14 h, 17 h UTC) : rencontres des 8 compétitions, relevés des rencontres à venir
-#   (/historical-odds, non décompté), historiques des matchs terminés, vues, appariement, suggestions et
-#   journal (immuable), export de l'artefact lu par l'onglet « Matchs à venir ».
-# - Le matin (06 h 30 UTC) : résultats de la veille (tableau de scores public ESPN, sans clé), règlement
-#   des suggestions publiées, historique des soirées avec cumul, export.
+# Quatre passages par jour (05 h 37, 09 h 13, 13 h 41, 16 h 47 UTC), tous identiques : rencontres, cotes des
+# rencontres à venir, historiques complets des matchs terminés qui n'en ont pas encore, référence sharp, résultats
+# (tableau de scores public ESPN, sans clé), règlement, suggestions et journal (immuable), soirées, export.
+# Ce qui est lourd (fenêtre de rencontres de toute la saison, historiques) est décidé par l'état de l'archive
+# (betting/cycle.py), jamais par l'heure : GitHub retarde ou saute des créneaux planifiés, journalisés à chaque passage.
 # Les deux publient l'archive dans la release privée `betting-odds` du dépôt de données et l'artefact des
 # suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
 #
@@ -15,8 +15,11 @@ name: Labo paris — cotes et suggestions
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 6 * * *"
-    - cron: "0 10,14,17 * * *"
+    # hors des heures rondes, encombrées chez GitHub (créneaux retardés ou sautés) ; identiques à betting/cycle.py:SLOTS
+    - cron: "37 5 * * *"
+    - cron: "13 9 * * *"
+    - cron: "41 13 * * *"
+    - cron: "47 16 * * *"
 
 permissions:
   contents: read
@@ -75,6 +78,9 @@ jobs:
             echo "aucune archive de cotes : premier passage"
           fi
 
+      - name: Journal du passage (créneaux planifiés manqués)
+        run: cd scripts && python3 -m betting.cycle record --event "${{ github.event_name }}"
+
       - name: Cotes Winamax (rencontres, relevés à venir, historiques, vues, appariement)
         env:
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
@@ -82,33 +88,30 @@ jobs:
           if [ -z "$ODDSPAPI_API_KEY" ]; then echo "::warning::Secret ODDSPAPI_API_KEY absent : étapes de cotes sautées."; exit 0; fi
           cd scripts
           python3 -m betting.fetch status --account --sync
-          # passage complet le matin, ou tant que l'archive de cotes est incomplète
-          FULL=0
-          if [ "$(date -u +%H)" -lt 9 ] || [ ! -d ../.research/betting/odds ] || [ "$(find ../.research/betting/odds -name '*.parquet' | wc -l)" -lt 8 ]; then FULL=1; fi
-          if [ "$FULL" = 1 ]; then
-            # toute la saison (14 fenêtres) pour rattraper les matchs joués
-            python3 -m betting.fetch fixtures --from 2026-07-01 --to "$(date -u -d '+9 days' +%F)"
-          else
-            python3 -m betting.fetch fixtures --from "$(date -u -d '-1 day' +%F)" --to "$(date -u -d '+9 days' +%F)"
-          fi
+          # fenêtre des rencontres décidée par l'état de l'archive : toute la saison si une compétition manque, sinon depuis la
+          # plus ancienne rencontre jouée dont le statut n'est pas encore final (au plus tard la veille)
+          eval "$(python3 -m betting.cycle plan --stage fixtures)"
+          python3 -m betting.fetch fixtures --from "$FIXTURES_FROM" --to "$(date -u -d '+9 days' +%F)"
           # cotes courantes des matchs à venir : un appel par tournoi (quelques secondes)
           python3 -m betting.fetch upcoming --days 7 --refresh-stale 2 --max-requests 60
-          # historique des matchs terminés : environ 6,5 s par match (limite d'OddsPapi), donc le matin seulement ;
-          # les suggestions de l'après-midi n'en ont pas besoin
-          if [ "$FULL" = 1 ]; then python3 -m betting.fetch history --max-requests 400; fi
+          # historiques complets (environ 6,5 s par match, non décomptés) dès qu'un match terminé n'a pas le sien, à
+          # n'importe quel passage : la clôture Winamax et le règlement n'attendent pas un créneau du matin
+          eval "$(python3 -m betting.cycle plan --stage history)"
+          if [ "$HISTORY" = 1 ]; then python3 -m betting.fetch history --max-requests 400; fi
           python3 -m betting.fetch views
           python3 -m betting.fetch match
           python3 -m betting.fetch status
 
       - name: "Référence sharp (The Odds API : Pinnacle, Betfair Exchange)"
-        # Un crédit par marché et par compétition ayant une rencontre sous 36 h (3 marchés) ; plan gratuit 500 par mois,
-        # réserve de 25. Écrit dans l'archive sous les bookmakers pinnacle / betfair-ex, lus par le coupe-circuit.
+        # Un passage par jour (le premier passage du cycle à partir de 09 h UTC), rencontres des 24 h suivantes : un crédit par
+        # marché et par compétition ayant une rencontre dans la fenêtre (3 marchés), de l'ordre de 300 crédits par mois pour un
+        # plan gratuit de 500, réserve de 25. Écrit dans l'archive sous les bookmakers pinnacle / betfair-ex.
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
           if [ -z "$THE_ODDS_API_KEY" ]; then echo "::warning::Secret THE_ODDS_API_KEY absent : pas de référence sharp, donc aucun pari validé."; exit 0; fi
           cd scripts
-          python3 -m betting.sharpfeed pull --hours 36 || echo "::warning::référence sharp indisponible à ce passage (voir ci-dessus)"
+          python3 -m betting.sharpfeed pull --daily --hours 24 --not-before 09:00 || echo "::warning::référence sharp indisponible à ce passage (voir ci-dessus)"
           python3 -m betting.sharpfeed status
 
       - name: Résultats de la veille (ESPN) et règlement
@@ -116,26 +119,29 @@ jobs:
           cd scripts
           python3 -m betting.results_web --date "$(date -u -d '-1 day' +%F)"
           python3 -m betting.results_web --date "$(date -u +%F)" || true
+          # dates dont une rencontre terminée n'a pas encore de mi-temps reconstruite (lecture antérieure, buts incomplets) :
+          # relues pour que les paris de mi-temps soient réglés, ou restent en attente, jamais sur un 0-0 inventé
+          python3 -m betting.results_web --refresh-incomplete 14
 
       - name: Suggestions, journal, bilan, historique des soirées, export
         env:
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
         run: |
           cd scripts
-          # rejeu de la saison recalculé le matin (archive de cotes complétée la veille) ou s'il manque
-          if [ ! -f ../.research/betting/product/bilan.json ] || [ "$(date -u +%H)" -lt 9 ]; then python3 -m betting.product replay || echo "::warning::rejeu impossible (archive de cotes incomplète)"; fi
+          # rejeu relancé quand le bilan manque ou vient d'un autre moteur (empreinte des sources et des paramètres figés)
+          python3 -m betting.product replay --if-stale || echo "::warning::rejeu impossible (archive de cotes incomplète)"
           # porte de validation universelle : la catégorie B (référence Winamax dé-viguée) a besoin de l'archive de cotes, présente ici seulement
           python3 -m betting.gate --write || echo "::warning::porte de validation non recalculée (poids et marges de l'amorce conservés)"
           python3 -m betting.product suggest
-          python3 -m betting.evening auto --date "$(date -u -d '-1 day' +%F)"
-          python3 -m betting.evening settle --date "$(date -u -d '-1 day' +%F)"
-          python3 -m betting.evening settle --pending   # combinés à cheval sur deux soirs, résultats tardifs
+          # soirées suivies reconstruites depuis le journal : mises sur la bankroll courante, jamais plus, réglées sur les scores connus
+          python3 -m betting.evening rebuild
+          python3 -m betting.evening settle --pending   # soirées saisies à la main : combinés à cheval sur deux soirs, résultats tardifs
           python3 -m betting.product export
 
       - name: Publication de l'archive du Labo (release privée)
         run: |
           cd .research/betting
-          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json aliases_theoddsapi.json quota.json quota_theoddsapi.json results_web.parquet markets_catalogue.json 2>/dev/null)
+          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json aliases_theoddsapi.json history_fetched.json cycle_log.json quota.json quota_theoddsapi.json results_web.parquet markets_catalogue.json 2>/dev/null)
           cd ../..
           gh release view betting-odds --repo "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds --repo "$DATA_REPO" --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (cotes Winamax FR via OddsPapi, journal, historique des soirées), mise à jour par betting-odds.yml" --prerelease
           gh release upload betting-odds betting-odds.tar.gz --repo "$DATA_REPO" --clobber

@@ -44,6 +44,16 @@ describe('myTestLogic', () => {
     expect(settle(updated!, [])[0]).toMatchObject({ status: 'won', net: 1, auto: true });
   });
 
+  it('oublie un règlement mémorisé quand la sélection publiée repasse en attente (score corrigé, mi-temps inconnue)', () => {
+    const memorised = { start: 20, startedAt: '', bets: [bet({ autoStatus: 'won' })] };
+    const pending: HistoryDay[] = [{ ...history[0], matches: [{ ...history[0].matches[0], profiles: { exploratoire: [{ ...history[0].matches[0].profiles.exploratoire![0], status: 'pending', realised: null }] } }] }];
+    expect(settle(memorised, pending)[0]).toMatchObject({ status: 'pending', net: null, auto: false });
+    const cleared = recordAuto(memorised, pending);
+    expect(cleared?.bets[0].autoStatus).toBeUndefined();
+    expect(recordAuto(cleared!, pending)).toBeNull();
+    expect(settle(memorised, [])[0]).toMatchObject({ status: 'won' });          // absente de l'historique (14 jours) : le mémorisé reste
+  });
+
   it('ajoute sans doublon, modifie, retire, et lit les montants à la française', () => {
     const t1 = addBet(emptyTest(), bet({}));
     expect(addBet(t1, bet({ stake: 5 })).bets).toHaveLength(1);

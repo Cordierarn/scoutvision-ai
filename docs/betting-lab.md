@@ -115,7 +115,8 @@ Points ouverts de la phase 1, tranchés sur de vraies réponses (2 novembre 2026
 
 Règlement (règles usuelles des paris football Winamax ; le site n'est pas consultable depuis
 l'environnement de développement, à confirmer sur la page « Règles des paris » de Winamax) : temps
-réglementaire, prolongations exclues ; but contre son camp crédité à l'équipe bénéficiaire ; remboursé si
+réglementaire, prolongations exclues ; but contre son camp crédité à l'équipe bénéficiaire ; mi-temps ou ordre des
+buts inconnus : sélection en attente (voir « Règlement depuis ESPN ») ; remboursé si
 nul et handicap entier remboursés en cas d'égalité ; ligne en quart = moitié de la mise sur chaque ligne
 voisine (moitié gagnée / moitié remboursée, moitié perdue / moitié remboursée) ; match reporté ou
 interrompu : hors périmètre (seuls les matchs terminés sont réglés, matchs à score administratif ou avec
@@ -196,10 +197,16 @@ Gains réels mais faibles : l'essentiel de l'information est déjà dans la base
 - Raisons : forme à domicile / à l'extérieur sur 5 matchs, buts attendus du modèle, confrontations
   directes, part de 1re mi-temps pour les marchés de mi-temps.
 - Rejeu 2026-27 (`product replay`) : prévisions figées, features point-in-time, dernier relevé avant le
-  coup d'envoi, bankroll de 300 € par profil misée sur la bankroll courante, arrondie au centime.
+  coup d'envoi, bankroll de 300 € par profil misée sur la bankroll courante, arrondie au centime. Depuis l'audit du
+  6 novembre 2026, le bilan couvre les cinq profils, porte l'empreinte du moteur qui l'a calculé (`engine`, sources
+  des modules et paramètres figés) et est recalculé dès qu'elle change (`replay --if-stale`) : un bilan d'un ancien
+  moteur n'est plus affiché comme celui du moteur courant. Rendement et CLV ont un intervalle à 95 % par bootstrap des
+  matchs (`cluster_ci`, `returnLow`/`returnHigh`, `clvLow`/`clvHigh`) : les paris d'un même match sont liés.
 - Journal (`.research/betting/journal/suggestions.parquet`) : chaque suggestion publiée est enregistrée
   avec l'horodatage du relevé et n'est jamais réécrite ; réglée après le match (remboursements et
-  demi-gains compris).
+  demi-gains compris). Le résumé exporté (`journal`, `product.journal_summary`) ne compte que les **paris jouables**
+  (`product.playable`) : pour chaque match et profil, la dernière publication avant le coup d'envoi ; les
+  republications d'une même sélection et les publications d'après le coup d'envoi ne sont pas des paris.
 - Export `public/data/forecast/suggestions/index.json` (artefact privé) : rencontres à venir, profils,
   bilan du rejeu, résumé du journal.
 
@@ -236,21 +243,36 @@ encre neutre.
 
 ### Cycle quotidien (`.github/workflows/betting-odds.yml`, actif à la demande du propriétaire)
 
-- **Le soir** (10 h, 14 h, 17 h UTC) : rencontres de la fenêtre, cotes courantes des rencontres à venir
+- **Quatre passages identiques** (05 h 37, 09 h 13, 13 h 41, 16 h 47 UTC, hors des heures rondes que GitHub
+  encombre ; `betting/cycle.py:SLOTS`, aligné sur les crons par un test). Audit du 6 novembre 2026 : sur l'ancien
+  planning (06 h 30, 10 h, 14 h, 17 h), GitHub n'avait servi aucun créneau du matin, et le passage complet, décidé
+  par l'heure, n'avait jamais tourné. Désormais ce qui est lourd est décidé par **l'état de l'archive**
+  (`cycle plan`) : fenêtre de rencontres depuis la plus ancienne rencontre jouée sans statut final (toute la saison si
+  une compétition manque à l'archive), historiques dès qu'un match terminé n'a pas le sien. Chaque passage est
+  journalisé (`cycle record`, `cycle_log.json` publié avec l'archive) ; un créneau qu'aucun passage n'a servi dans les
+  2 h est signalé en avertissement et dans le résumé du workflow.
+- **Cotes** (à chaque passage) : rencontres de la fenêtre, cotes courantes des rencontres à venir
   (`/odds-by-tournaments`, un appel par tournoi, décompté : 11 appels par passage), vues, appariement,
   suggestions et journal, export. Les cotes sont datées de l'heure de l'appel (`flatten_live(stamp="observed")`) :
   prix vérifiés identiques au dernier relevé de `/historical-odds` sur 834 issues (3 novembre 2026), alors que
   `changedAt` daterait de plusieurs heures une cote inchangée et la ferait écarter comme périmée. L'ancien
   relevé match par match reste disponible (`upcoming --per-fixture`, environ 6,5 s par rencontre).
-- **Historiques des matchs terminés** (`/historical-odds`, environ 6,5 s par match, limite d'OddsPapi) :
-  au passage du matin seulement, ou tant que l'archive est incomplète. Les relevés sont écrits par lots
-  (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison.
-- **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
-  (`betting/results_web.py`, scores finaux, mi-temps, premier et dernier but, sans clé), fusionnés aux
+- **Historiques des matchs terminés** (`/historical-odds`, environ 6,5 s par match, limite d'OddsPapi, non
+  décomptés) : à n'importe quel passage, dès qu'un match terminé n'a pas son historique complet. Les relevés sont écrits par lots
+  (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison. Un match est redemandé tant que son
+  historique ne va pas jusqu'au coup d'envoi (`fetch.history_todo`) : un relevé « à venir » pris quelques heures avant
+  ne suffit pas (correction de l'audit du 6 novembre 2026 : ces matchs n'étaient jamais redemandés, et leur « clôture »
+  était le dernier relevé « à venir »). L'historique est complet quand l'archive contient un relevé Winamax postérieur
+  au coup d'envoi, ou quand il a été demandé après le coup d'envoi (`history_fetched.json`, publié avec l'archive).
+- **Résultats et règlement** (à chaque passage) : résultats de la veille lus sur le tableau de scores public d'ESPN
+  (`betting/results_web.py`, sans clé ; voir « Règlement depuis ESPN » plus bas), fusionnés aux
   résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis
-  `betting.evening auto` enregistre les paris de la veille (dernière publication du profil Équilibré avant
-  chaque coup d'envoi, mise = fraction × 300 €) et `betting.evening settle` les règle ; `evening show`
-  donne le tableau soirée par soirée avec le cumul.
+  `betting.evening rebuild` reconstruit les soirées depuis le journal (dernière publication du profil Équilibré
+  avant chaque coup d'envoi) : chaque soirée mise la fraction publiée de la **bankroll courante** (300 € au départ,
+  plus les gains nets des soirées précédentes), et jamais plus que cette bankroll (mises ramenées
+  proportionnellement), puis est réglée ; `evening show` donne le tableau soirée par soirée avec le cumul. Avant
+  l'audit du 6 novembre 2026, chaque soirée misait la fraction de 300 € sans plafond : la somme des mises d'un soir
+  dépassait plusieurs fois la bankroll et le cumul affiché n'était pas jouable.
 - Publication : archive du Labo (odds, vues, journal, historique des soirées, phase 2, résultats) dans la
   release privée `betting-odds` ; artefact des suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
 - Premier passage : l'archive de cotes se reconstitue par lots de 400 matchs par passage (non décomptés) ;
@@ -258,6 +280,26 @@ encre neutre.
 - Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement),
   `THE_ODDS_API_KEY` (référence sharp ; sans elle, aucun pari n'est validé) et `PITCHAPI_DATA_TOKEN`. Depuis l'environnement de développement, ESPN et les releases ne sont pas
   accessibles : l'historique se règle en CI.
+
+### Règlement depuis ESPN (correction du 6 novembre 2026)
+
+Audit du 6 novembre : le tableau de scores d'ESPN ne donne **pas** le score de mi-temps (pas de `linescores`), et le
+lecteur le remplaçait par 0-0. Tous les paris de mi-temps (1re mi-temps, mi-temps / fin de match, marque ou gagne dans
+les deux mi-temps…) réglés depuis ESPN l'ont été sur une mi-temps inventée, et les buts contre son camp étaient inversés
+une seconde fois alors qu'ESPN les crédite déjà à l'équipe bénéficiaire (premier et dernier but faux). Règles depuis :
+
+- **Mi-temps et ordre des buts reconstruits** à partir des buts listés (`details`) : minute affichée (« 43' », « 45'+2' »,
+  un but à 45'+n est en première mi-temps), équipe créditée telle quelle. Seulement si chaque minute est lisible et si les
+  buts listés redonnent exactement le score final ; sinon mi-temps et ordre des buts restent **inconnus**.
+- **Inconnu n'est jamais 0** (`markets.Result` accepte `None`, `markets.settleable`) : une sélection qui dépend de la
+  mi-temps ou de l'ordre des buts reste **en attente** ; les marchés du temps réglementaire se règlent normalement.
+- **Temps réglementaire seulement** : une rencontre terminée au-delà de la deuxième période (prolongation, tirs au but)
+  n'est pas réglée depuis ESPN (`regulation`).
+- **Re-règlement** : le règlement est dérivé du résultat courant à chaque passage (`product.resettle`, combinés et soirées
+  des 7 derniers jours compris) ; un score corrigé remplace l'ancien règlement, la publication n'est jamais réécrite.
+  `results_web --refresh-incomplete 14` relit les dates dont une rencontre terminée n'a pas de mi-temps reconstruite ; une
+  relecture ne perd jamais un appariement connu. Dans Mon test, une sélection publiée de nouveau en attente efface le
+  statut mémorisé.
 
 ## Étape 1 du moteur quantitatif : référence sharp, coupe-circuit, CLV (5 novembre 2026)
 
@@ -276,8 +318,8 @@ vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étape
   Pinnacle sur toutes les rencontres des compétitions du Labo et Betfair Exchange (prix « back » bruts) sur
   une partie, trois marchés (1N2, plus/moins et handicap asiatique à la ligne principale), écrits dans
   l'archive sous les mêmes noms et au même schéma, datés de l'heure de l'appel. Coût : un crédit par marché
-  et par compétition ayant une rencontre sous 36 h (3 marchés), plan gratuit de 500 crédits par mois lus
-  dans les en-têtes, réserve de 25 ; premier relevé réel : 8 compétitions, 36 crédits, 77 rencontres
+  et par compétition ayant une rencontre dans la fenêtre (3 marchés), plan gratuit de 500 crédits par mois lus
+  dans les en-têtes, réserve de 25 (budget quotidien : voir « Budget The Odds API ») ; premier relevé réel : 8 compétitions, 36 crédits, 77 rencontres
   appariées sur 126 (les autres sont au-delà de la fenêtre OddsPapi, plus quelques noms non reconnus).
   Appariement des rencontres : même compétition, coup d'envoi à ± 2 h, les deux noms similaires (seuil
   0,5) ; sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau suffit et l'autre nom
@@ -321,9 +363,9 @@ sélections validées, sur p_ref.
 
 - Journal : chaque suggestion publiée porte p_sharp, p_ref, espérance de référence, poids du pool,
   bookmaker de référence ; après le coup d'envoi, `closing_p_sharp` (dernier marché complet avant le coup
-  d'envoi, sans borne d'âge) et `clv = cote prise × p_clôture − 1`. Le rejeu et le résumé du journal donnent
-  le CLV moyen et la part des paris qui battent la clôture (Buchdahl : le CLV juge une sélection bien plus
-  vite que le résultat, bruité par le hasard).
+  d'envoi, sans borne d'âge) et `clv = cote prise × p_clôture − 1`. Le rejeu et le résumé du journal (paris
+  jouables seulement) donnent le CLV moyen avec son intervalle par grappes de match et la part des paris qui
+  battent la clôture (Buchdahl : le CLV juge une sélection bien plus vite que le résultat, bruité par le hasard).
 - Export : `pSharp`, `pRef`, `evRef`, `poolW`, `sharpBookmaker`, `warnings`, `verdict` par suggestion ;
   `noBet` par match (meilleure idée du moteur et motifs du refus), `sharpCoverage`, `teams` (OPD,
   dépendance) ; `rules` et `reference` (bookmakers, méthode, poids, libellés) ; `schemaVersion` 1.1.0.
@@ -341,9 +383,25 @@ Pas de poids w > 0 (l'étape 2 ci-dessous confirme w = 0 partout sur la clôture
 composition probable avant H−1 (seule la dépendance à un joueur clé est signalée) ; pas de Betfair après commission (prix bruts) ; pas de décorrélation ni
 d'agrégation du onze (étape 4). L'archive antérieure au 5 novembre n'a pas de bookmaker de référence :
 le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est archivé pour le match. La
-« clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (passages de
-10 h, 14 h et 17 h UTC) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
+« clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (dernier passage
+du cycle avant le match) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
 les ligues principales (étape 2).
+
+### Budget The Odds API (6 novembre 2026)
+
+Audit du 6 novembre : trois passages par jour sur les rencontres des 36 h suivantes consommaient le plan gratuit en
+quelques jours (de l'ordre de 1 000 crédits par mois sur le calendrier réel pour 500), après quoi plus aucune
+référence sharp, donc plus aucun pari validé. Décision du propriétaire (option a) : **un passage sharp par jour**, le
+premier passage du cycle à partir de 09 h UTC (`sharpfeed pull --daily --not-before 09:00`, `daily_pull_due`), sur les
+rencontres des **24 h** suivantes. Un passage sauté est repris au créneau suivant du même jour ; un appel refusé ne
+compte pas comme fait.
+
+Calcul : 3 crédits (1N2, plus/moins, handicap) par compétition couverte ayant une rencontre dans la fenêtre, soit de
+l'ordre de 300 crédits par mois sur le calendrier réel des 11 compétitions (`credits_per_day`, affiché par
+`sharpfeed status` pour la fin du mois en cours), sous les 475 utilisables. Contrepartie : la « clôture » sharp du CLV
+est un relevé du matin pour les matchs du soir, plus éloigné du coup d'envoi qu'avec trois passages ; le CLV reste une
+clôture approchée tant que la référence ne vient pas d'un flux couvrant la dernière heure (plan payant ou clôture
+Pinnacle de football-data).
 
 ## Étape 2 du moteur quantitatif : porte de validation par segment, catégorie A (5 novembre 2026)
 
@@ -614,8 +672,9 @@ cote du matin meilleure que celle de la clôture. D'où un cinquième profil pub
   calculé avant le coupe-circuit (`product._legacy_block`). La probabilité sharp de Shin, quand elle existe, est
   exportée (`pSharp`, `evRef`) pour mesurer le CLV ; le verdict vaut `ancien` et le bilan du rejeu n'est pas affiché ;
 - **cote de clôture Winamax** (colonne `closing_odds` du journal) : la dernière cote Winamax relevée avant le coup
-  d'envoi, remplie par `journal_append` pour les paris dont le match a commencé, exportée en `closingOdds` dans
-  l'historique avec `marketId` et `outcomeId` ;
+  d'envoi, remplie par `journal_append` pour les paris dont le match a commencé et recalculée pendant 7 jours
+  (`product.update_winamax_closing`), le temps que l'historique complet du match soit archivé ; exportée en
+  `closingOdds` dans l'historique avec `marketId` et `outcomeId` ;
 - **effet « cote du matin »** (`product.early_block`, champs `closeBets`, `earlyEdge`, `oddsDroppedRate` de
   `journal.byProfile`) : cote prise ÷ clôture Winamax − 1 en moyenne, et part des paris dont la cote a baissé ensuite.
   Affiché dans le Suivi des paris pour chaque profil.
@@ -645,7 +704,8 @@ handicaps asiatiques, match reporté, combinés).
 
 Ce qui a été suggéré et ce que cela a donné, lu dans l'export (`history`, `evenings[].details`) :
 
-- **Soirées suivies** : profil Équilibré, mises du moteur sur 300 € ; chaque soirée se déplie pari par pari
+- **Soirées suivies** : profil Équilibré, mises du moteur sur la bankroll courante, plafonnées à cette bankroll
+  (`evening.rebuild`, bankroll de chaque soirée exportée en `bankroll`) ; chaque soirée se déplie pari par pari
   (match, sélection, cote, mise, résultat, net), combinés compris ; gagnés et en attente comptés pari par pari.
 - **Suggestions publiées et résultats** : 14 derniers jours, matchs commencés ; pour chaque match et profil,
   la dernière publication avant le coup d'envoi (`product.history`), réglée sur le score réel au passage du

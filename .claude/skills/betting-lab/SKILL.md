@@ -18,8 +18,9 @@ règle, de chiffre ou de comportement.
   Gemini en secours).
 - Pipeline : `scripts/betting/` (client OddsPapi, archive, simulation, coupe-circuit, porte de validation, suggestions, journal,
   règlement, export), tests dans `scripts/tests/test_betting_*.py`.
-- Cycle : `.github/workflows/betting-odds.yml` (06 h 30 UTC : résultats et règlement ; 10 h, 14 h, 17 h UTC : cotes, suggestions,
-  export). Les commandes se lancent depuis `scripts/` : `cd scripts && python3 -m betting.<module> …`. Le serveur Heroku
+- Cycle : `.github/workflows/betting-odds.yml`, quatre passages identiques (05 h 37, 09 h 13, 13 h 41, 16 h 47 UTC, alignés sur
+  `betting/cycle.py:SLOTS`) ; le travail lourd (fenêtre de rencontres, historiques) est décidé par l'état de l'archive
+  (`cycle plan`), jamais par l'heure ; chaque passage est journalisé et un créneau manqué est signalé (`cycle record`). Les commandes se lancent depuis `scripts/` : `cd scripts && python3 -m betting.<module> …`. Le serveur Heroku
   recharge l'artefact au démarrage puis toutes les 6 h (`SCOUTVISION_DATA_REFRESH_HOURS`).
 
 ## Invariants
@@ -34,6 +35,11 @@ règle, de chiffre ou de comportement.
   bankroll saisie, jamais une probabilité.
 - **L'IA rédige, elle ne calcule pas** : jamais de probabilité, de cote ou de mise produite par l'IA ; elle ne contredit jamais un
   « pas de pari » du moteur. Tout changement de prompt incrémente `BETTING_PROMPT_VERSIONS` et ajoute un cas de test.
+- **Règlement** : mi-temps et ordre des buts inconnus restent inconnus (`markets.Result` à `None`), jamais 0-0 ; la sélection
+  qui en dépend reste en attente. Le règlement est dérivé du résultat courant à chaque passage (`product.resettle`).
+- **Mesure** : un pari = la dernière publication d'un match et d'un profil avant le coup d'envoi (`product.playable`) ; rendement
+  et CLV avec intervalle à 95 % par grappes de match (`cluster_ci`) ; bilan daté du moteur (`engine_fingerprint`), recalculé
+  quand il change ; soirées suivies sur la bankroll courante, jamais plus (`evening.rebuild`).
 - **Un résultat négatif est un résultat** : il s'affiche tel quel (profils non validés, porte à poids nul, espérance négative).
 
 ## Règles d'interface
@@ -72,7 +78,8 @@ règle, de chiffre ou de comportement.
   commencé ; un pari déjà suivi affiche « Suivi dans Mon test ».
 - Cote et mise restent modifiables tant que le pari n'est pas réglé (montants saisis à la française, `parseAmount`).
 - Règlement automatique par l'identifiant match:marché:issue retrouvé dans l'historique publié (`publishedStatus`), mémorisé
-  dans le pari (`autoStatus`) parce que l'historique ne garde que 14 jours ; le réglage manuel (`manualStatus`) l'emporte.
+  dans le pari (`autoStatus`) parce que l'historique ne garde que 14 jours ; une sélection publiée de nouveau en attente
+  l'efface ; le réglage manuel (`manualStatus`) l'emporte.
   Gain net sur la cote saisie, règles Winamax des demi-gains et remboursements (`netPerUnit`).
 - Résumé : bankroll, disponible (hors mises en attente), gain net, rendement sur les mises réglées hors remboursés, réglés,
   soirées (regroupement par date de coup d'envoi, heure de Paris).
