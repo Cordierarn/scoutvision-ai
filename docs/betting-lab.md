@@ -281,7 +281,8 @@ vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étape
   appariées sur 126 (les autres sont au-delà de la fenêtre OddsPapi, plus quelques noms non reconnus).
   Appariement des rencontres : même compétition, coup d'envoi à ± 2 h, les deux noms similaires (seuil
   0,5) ; sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau suffit et l'autre nom
-  est appris dans `aliases_theoddsapi.json` (Red Star Belgrade → nom OddsPapi, Köln / Cologne…) ; deux
+  est appris dans `aliases_theoddsapi.json` (nom anglais d'un club serbe → nom OddsPapi, nom allemand / français
+  d'un club allemand…) ; deux
   rencontres désignées = aucun appariement, jamais le plus proche.
   Un plan OddsPapi incluant Pinnacle suffirait à revenir à une seule source (`BOOKMAKERS`).
 - **Devigging.** Méthode de Shin (part de parieurs informés z, marge plus lourde sur les outsiders),
