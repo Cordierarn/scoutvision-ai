@@ -205,7 +205,8 @@ def main(argv=None) -> int:
         e = settle(args.date, scores)
         for b in (e["bets"] if e else []):
             lab = b.get("label") or " + ".join(l["label"] for l in b["combo"])
-            print(f"  {b['match']:34s} {lab:58s} {b.get('odds', '') if 'odds' in b else '':>5} mise {b['stake']:6.2f} € → {b['result'] or 'en attente':14s} {('' if b['profit'] is None else f'{b['profit']:+.2f} €')}")
+            profit = "" if b["profit"] is None else f"{b['profit']:+.2f} €"
+            print(f"  {b['match']:34s} {lab:58s} {b.get('odds', '') if 'odds' in b else '':>5} mise {b['stake']:6.2f} € → {b['result'] or 'en attente':14s} {profit}")
         if e:
             print(f"Soirée {args.date} : misé {e['stake']:.2f} €, gain net {e['profit']:+.2f} €, {e['won']} gagnés sur {len(e['bets'])}{'' if e['settled'] else ' (scores manquants)'}")
     print(show())
