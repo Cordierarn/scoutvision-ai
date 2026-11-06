@@ -72,7 +72,7 @@ Besoin mensuel Big 5 décompté : 150 relevés quotidiens et 3 fenêtres de fixt
 Rattrapage initial (2 novembre 2026) : 447 matchs terminés de 2026-27, 9,1 millions de relevés, 23 Mo
 en parquet, 58 à 98 marchés par match, médiane 20 000 relevés par match ; vues dérivées sur 103 870
 lignes avec H−1 disponible à 99,5 % (manque surtout sur les scores exacts par équipe, 7,7 %) ;
-appariement avec PitchAPI 447/447 après deux alias saisis à la main (Bilbao, Cologne).
+appariement avec PitchAPI 447/447 après deux alias saisis à la main (deux clubs dont le nom OddsPapi diffère du nom PitchAPI).
 Deux processus ne doivent jamais écrire l'archive en même temps (verrou `.research/betting/.lock`).
 
 Tests sans réseau (`npm run test:data`) : `scripts/tests/test_betting_client.py`, `test_betting_archive.py`,
