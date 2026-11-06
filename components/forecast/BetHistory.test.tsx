@@ -87,7 +87,7 @@ describe('BetHistory (rendu statique)', () => {
   });
 
   it('explique un historique vide et gère chargement, absence et erreur', () => {
-    expect(renderToStaticMarkup(<BetHistory index={{ ...index, evenings: [], history: [] }} {...props} />)).toContain('Le suivi commence avec les suggestions publiées depuis le 3 novembre 2026');
+    expect(renderToStaticMarkup(<BetHistory index={{ ...index, evenings: [], history: [] }} {...props} />)).toContain('Le suivi commence avec les suggestions publiées depuis le coupe-circuit (5 novembre 2026)');
     expect(renderToStaticMarkup(<BetHistory index={undefined} {...props} />)).toContain('Chargement du suivi des paris');
     expect(renderToStaticMarkup(<BetHistory index={null} {...props} />)).toContain('Suivi des paris indisponible.');
     const failed = renderToStaticMarkup(<BetHistory index={null} failed onRetry={() => {}} {...props} />);

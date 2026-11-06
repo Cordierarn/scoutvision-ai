@@ -737,6 +737,19 @@ publiée dans plusieurs profils compte une fois). Si moins de 30 paris sont rég
 grappes de match du CLV face à la référence sharp n'est pas entièrement positif, le Labo passe en stand-by. Ce critère
 ne se modifie pas après coup.
 
+Lecture (`product.criterion_summary`, champ `criterion` de l'export) : sélections distinctes des paris jouables des trois
+profils validés publiés depuis `CIRCUIT_START`, nombre de paris réglés (`settled`, seuil `minSettled`), CLV moyen et son
+intervalle à 95 % par grappes de match (`meanClv`, `clvLow`, `clvHigh`), et `standBy` vrai si l'une des deux conditions
+d'arrêt est remplie. Le contrôle du 18 décembre se lit sur l'export de ce jour-là.
+
+## Paris d'avant le coupe-circuit exclus des mesures (6 novembre 2026)
+
+Les lignes publiées avant le premier passage du coupe-circuit (`product.CIRCUIT_START`, 5 novembre 2026, 18 h 27 UTC)
+viennent du moteur d'avant, même sous les noms Sûr, Équilibré ou Grosse cote. Elles restent dans le journal, immuables,
+mais ne sont plus comptées ni montrées : résumé du journal (`playable`), historique publié (`history`), soirées suivies
+(`evening.journal_bets`, les soirées de ce moteur ne sont plus reconstruites) et critère d'arrêt. L'export porte
+`circuitStart` pour le dire.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans

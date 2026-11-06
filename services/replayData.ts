@@ -169,6 +169,11 @@ export interface SuggestionsIndex {
   bilan: { start: number; engine?: string; generatedAt?: string; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
   journal: { published: number; playable?: number; settled: number; byProfile: Record<string, BilanBlock & { closeBets?: number; earlyEdge?: number | null; oddsDroppedRate?: number | null }> };
   evenings?: EveningSummary[];
+  /** Premier passage du coupe-circuit : les publications antérieures ne sont jamais comptées ni montrées. */
+  circuitStart?: string;
+  /** Critère d'arrêt du 18 décembre 2026 : sélections distinctes des trois profils validés réunis, publiées depuis circuitStart. */
+  criterion?: ClvBlock & { checkDate: string; since: string; profiles: SuggestionProfile[]; selections: number; settled: number; matches: number;
+    minSettled: number; enoughBets: boolean; clvPositive: boolean; standBy: boolean };
   history?: HistoryDay[];
 }
 /** Statut d'un pari réglé sur le score réel (demi-gains et remboursements des handicaps asiatiques). */
