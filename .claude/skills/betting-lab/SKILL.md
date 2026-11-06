@@ -34,6 +34,8 @@ règle, de chiffre ou de comportement.
   bankroll saisie, jamais une probabilité.
 - **L'IA rédige, elle ne calcule pas** : jamais de probabilité, de cote ou de mise produite par l'IA ; elle ne contredit jamais un
   « pas de pari » du moteur. Tout changement de prompt incrémente `BETTING_PROMPT_VERSIONS` et ajoute un cas de test.
+- **Règlement** : mi-temps et ordre des buts inconnus restent inconnus (`markets.Result` à `None`), jamais 0-0 ; la sélection
+  qui en dépend reste en attente. Le règlement est dérivé du résultat courant à chaque passage (`product.resettle`).
 - **Un résultat négatif est un résultat** : il s'affiche tel quel (profils non validés, porte à poids nul, espérance négative).
 
 ## Règles d'interface
@@ -72,7 +74,8 @@ règle, de chiffre ou de comportement.
   commencé ; un pari déjà suivi affiche « Suivi dans Mon test ».
 - Cote et mise restent modifiables tant que le pari n'est pas réglé (montants saisis à la française, `parseAmount`).
 - Règlement automatique par l'identifiant match:marché:issue retrouvé dans l'historique publié (`publishedStatus`), mémorisé
-  dans le pari (`autoStatus`) parce que l'historique ne garde que 14 jours ; le réglage manuel (`manualStatus`) l'emporte.
+  dans le pari (`autoStatus`) parce que l'historique ne garde que 14 jours ; une sélection publiée de nouveau en attente
+  l'efface ; le réglage manuel (`manualStatus`) l'emporte.
   Gain net sur la cote saisie, règles Winamax des demi-gains et remboursements (`netPerUnit`).
 - Résumé : bankroll, disponible (hors mises en attente), gain net, rendement sur les mises réglées hors remboursés, réglés,
   soirées (regroupement par date de coup d'envoi, heure de Paris).

@@ -495,7 +495,7 @@ def upcoming_suggestions(now: dt.datetime | None = None, days: int = UPCOMING_DA
 
 def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.DataFrame, cat, snaps: pd.DataFrame | None = None) -> pd.DataFrame:
     """Ajoute au journal les suggestions publiées (jamais réécrites : clé = match, profil, issue, horodatage du
-    relevé), règle celles dont le match est terminé et, quand l'archive (`snaps`) porte la clôture sharp du
+    relevé), règle ou règle à nouveau celles dont le match est terminé (`resettle`) et, quand l'archive (`snaps`) porte la clôture sharp du
     marché, calcule le CLV de chaque suggestion dont le coup d'envoi est passé."""
     existing = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
     for col in JOURNAL_COLUMNS:            # journal antérieur à l'étape 1 : colonnes quantitatives absentes
@@ -518,16 +518,7 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
     new = pd.DataFrame(rows, columns=JOURNAL_COLUMNS)
     new = new[~new["suggestion_id"].isin(existing["suggestion_id"])]
     journal = pd.concat([existing, new], ignore_index=True) if len(new) else existing
-    # règlement des suggestions dont le match est terminé
-    res = results.set_index("match_id")
-    pending = journal["settled"].isna() & journal["match_id"].isin(res.index)
-    for i in journal[pending].index:
-        r = res.loc[journal.at[i, "match_id"]]
-        spec = cat[int(journal.at[i, "market_id"])].spec(int(journal.at[i, "outcome_id"]))
-        settled = mk.settle(spec, mk.Result(int(r.ft_home), int(r.ft_away), int(r.ht_home), int(r.ht_away), r.first_goal, r.last_goal))
-        journal.at[i, "settled"] = -2.0 if settled is None else settled   # -2 = remboursé
-        journal.at[i, "realised"] = mk.realised_return(settled, float(journal.at[i, "odds"]))
-        journal.at[i, "settled_at"] = published_at.isoformat()
+    resettle(journal, results, cat, published_at)
     # CLV : clôture sharp (dernier relevé complet avant le coup d'envoi) des suggestions dont le match a commencé
     if snaps is not None and not snaps.empty:
         kick = pd.to_datetime(journal["kickoff_utc"], utc=True, format="ISO8601")
@@ -552,13 +543,39 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
     return journal
 
 
+def resettle(journal: pd.DataFrame, results: pd.DataFrame, cat, at: dt.datetime) -> int:
+    """Règle, ou règle à nouveau, chaque suggestion dont le match a un résultat : le règlement est dérivé du résultat
+    courant (un score corrigé depuis remplace l'ancien règlement), la publication elle-même n'est jamais réécrite. Une
+    sélection qui dépend d'une mi-temps ou d'un ordre des buts inconnus repasse en attente. `settled_at` ne change
+    que si le règlement change. Renvoie le nombre de lignes modifiées."""
+    res = results.drop_duplicates("match_id", keep="last").set_index("match_id")
+    known = {mid: mk.result_from_row(r) for mid, r in zip(res.index, res.itertuples(index=False))}
+    changed = 0
+    for i in journal.index[journal["match_id"].isin(known.keys())]:
+        result = known[journal.at[i, "match_id"]]
+        spec = cat[int(journal.at[i, "market_id"])].spec(int(journal.at[i, "outcome_id"]))
+        if mk.settleable(spec, result):
+            settled = mk.settle(spec, result)
+            code, realised = (-2.0 if settled is None else float(settled)), mk.realised_return(settled, float(journal.at[i, "odds"]))   # -2 = remboursé
+        else:
+            code, realised = None, None
+        old = journal.at[i, "settled"]
+        same = (code is None and pd.isna(old)) or (code is not None and pd.notna(old) and float(old) == code)
+        if same:
+            continue
+        journal.at[i, "settled"], journal.at[i, "realised"] = code, realised
+        journal.at[i, "settled_at"] = None if code is None else at.isoformat()
+        changed += 1
+    return changed
+
+
 HISTORY_DAYS = 14
 # règlement d'une sélection dans un combiné (règles Winamax) : facteur appliqué à la cote du combiné
 LEG_FACTOR = {1.0: lambda o: o, 0.5: lambda o: (1.0 + o) / 2.0, -2.0: lambda o: 1.0, -0.5: lambda o: 0.5, 0.0: lambda o: 0.0}
 
 
 def settle_combo(legs: list[dict], results: pd.DataFrame, cat) -> tuple[str, float] | None:
-    """Statut et gain net pour 1 € d'un combiné quand tous ses matchs sont terminés, None sinon. Sélection perdue : combiné
+    """Statut et gain net pour 1 € d'un combiné quand tous ses matchs sont terminés et réglables, None sinon. Sélection perdue : combiné
     perdu ; remboursée : sa cote sort du combiné ; demi-gagnée / demi-perdue : (1 + cote) / 2 ou 0,5 (règle Winamax)."""
     res = results.drop_duplicates("match_id").set_index("match_id")
     factor = 1.0
@@ -566,9 +583,11 @@ def settle_combo(legs: list[dict], results: pd.DataFrame, cat) -> tuple[str, flo
     for leg in legs:
         if leg["matchId"] not in res.index or leg.get("marketId") is None:
             return None
-        r_ = res.loc[leg["matchId"]]
+        result = mk.result_from_row(res.loc[leg["matchId"]].to_dict())
         spec = cat[int(leg["marketId"])].spec(int(leg["outcomeId"]))
-        settled = mk.settle(spec, mk.Result(int(r_.ft_home), int(r_.ft_away), int(r_.ht_home), int(r_.ht_away), r_.first_goal, r_.last_goal))
+        if not mk.settleable(spec, result):
+            return None                       # mi-temps ou ordre des buts inconnus : le combiné attend
+        settled = mk.settle(spec, result)
         code = -2.0 if settled is None else float(settled)
         codes.append(code)
         factor *= LEG_FACTOR[code](float(leg["odds"]))
@@ -584,7 +603,8 @@ def settle_combo(legs: list[dict], results: pd.DataFrame, cat) -> tuple[str, flo
 
 def combo_journal_append(entries: list[dict], published_at: dt.datetime, results: pd.DataFrame, cat) -> pd.DataFrame:
     """Ajoute au journal des combinés ceux du jour publiés avant le premier coup d'envoi de leurs sélections (clé = date et
-    sélections : un même combiné republié n'est pas dupliqué), puis règle ceux dont tous les matchs sont terminés."""
+    sélections : un même combiné republié n'est pas dupliqué), puis règle (ou règle à nouveau) ceux dont tous les matchs
+    sont terminés et réglables."""
     existing = pd.read_parquet(COMBO_JOURNAL) if COMBO_JOURNAL.exists() else pd.DataFrame(columns=COMBO_COLUMNS)
     rows = []
     for day in explore_day_combos(entries):
@@ -600,11 +620,13 @@ def combo_journal_append(entries: list[dict], published_at: dt.datetime, results
     new = pd.DataFrame(rows, columns=COMBO_COLUMNS)
     new = new[~new["combo_id"].isin(existing["combo_id"])]
     journal = pd.concat([existing, new], ignore_index=True) if len(new) else existing.copy()
-    for i in journal[journal["status"].isna()].index:
+    for i in journal.index:                    # règlement dérivé du résultat courant : un score corrigé le remplace
         out = settle_combo(json.loads(journal.at[i, "legs"]), results, cat)
-        if out is not None:
-            journal.at[i, "status"], journal.at[i, "realised"] = out
-            journal.at[i, "settled_at"] = published_at.isoformat()
+        status, realised = out if out is not None else (None, None)
+        if status == (journal.at[i, "status"] if isinstance(journal.at[i, "status"], str) else None) and (status is None or realised == journal.at[i, "realised"]):
+            continue
+        journal.at[i, "status"], journal.at[i, "realised"] = status, realised
+        journal.at[i, "settled_at"] = None if status is None else published_at.isoformat()
     COMBO_JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     journal.to_parquet(COMBO_JOURNAL, index=False)
     return journal

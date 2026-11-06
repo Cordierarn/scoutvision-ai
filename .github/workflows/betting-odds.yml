@@ -116,6 +116,9 @@ jobs:
           cd scripts
           python3 -m betting.results_web --date "$(date -u -d '-1 day' +%F)"
           python3 -m betting.results_web --date "$(date -u +%F)" || true
+          # dates dont une rencontre terminée n'a pas encore de mi-temps reconstruite (lecture antérieure, buts incomplets) :
+          # relues pour que les paris de mi-temps soient réglés, ou restent en attente, jamais sur un 0-0 inventé
+          python3 -m betting.results_web --refresh-incomplete 14
 
       - name: Suggestions, journal, bilan, historique des soirées, export
         env:

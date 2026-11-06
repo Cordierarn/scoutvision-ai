@@ -190,6 +190,50 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(j4.iloc[0]["settled_at"], j3.iloc[0]["settled_at"])   # réglé une seule fois
 
 
+    def test_journal_is_resettled_and_a_half_time_bet_without_half_time_is_pending(self):
+        from betting import catalogue
+        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]},
+                               {"marketId": 201, "marketType": "totals", "period": "p1", "handicap": 1.5, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 201, "outcomeName": "Over"}, {"outcomeId": 202, "outcomeName": "Under"}]},
+                               {"marketId": 301, "marketType": "firstgoal", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 301, "outcomeName": "1"}, {"outcomeId": 302, "outcomeName": "No Goal"}, {"outcomeId": 303, "outcomeName": "2"}]}])
+        s = lambda r, mid, oid, label: {"rank": r, "marketId": mid, "outcomeId": oid, "family": "x", "label": label, "odds": 2.0, "oddsAt": NOW.isoformat(), "p": 0.5, "ev": 0.0,
+                                        "stakeFraction": 0.01, "stakeMode": "fixed"}
+        entries = [{"status": "ok", "matchId": "m1", "competition": "AAA", "kickoff": KO.isoformat(), "profiles": {"sur": {"suggestions": [
+            s(1, 101, 101, "Club A gagne"), s(2, 201, 202, "Moins de 1,5 but (1re mi-temps)"), s(3, 301, 301, "Club A marque le premier")]}}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            product.JOURNAL = Path(tmp) / "journal.parquet"
+            # ancien règlement : mi-temps 0-0 inventée faute de score de mi-temps
+            wrong = pd.DataFrame([{"match_id": "m1", "ft_home": 3, "ft_away": 0, "ht_home": 0, "ht_away": 0, "first_goal": "none", "last_goal": "none"}])
+            j1 = product.journal_append(entries, NOW, wrong, cat)
+            self.assertEqual(j1["settled"].tolist(), [1.0, 1.0, 0.0])
+            unknown = pd.DataFrame([{"match_id": "m1", "ft_home": 3, "ft_away": 0, "ht_home": None, "ht_away": None, "first_goal": None, "last_goal": None}])
+            j2 = product.journal_append([], NOW + dt.timedelta(days=1), unknown, cat)
+            self.assertEqual(float(j2.iloc[0]["settled"]), 1.0)                      # temps réglementaire : inchangé
+            self.assertEqual(j2.iloc[0]["settled_at"], j1.iloc[0]["settled_at"])
+            self.assertTrue(pd.isna(j2.iloc[1]["settled"]) and pd.isna(j2.iloc[1]["realised"]) and pd.isna(j2.iloc[1]["settled_at"]))   # en attente
+            self.assertTrue(pd.isna(j2.iloc[2]["settled"]))
+            right = pd.DataFrame([{"match_id": "m1", "ft_home": 3, "ft_away": 0, "ht_home": 2, "ht_away": 0, "first_goal": "home", "last_goal": "home"}])
+            j3 = product.journal_append([], NOW + dt.timedelta(days=2), right, cat)
+            self.assertEqual(j3["settled"].tolist(), [1.0, 0.0, 1.0])
+            self.assertEqual(j3["realised"].tolist(), [1.0, -1.0, 1.0])
+            self.assertEqual(j3.iloc[1]["settled_at"], (NOW + dt.timedelta(days=2)).isoformat())
+
+    def test_combo_with_a_leg_lacking_its_half_time_is_not_settled(self):
+        from betting import catalogue
+        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]},
+                               {"marketId": 201, "marketType": "totals", "period": "p1", "handicap": 1.5, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 201, "outcomeName": "Over"}, {"outcomeId": 202, "outcomeName": "Under"}]}])
+        legs = [{"matchId": "m1", "marketId": 101, "outcomeId": 101, "odds": 1.5}, {"matchId": "m2", "marketId": 201, "outcomeId": 202, "odds": 1.6}]
+        res = pd.DataFrame([{"match_id": "m1", "ft_home": 1, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
+                            {"match_id": "m2", "ft_home": 2, "ft_away": 2, "ht_home": None, "ht_away": None, "first_goal": None, "last_goal": None}])
+        self.assertIsNone(product.settle_combo(legs, res, cat))
+        res.loc[1, ["ht_home", "ht_away"]] = [0, 0]
+        self.assertEqual(product.settle_combo(legs, res, cat), ("won", round(1.5 * 1.6 - 1, 4)))
+
+
 class HistoryTests(unittest.TestCase):
     def row(self, mid, profile, rank, published, kick, settled=None, realised=None, label="Club A gagne"):
         return {"suggestion_id": f"{mid}{profile}{rank}{published}", "published_at": published.isoformat(), "match_id": mid, "fixture_id": None, "competition": "AAA",
