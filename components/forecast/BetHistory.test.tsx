@@ -59,6 +59,16 @@ describe('BetHistory (rendu statique)', () => {
     expect(sur).not.toContain('Club C – Club D');  // aucun pari Sûr sur ce match
   });
 
+  it('affiche les combinés du jour en profil exploratoire, réglés sur la bankroll', () => {
+    const withCombos = { ...index, comboHistory: [{ date: '2026-11-06', legs: [{ matchId: 'a', match: 'Club A – Club B', label: 'Club A gagne', odds: 1.8 }, { matchId: 'b', match: 'Club C – Club D', label: 'Match nul', odds: 3.5 }],
+      odds: 6.3, jointP: 0.13, ev: -0.18, stakeFraction: 0.005, status: 'won' as const, realised: 5.3 }] };
+    const html = renderToStaticMarkup(<BetHistory index={withCombos} {...props} profile="exploratoire" />);
+    expect(html).toContain('Combinés du jour · Exploratoire');
+    expect(html).toContain('6,30');
+    expect(html).toContain('+7,95'); // 1,50 € × 5,3
+    expect(renderToStaticMarkup(<BetHistory index={withCombos} {...props} profile="equilibre" />)).not.toContain('Combinés du jour · Exploratoire');
+  });
+
   it('explique un historique vide et gère chargement, absence et erreur', () => {
     expect(renderToStaticMarkup(<BetHistory index={{ ...index, evenings: [], history: [] }} {...props} />)).toContain('Le suivi commence avec les suggestions publiées depuis le 3 novembre 2026');
     expect(renderToStaticMarkup(<BetHistory index={undefined} {...props} />)).toContain('Chargement du suivi des paris');

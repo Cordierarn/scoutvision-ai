@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryBet, HistoryDay } from '../../services/replayData';
 import { betNet, bilanLine, formatEv, formatSignedEuros, historySummary, oddsAge, parseBankroll, stakeEuros, stakeLabel, statusClass } from './suggestionsLogic';
+import { comboSummary } from './suggestionsLogic';
 
 const bet = (status: HistoryBet['status'], realised: number | null, stakeFraction = 0.02): HistoryBet =>
   ({ label: 'x', family: 'résultat', odds: 2, p: 0.5, ev: 0, stakeFraction, stakeMode: 'kelly', status, realised });
@@ -70,5 +71,19 @@ describe('suggestionsLogic', () => {
     expect(statusClass('won')).toBe('text-pos');
     expect(statusClass('half_lost')).toBe('text-neg');
     expect(statusClass('pending')).toBe('text-ink-3');
+  });
+});
+
+describe('comboSummary', () => {
+  it('compte les combinés réglés, les gagnés et le net sur la bankroll, sans les remboursés ni les combinés en attente', () => {
+    const base = { legs: [], odds: 4, jointP: 0.2, ev: -0.2, stakeFraction: 0.005 };
+    const combos = [
+      { ...base, date: '2026-11-06', status: 'won' as const, realised: 3 },
+      { ...base, date: '2026-11-06', status: 'lost' as const, realised: -1 },
+      { ...base, date: '2026-11-07', status: 'void' as const, realised: 0 },
+      { ...base, date: '2026-11-08', status: 'pending' as const, realised: null },
+    ];
+    expect(comboSummary(combos, 300)).toEqual({ settled: 3, won: 1, staked: 3, net: 3 }); // 1,50 × 3 − 1,50
+    expect(comboSummary(combos, null)).toEqual({ settled: 3, won: 1, staked: 0, net: 0 });
   });
 });

@@ -158,6 +158,46 @@ class CategoryBTests(unittest.TestCase):
         self.assertLess(band["sides"]["bas"]["biasHigh"], 0)
 
 
+class MultiOutcomeTests(unittest.TestCase):
+    def data(self, n, model, seed=4, k=3):
+        rng = np.random.default_rng(seed)
+        truth = rng.dirichlet(np.ones(k) * 3, size=n)
+        y = np.array([rng.choice(k, p=t) for t in truth])
+        noisy = lambda p, sc: (lambda q: q / q.sum(axis=1, keepdims=True))(np.clip(p * np.exp(rng.normal(0, sc, p.shape)), 0.01, 0.99))
+        ps = noisy(truth, 0.3)
+        pm = truth if model == "exact" else noisy(truth[:, ::-1], 0.3)
+        odds = 1.0 / (ps * 1.08)
+        kick = [pd.Timestamp("2026-08-01", tz="UTC") + pd.Timedelta(hours=i) for i in range(n)]
+        return {"résultat (1re mi-temps)": {"pm": pm, "ps": ps, "odds": odds, "y": y, "competition": ["AAA"] * n, "kickoff": kick, "match_id": [f"m{i}" for i in range(n)]}}
+
+    def test_exact_multi_outcome_model_gets_weight_and_wrong_one_does_not(self):
+        seg = next(s for s in gate.run_gate_m(self.data(1200, "exact"), min_matches=150) if s["competition"] == "toutes")
+        self.assertGreater(seg["weight"], 0.0); self.assertGreater(seg["test"]["gain"], 0.0); self.assertEqual(seg["reference"], "winamax")
+        self.assertEqual(set(seg["band"]["sides"]), {"0", "1", "2"})
+        bad = next(s for s in gate.run_gate_m(self.data(1200, "wrong"), min_matches=150) if s["competition"] == "toutes")
+        self.assertIn(bad["verdict"], ("poids_nul", "gain_non_significatif", "biais_directionnel"))
+        empty = gate.run_gate_m({"mi-temps / fin de match": {"pm": np.zeros((0, 9)), "ps": np.zeros((0, 9)), "odds": np.zeros((0, 9)), "y": np.zeros(0, int), "competition": [], "kickoff": [], "match_id": []}})
+        self.assertEqual(empty[0]["verdict"], "trop_peu_de_matchs")
+
+    def test_band_gate_multi_flags_an_overestimated_outcome(self):
+        rng = np.random.default_rng(1)
+        n = 300
+        y = rng.choice(3, size=n, p=[0.45, 0.30, 0.25])
+        pool = np.tile([0.30, 0.30, 0.40], (n, 1))                                            # issue 2 surestimée de 15 points
+        band = gate.band_gate_multi(pool, y, np.full((n, 3), 3.0), "résultat (1re mi-temps)")
+        self.assertFalse(band["passed"]); self.assertEqual(band["sides"]["2"]["verdict"], "surestime")
+
+
+class SegmentTests(unittest.TestCase):
+    def test_segment_key_carries_the_period(self):
+        from betting import markets as mk
+        self.assertEqual(mk.Spec("totals", "fulltime", 2.5, "Over").segment, "plus/moins")
+        self.assertEqual(mk.Spec("totals", "p1", 1.5, "Over").segment, "plus/moins (1re mi-temps)")
+        self.assertEqual(mk.Spec("1x2", "p1", 0.0, "X").segment, "résultat (1re mi-temps)")
+        self.assertEqual(mk.Spec("halftime-fulltime", "fulltime", 0.0, "1/1").segment, "mi-temps / fin de match")
+        self.assertTrue(all(k in gate.B_FAMILIES or k in gate.M_FAMILIES for k in ("plus/moins (1re mi-temps)", "résultat (1re mi-temps)", "mi-temps (équipe)")))
+
+
 class CategoryCTests(unittest.TestCase):
     def test_model_grid_probabilities_and_outcome_indices_are_consistent(self):
         m = np.zeros((11, 11)); m[2, 1] = 0.6; m[0, 0] = 0.4

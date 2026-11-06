@@ -560,7 +560,9 @@ au marché médiane −13 % (meilleure −8 %), référence Pinnacle pour un tie
 chiffre est la marge de Winamax : il mesure ce que coûte en moyenne un pari sur ces marchés. Relâcher l'accord du
 moteur ne change presque rien (−13,0 % au lieu de −13,4 %).
 
-**Combinés du jour** (`suggest.day_combos`, `product.explore_day_combos`, champ `exploreCombos` de l'export) : la meilleure
+**Combinés du jour** (journalisés dans `journal/combos.parquet`, réglés quand tous leurs matchs sont terminés selon les règles
+Winamax — sélection perdue : combiné perdu ; remboursée : cote retirée ; demi-gain : (1 + cote) / 2 ; demi-perte : 0,5 —, affichés
+dans le Suivi des paris en profil Exploratoire ; `suggest.day_combos`, `product.explore_day_combos`, champ `exploreCombos` de l'export) : la meilleure
 sélection exploratoire de chaque match, combinée entre matchs différents du même jour (indépendants, donc probabilité
 jointe = produit des probabilités sans marge), un combiné de 2 et un de 3 sélections par jour, cote de 2,00 à 12,00,
 retenus sur la meilleure espérance face au marché, mise symbolique de 0,5 %. Mesure du 5 novembre : cotes de 3,7 à
@@ -573,6 +575,33 @@ leur espérance face au marché est le plus souvent négative et qu'elles serven
 d'actualité de Claude peut désormais ouvrir jusqu'à trois articles en entier (outil serveur de lecture d'URL) quand
 l'extrait d'un résultat ne suffit pas à confirmer une absence ou une composition ; les pages lues passent en tête des
 sources.
+
+## Lot 3 : marchés de mi-temps dans la porte de validation (6 novembre 2026)
+
+Les poids du pool et les marges sont désormais indexés par **segment** (`Spec.segment`) : la famille, suffixée de la
+période pour une mi-temps (« plus/moins (1re mi-temps) »). Une mi-temps validée n'ouvre pas le match entier, ni
+l'inverse. La porte (`gate.py`) passe en catégorie B (référence Winamax dé-viguée par Shin, archive 2026-27, partage
+60 / 40 chronologique) les marchés à deux issues de la mi-temps, et en catégorie B à plusieurs issues les marchés
+complets (`build_rows_m`, `run_gate_m`, porte de bande issue par issue). Simulation avec la part de buts de première
+mi-temps propre à chaque compétition.
+
+Diagnostic préalable, 1re mi-temps 2025-26 (2 906 matchs) : nul à la pause 39,9 % observé contre 40,8 % prédit, 0-0
+28,6 % contre 29,0 %, 1,22 but contre 1,23. La loi de la mi-temps est juste en moyenne ; aucune correction appliquée.
+
+| Segment (toutes compétitions) | Test | w | ECE pool | Moteur seul : sélections, réussite / probabilité annoncée, rendement | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| plus/moins (1re mi-temps) | 282 | 0,00 | 0,027 | 33, 27 % / 46 %, −51 % | poids nul |
+| plus/moins équipe (1re mi-temps) | 282 | 0,00 | 0,028 | 42, 33 % / 53 %, −29 % | poids nul |
+| BTTS / clean sheet (1re mi-temps) | 282 | 0,00 | 0,039 | 32, 25 % / 43 %, −33 % | poids nul |
+| handicap asiatique (1re mi-temps) | 259 | 0,00 | 0,023 | 72, 38 % / 55 %, −27 % | poids nul |
+| mi-temps (équipe) : marque / gagne dans les mi-temps | 282 | 0,00 | 0,016 | 160, 31 % / 44 %, −29 % | poids nul |
+| résultat (1re mi-temps) | 282 | 0,00 | 0,033 | 27, 15 % / 27 %, −31 % | poids nul |
+| mi-temps / fin de match | 282 | 0,00 | 0,005 | 69, 9 % / 17 %, −53 % | poids nul |
+
+Même conclusion que pour les lots 1 et 2 : partout, le log-loss croît avec le poids du modèle dès la partie de
+validation, et les sélections du moteur seul sont surestimées d'une quinzaine de points. Les marchés de mi-temps ne
+sont pas plus mal pricés par Winamax que ceux du match entier. Par compétition, aucun segment n'atteint 150 matchs
+par partie. Relecture quotidienne automatique dans `betting-odds.yml` à mesure que l'archive grandit.
 
 ## Phases suivantes
 

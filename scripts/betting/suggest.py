@@ -296,8 +296,9 @@ def apply_circuit(candidates: list[Candidate], reference_of, weight_of, move_of=
             continue
         ref = reference_of(c.market_id)
         move = move_of(c.market_id, c.outcome_id, ref) if (move_of is not None and ref is not None) else None
-        c.assessment = circuit.assess(c.p, c.odds, c.family, c.spec, ref, c.outcome_id, weight_of(c.family), move, overperforming, dependency, hours_to_kickoff,
-                                      ev_margin=margin_of(c.family) if margin_of is not None else 0.0)
+        # poids et marge par segment (famille et période) : une mi-temps validée n'ouvre pas le match entier, ni l'inverse
+        c.assessment = circuit.assess(c.p, c.odds, c.family, c.spec, ref, c.outcome_id, weight_of(c.spec.segment), move, overperforming, dependency, hours_to_kickoff,
+                                      ev_margin=margin_of(c.spec.segment) if margin_of is not None else 0.0)
         if c.assessment.blocks:
             c.excluded = c.assessment.blocks[0]
     return candidates

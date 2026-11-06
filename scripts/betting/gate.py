@@ -65,14 +65,26 @@ N_SIMS = 4000
 MIN_SELECTIONS = 20        # sélections par côté pour juger un biais directionnel
 ECE_BINS = 10
 FAMILIES = {"1x2": "résultat", "ou25": "plus/moins"}
-# catégorie B : famille → types de marché (temps réglementaire)
+# catégorie B, marchés à deux issues : segment (famille, suffixée de la période pour une mi-temps) → (type, période)
 B_FAMILIES = {
-    "plus/moins": ("totals",),
-    "plus/moins équipe": ("teamtotals-team1", "teamtotals-team2"),
-    "BTTS / clean sheet": ("bothteamsscore", "cleansheet-team1", "cleansheet-team2"),
-    "gagne sans encaisser": ("wintonil-team1", "wintonil-team2"),
+    "plus/moins": (("totals", "fulltime"),),
+    "plus/moins équipe": (("teamtotals-team1", "fulltime"), ("teamtotals-team2", "fulltime")),
+    "BTTS / clean sheet": (("bothteamsscore", "fulltime"), ("cleansheet-team1", "fulltime"), ("cleansheet-team2", "fulltime")),
+    "gagne sans encaisser": (("wintonil-team1", "fulltime"), ("wintonil-team2", "fulltime")),
+    # lot 3 : mi-temps
+    "plus/moins (1re mi-temps)": (("totals", "p1"),),
+    "plus/moins équipe (1re mi-temps)": (("teamtotals-team1", "p1"), ("teamtotals-team2", "p1")),
+    "BTTS / clean sheet (1re mi-temps)": (("bothteamsscore", "p1"), ("cleansheet-team1", "p1"), ("cleansheet-team2", "p1")),
+    "handicap asiatique (1re mi-temps)": (("spreads", "p1"),),
+    "mi-temps (équipe)": (("toscoreinbh-team1", "fulltime"), ("toscoreinbh-team2", "fulltime"), ("winbothh-team1", "fulltime"), ("winbothh-team2", "fulltime"),
+                          ("wineitherh-team1", "fulltime"), ("wineitherh-team2", "fulltime")),
 }
-HIGH_SIDES = ("Over", "Yes")        # côté « haut » d'un marché à deux issues (l'autre côté est le complément)
+# catégorie B, marchés complets à plus de deux issues (partition) : segment → (type, période)
+M_FAMILIES = {
+    "résultat (1re mi-temps)": (("1x2", "p1"),),
+    "mi-temps / fin de match": (("halftime-fulltime", "fulltime"),),
+}
+HIGH_SIDES = ("Over", "Yes", "1")   # côté « haut » d'un marché à deux issues (l'autre côté est le complément ; « 1 » : handicap domicile)
 # catégorie C : famille → grille d'issues
 C_FAMILIES = ("score exact", "marge de victoire", "nombre de buts")
 SCORE_CAP, MARGIN_CAP, TOTAL_CAP = 5, 4, 7
@@ -264,7 +276,7 @@ def _high_side(spec: mk.Spec) -> bool | None:
     """True si l'issue est le côté « haut » (plus / oui), False pour le complément, None si le marché n'est pas à deux issues."""
     if spec.outcome in HIGH_SIDES:
         return True
-    if spec.outcome in ("Under", "No"):
+    if spec.outcome in ("Under", "No", "2"):
         return False
     return None
 
@@ -275,27 +287,42 @@ def _winamax_last(snaps: pd.DataFrame) -> pd.DataFrame:
     return s.groupby(["fixture_id", "market_id", "outcome_id"], as_index=False).last()
 
 
-def build_rows_b(matches: pd.DataFrame, snaps: pd.DataFrame, cat, variant: sm.Variant, n_sims: int = N_SIMS, families: dict = B_FAMILIES) -> pd.DataFrame:
-    """Une ligne par match × marché à deux issues (côté haut) : probabilité du modèle, probabilité dé-viguée de Winamax
-    (Shin sur le dernier relevé complet avant le coup d'envoi), cotes brutes des deux côtés, règlement du côté haut.
-    `matches` : match_id, fixture_id, competition, kickoff_utc, expected_goals_*, ft_*, ht_*, first_goal, last_goal.
-    Les remboursements (lignes entières touchées) sont écartés."""
-    types = {t: fam for fam, ts in families.items() for t in ts}
+def _half_shares() -> dict:
+    try:
+        from .phase2 import half_share_prior
+        return half_share_prior(load_results())
+    except Exception:              # résultats détaillés absents (tests) : part par défaut
+        return {}
+
+
+def _prepared(matches: pd.DataFrame, snaps: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+    """Coups d'envoi par rencontre et dernier relevé Winamax de chaque issue avant le coup d'envoi."""
     kick = pd.to_datetime(matches.set_index("fixture_id")["kickoff_utc"], utc=True)
     s = snaps[snaps["fixture_id"].isin(kick.index)].copy()
     s["created_at"] = pd.to_datetime(s["created_at"], utc=True)
     s = s[s["created_at"] < s["fixture_id"].map(kick)]
-    last = _winamax_last(s)
+    return kick, _winamax_last(s)
+
+
+def build_rows_b(matches: pd.DataFrame, snaps: pd.DataFrame, cat, variant: sm.Variant, n_sims: int = N_SIMS, families: dict = B_FAMILIES,
+                 shares: dict | None = None) -> pd.DataFrame:
+    """Une ligne par match × marché à deux issues (côté haut) : probabilité du modèle, probabilité dé-viguée de Winamax
+    (Shin sur le dernier relevé complet avant le coup d'envoi), cotes brutes des deux côtés, règlement du côté haut.
+    `matches` : match_id, fixture_id, competition, kickoff_utc, expected_goals_*, ft_*, ht_*, first_goal, last_goal.
+    Les remboursements (lignes entières touchées) sont écartés."""
+    types = {tp: fam for fam, ts in families.items() for tp in ts}
+    shares = _half_shares() if shares is None else shares
+    kick, last = _prepared(matches, snaps)
     rows = []
     for m in matches.itertuples(index=False):
         g = last[last["fixture_id"] == m.fixture_id]
         if g.empty:
             continue
-        sims = sm.simulate(float(m.expected_goals_home), float(m.expected_goals_away), 0.45, variant, n=n_sims)
+        sims = sm.simulate(float(m.expected_goals_home), float(m.expected_goals_away), shares.get((m.competition, getattr(m, "season", "")), 0.45), variant, n=n_sims)
         result = mk.Result(int(m.ft_home), int(m.ft_away), int(m.ht_home), int(m.ht_away), str(m.first_goal), str(m.last_goal))
         for mid, gm in g.groupby("market_id"):
             market = cat.get(int(mid))
-            if market is None or market.period != "fulltime" or market.market_type not in types:
+            if market is None or (market.market_type, market.period) not in types:
                 continue
             specs = {int(o): market.spec(int(o)) for o in gm["outcome_id"]}
             if len(specs) != 2 or any(sp is None for sp in specs.values()):
@@ -312,7 +339,7 @@ def build_rows_b(matches: pd.DataFrame, snaps: pd.DataFrame, cat, variant: sm.Va
                 continue
             q = sharp.implied([prices[o_high], prices[o_low]])
             shin, _ = sharp.devig_shin(q)
-            rows.append({"match_id": m.match_id, "competition": m.competition, "kickoff": kick[m.fixture_id], "family": types[market.market_type],
+            rows.append({"match_id": m.match_id, "competition": m.competition, "kickoff": kick[m.fixture_id], "family": types[(market.market_type, market.period)],
                          "market_type": market.market_type, "handicap": float(specs[o_high].handicap), "p_model": float(mk.probability(specs[o_high], sims)),
                          "p_wx": float(shin[0]), "odds_high": prices[o_high], "odds_low": prices[o_low], "overround": float(q.sum() - 1.0), "y": float(settled)})
     return pd.DataFrame(rows)
@@ -333,14 +360,14 @@ def _two_way(rows: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return pm, ps, y
 
 
-def run_gate_b(rows: pd.DataFrame, min_matches: int = MIN_MATCHES, share: float = SPLIT_SHARE) -> dict:
+def run_gate_b(rows: pd.DataFrame, min_matches: int = MIN_MATCHES, share: float = SPLIT_SHARE, families=None) -> dict:
     """Catégorie B : par famille × compétition (et famille entière), poids choisi sur la première partie chronologique,
     gain, porte de calibration par bande et ECE sur la seconde ; verdict."""
     if rows.empty:
         return {"season": ARCHIVE_SEASON, "split": share, "segments": []}
     fit, test = split_chronological(rows, share)
     segments = []
-    for family in B_FAMILIES:
+    for family in (families or B_FAMILIES):
         comps = [None] + sorted(rows["competition"].unique())
         for comp in comps:
             f = fit[(fit["family"] == family) & ((fit["competition"] == comp) if comp else True)]
@@ -374,6 +401,110 @@ def run_gate_b(rows: pd.DataFrame, min_matches: int = MIN_MATCHES, share: float 
     return {"season": ARCHIVE_SEASON, "split": share, "segments": segments}
 
 
+def build_rows_m(matches: pd.DataFrame, snaps: pd.DataFrame, cat, variant: sm.Variant, n_sims: int = N_SIMS, families: dict = M_FAMILIES,
+                 shares: dict | None = None) -> dict[str, dict]:
+    """Marchés complets à plus de deux issues (1N2 de la mi-temps, mi-temps / fin de match) : par segment, matrices des
+    probabilités du modèle et de Winamax dé-vigué (Shin), cotes brutes et issue réalisée ; seules les rencontres dont le
+    dernier relevé couvre toutes les issues du marché sont gardées."""
+    types = {tp: fam for fam, ts in families.items() for tp in ts}
+    shares = _half_shares() if shares is None else shares
+    kick, last = _prepared(matches, snaps)
+    out = {fam: {"pm": [], "ps": [], "odds": [], "y": [], "competition": [], "kickoff": [], "match_id": []} for fam in families}
+    for m in matches.itertuples(index=False):
+        g = last[last["fixture_id"] == m.fixture_id]
+        if g.empty:
+            continue
+        sims = None
+        result = mk.Result(int(m.ft_home), int(m.ft_away), int(m.ht_home), int(m.ht_away), str(m.first_goal), str(m.last_goal))
+        for mid, gm in g.groupby("market_id"):
+            market = cat.get(int(mid))
+            if market is None or (market.market_type, market.period) not in types:
+                continue
+            ids = sorted(int(o) for o in market.outcomes)
+            prices = {int(o): float(p) for o, p in zip(gm["outcome_id"], gm["price"])}
+            if set(ids) - set(prices) or any(prices[i] <= 1.0 for i in ids):
+                continue
+            specs = [market.spec(i) for i in ids]
+            won = [mk.settle(sp, result) for sp in specs]
+            if any(sp is None for sp in specs) or sum(1 for w in won if w == 1.0) != 1:
+                continue
+            if sims is None:
+                sims = sm.simulate(float(m.expected_goals_home), float(m.expected_goals_away), shares.get((m.competition, getattr(m, "season", "")), 0.45), variant, n=n_sims)
+            pm = np.array([mk.probability(sp, sims) for sp in specs]); pm = pm / pm.sum()
+            shin, _ = sharp.devig_shin(sharp.implied([prices[i] for i in ids]))
+            d = out[types[(market.market_type, market.period)]]
+            d["pm"].append(pm); d["ps"].append(np.asarray(shin)); d["odds"].append(np.array([prices[i] for i in ids])); d["y"].append(won.index(1.0))
+            d["competition"].append(m.competition); d["kickoff"].append(kick[m.fixture_id]); d["match_id"].append(m.match_id)
+    return {fam: {k: (np.array(v) if k in ("pm", "ps", "odds", "y") else v) for k, v in d.items()} for fam, d in out.items()}
+
+
+def band_gate_multi(pool: np.ndarray, y: np.ndarray, odds: np.ndarray, family: str) -> dict:
+    """Porte de calibration par bande d'un marché à plusieurs issues : chaque issue est un « côté » ; sélections = issues
+    dont l'espérance à la cote Winamax dépasse le seuil ; échec si une issue jugée (≥ MIN_SELECTIONS) est
+    significativement surestimée."""
+    thr = circuit.ev_threshold(family)
+    out = {"threshold": thr, "sides": {}, "passed": True, "judged": False}
+    onehot = np.zeros_like(pool); onehot[np.arange(len(y)), y] = 1.0
+    for j in range(pool.shape[1]):
+        sel = pool[:, j] * odds[:, j] - 1.0 >= thr
+        n = int(sel.sum())
+        block = {"selections": n}
+        if n:
+            bias = onehot[sel, j] - pool[sel, j]
+            lo, hi = _bootstrap_mean_ci(bias)
+            block.update({"pMean": round(float(pool[sel, j].mean()), 4), "hitRate": round(float(onehot[sel, j].mean()), 4), "bias": round(float(bias.mean()), 4),
+                          "biasLow": round(lo, 4), "biasHigh": round(hi, 4), "roi": round(float((onehot[sel, j] * odds[sel, j] - 1.0).mean()), 4)})
+            if n >= MIN_SELECTIONS:
+                block["judged"] = True
+                out["judged"] = True
+                block["verdict"] = "surestime" if hi < 0 else "ok"
+                if hi < 0:
+                    out["passed"] = False
+        out["sides"][str(j)] = block
+    return out
+
+
+def run_gate_m(data: dict[str, dict], min_matches: int = MIN_MATCHES, share: float = SPLIT_SHARE) -> list[dict]:
+    """Catégorie B, marchés à plusieurs issues : par segment × compétition (et toutes), poids choisi sur la première partie
+    chronologique, gain, porte de calibration par bande et ECE sur la seconde."""
+    segments = []
+    for family, d in data.items():
+        if not len(d["y"]):
+            segments.append({"category": "B", "family": family, "competition": "toutes", "reference": "winamax", "validationMatches": 0, "testMatches": 0,
+                             "weight": 0.0, "verdict": "trop_peu_de_matchs"})
+            continue
+        order = np.argsort(np.array(d["kickoff"], dtype="datetime64[ns]"))
+        n_fit = int(round(len(order) * share))
+        fit_idx, test_idx = order[:n_fit], order[n_fit:]
+        comps = np.array(d["competition"])
+        for comp in [None] + sorted(set(comps)):
+            f = fit_idx if comp is None else fit_idx[comps[fit_idx] == comp]
+            t = test_idx if comp is None else test_idx[comps[test_idx] == comp]
+            seg = {"category": "B", "family": family, "competition": comp or "toutes", "reference": "winamax", "validationMatches": int(len(f)), "testMatches": int(len(t))}
+            if len(f) < min_matches or len(t) < min_matches:
+                seg.update({"weight": 0.0, "verdict": "trop_peu_de_matchs"})
+                segments.append(seg); continue
+            w, scores = fit_weight(d["pm"][f], d["ps"][f], d["y"][f])
+            pool_t = pool_matrix(d["pm"][t], d["ps"][t], w)
+            seg["weight"] = w
+            seg["validationLogLossByWeight"] = {str(k): round(v, 5) for k, v in scores.items()}
+            seg["test"] = evaluate(d["pm"][t], d["ps"][t], d["y"][t], w)
+            seg["ece"] = round(_ece_multi(pool_t, d["y"][t]), 4)
+            seg["eceModelAlone"] = round(_ece_multi(d["pm"][t], d["y"][t]), 4)
+            seg["band"] = band_gate_multi(pool_t, d["y"][t], d["odds"][t], family)
+            seg["bandModelAlone"] = band_gate_multi(d["pm"][t], d["y"][t], d["odds"][t], family)
+            if w == 0.0:
+                seg["verdict"] = "poids_nul"
+            elif seg["test"]["gainLow"] <= 0:
+                seg["verdict"] = "gain_non_significatif"
+            elif not seg["band"]["passed"]:
+                seg["verdict"] = "biais_directionnel"
+            else:
+                seg["verdict"] = "valide"
+            segments.append(seg)
+    return segments
+
+
 def load_rows_b(season: str = ARCHIVE_SEASON, n_sims: int = N_SIMS) -> pd.DataFrame:
     """Lignes de la catégorie B sur l'archive Winamax : matchs joués de la saison avec prévision figée et rencontre appariée."""
     from .product import load_catalogue
@@ -386,7 +517,10 @@ def load_rows_b(season: str = ARCHIVE_SEASON, n_sims: int = N_SIMS) -> pd.DataFr
     frames = [pd.read_parquet(p, columns=cols) for c in COMPETITIONS for p in sorted((RESEARCH / "odds" / c).glob(f"{season}.parquet"))]
     snaps = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=cols)
     snaps = snaps[snaps["fixture_id"].isin(df["fixture_id"])]
-    return build_rows_b(df, snaps, load_catalogue(), frozen_variant(), n_sims)
+    cat, variant, shares = load_catalogue(), frozen_variant(), _half_shares()
+    rows = build_rows_b(df, snaps, cat, variant, n_sims, shares=shares)
+    rows.attrs["multi"] = build_rows_m(df, snaps, cat, variant, n_sims, shares=shares)
+    return rows
 
 
 # ----- catégorie C : issues multiples, référence = fréquence de base -----
@@ -499,9 +633,9 @@ def summary_lines(report: dict) -> list[str]:
             band = s.get("band")
             if band:
                 sides = band["sides"]
-                line += " | sélections haut/bas " + "/".join(str(sides[k]["selections"]) for k in ("haut", "bas"))
+                line += " | sélections " + "/".join(f"{k}:{v['selections']}" for k, v in sides.items())
                 if band["judged"]:
-                    line += " " + ", ".join(f"{k}:{sides[k].get('verdict', '-')}" for k in ("haut", "bas") if sides[k].get("judged"))
+                    line += " " + ", ".join(f"{k}:{v.get('verdict', '-')}" for k, v in sides.items() if v.get("judged"))
             out.append(line + f"  → {s['verdict']}")
     out.append(f"Segments validés : {len(report['weights'])} ({', '.join(f'{k} w={v} ece={report['margins'][k]:.3f}' for k, v in report['weights'].items()) or 'aucun'})")
     return out
@@ -525,6 +659,7 @@ def main(argv=None) -> int:
         a = previous.get("categoryA") or {"validationSeason": args.validation, "testSeason": args.test, "segments": []}
     rows_b = pd.DataFrame() if args.skip_b else load_rows_b()
     b = run_gate_b(rows_b)
+    b["segments"] += run_gate_m(rows_b.attrs.get("multi", {})) if not args.skip_b else []
     variant = frozen_variant()
     c = run_gate_c(build_rows_c(matches_with_predictions([args.validation, args.test]), variant), args.validation, args.test)
     report = assemble(a, b, c)

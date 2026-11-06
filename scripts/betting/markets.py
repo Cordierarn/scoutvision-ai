@@ -70,6 +70,12 @@ class Spec:
     def family(self) -> str:
         return FAMILIES[self.market_type]
 
+    @property
+    def segment(self) -> str:
+        """Clé de segment de la porte de validation et des poids du pool : la famille, suffixée de la période quand le
+        marché porte sur une mi-temps (« plus/moins (1re mi-temps) ») ; la famille seule au temps réglementaire."""
+        return self.family if self.period == "fulltime" else f"{self.family} ({'1re' if self.period == 'p1' else '2e'} mi-temps)"
+
 
 def _team(market_type: str) -> int:
     return 2 if market_type.endswith("team2") else 1

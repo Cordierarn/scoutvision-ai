@@ -174,6 +174,7 @@ export interface SuggestionsIndex {
   journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
   evenings?: EveningSummary[];
   history?: HistoryDay[];
+  comboHistory?: ComboHistoryEntry[];
 }
 /** Statut d'un pari réglé sur le score réel (demi-gains et remboursements des handicaps asiatiques). */
 export type BetStatus = 'won' | 'lost' | 'void' | 'half_won' | 'half_lost' | 'pending';
@@ -193,6 +194,11 @@ export interface HistoryMatch {
   profiles: Partial<Record<SuggestionProfile, HistoryBet[]>>;
 }
 export interface HistoryDay { date: string; matches: HistoryMatch[] }
+/** Combiné du jour journalisé (profil exploratoire) : dernière version publiée avant le premier coup d'envoi, avec son règlement. */
+export interface ComboHistoryEntry {
+  date: string; legs: { matchId: string; match: string; label: string; odds: number }[];
+  odds: number; jointP: number; ev: number; stakeFraction: number; status: BetStatus; realised: number | null;
+}
 
 export const replayData = {
   marketBenchmark: () => loadOptional<MarketBenchmark>('/data/forecast/market_benchmark.json'),
