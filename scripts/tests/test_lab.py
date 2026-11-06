@@ -232,7 +232,7 @@ class StyleFrictionTest(unittest.TestCase):
         """Les 9 dimensions copiées de utils/recruitment.ts (clés et métriques) restent identiques."""
         import re
         from pathlib import Path
-        ts = (Path(__file__).resolve().parent.parent / "utils" / "recruitment.ts").read_text(encoding="utf-8")
+        ts = (Path(__file__).resolve().parents[2] / "utils" / "recruitment.ts").read_text(encoding="utf-8")
         block = ts.split("SQUAD_DIMENSIONS")[1].split("];")[0]
         found = {}
         for m in re.finditer(r"key: '([a-z]+)'.*?metrics: \{([^}]*)\}(.*?)\}", block):

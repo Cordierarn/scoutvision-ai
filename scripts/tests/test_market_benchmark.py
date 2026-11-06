@@ -18,7 +18,7 @@ import pandas as pd
 from backtest import leakage, market_benchmark as mb, odds as odds_mod, replay, walk_forward
 from forecast_models import elo, frequency, poisson, xg
 from forecast_models.base import PROB_COLUMNS
-from test_forecast_models import big_fixture
+from tests.test_forecast_models import big_fixture
 
 MAIN_HEADER = "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,B365H,B365D,B365A,PSH,PSD,PSA,AvgH,AvgD,AvgA,B365>2.5,B365<2.5,P>2.5,P<2.5,Avg>2.5,Avg<2.5,PSCH,PSCD,PSCA,AvgCH,AvgCD,AvgCA,PC>2.5,PC<2.5,AvgC>2.5,AvgC<2.5"
 NEW_HEADER = "Country,League,Season,Date,Time,Home,Away,HG,AG,Res,PH,PD,PA,MaxH,MaxD,MaxA,AvgH,AvgD,AvgA,PCH,PCD,PCA,MaxCH,MaxCD,MaxCA,AvgCH,AvgCD,AvgCA"
