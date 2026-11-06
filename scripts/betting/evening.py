@@ -113,16 +113,19 @@ def _settle_bet(b: dict, scores: dict):
 START_BANKROLL = 300.0
 
 
-def journal_bets(profile: str = "equilibre") -> dict[str, list[dict]]:
+def journal_bets(profile: str = "equilibre", cat=None) -> dict[str, list[dict]]:
     """Paris de chaque soirée (date UTC du coup d'envoi) depuis le journal : pour chaque match, la dernière publication du
-    profil avant le coup d'envoi, avec sa fraction de mise publiée."""
+    profil avant le coup d'envoi, avec sa fraction de mise publiée. Seules les publications du coupe-circuit comptent
+    (`product.CIRCUIT_START`) : les soirées du moteur d'avant ne sont plus reconstruites."""
     from .catalogue import load as load_catalogue
-    from .product import JOURNAL
-    if not JOURNAL.exists():
+    from . import product
+    if not product.JOURNAL.exists():
         return {}
-    cat = load_catalogue()
-    j = pd.read_parquet(JOURNAL)
-    j = j[(j["profile"] == profile) & (j["kind"] == "simple") & (j["published_at"] < j["kickoff_utc"])]
+    cat = cat if cat is not None else load_catalogue()
+    j = pd.read_parquet(product.JOURNAL)
+    pub = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
+    kick = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
+    j = j[(j["profile"] == profile) & (j["kind"] == "simple") & (pub < kick) & (pub >= product.CIRCUIT_START)]
     out: dict[str, list[dict]] = {}
     for match_id, g in j.groupby("match_id"):
         last = g[g["published_at"] == g["published_at"].max()].sort_values("rank")

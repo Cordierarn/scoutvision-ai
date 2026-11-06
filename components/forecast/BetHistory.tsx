@@ -212,7 +212,7 @@ const BetHistoryContent: React.FC<BetHistoryProps> = ({ index, failed = false, o
 
       {days.length === 0 ? (
         <EmptyState title={`Aucune suggestion ${PROFILE_LABELS[profile]} sur un match commencé ces 14 derniers jours.`}>
-          Le suivi commence avec les suggestions publiées depuis le 3 novembre 2026 ; un match apparaît ici dès son coup d'envoi, et son résultat après le passage du matin.
+          Le suivi commence avec les suggestions publiées depuis le coupe-circuit (5 novembre 2026) ; un match apparaît ici dès son coup d'envoi, et son résultat après le passage du matin.
         </EmptyState>
       ) : (
         <div className="space-y-3">

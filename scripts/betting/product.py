@@ -42,6 +42,13 @@ JOURNAL = RESEARCH / "journal" / "suggestions.parquet"
 # 6 novembre 2026 (docs/betting-lab.md) ; leurs lignes déjà écrites restent dans le journal (immuable), et celui des
 # combinés du jour (`journal/combos.parquet`) n'est plus ni lu ni écrit, mais aucune n'est plus résumée ni exportée.
 VALIDATED_PROFILES = sg.PROFILES
+# Premier passage du coupe-circuit (5 novembre 2026, 18 h 27 UTC) : les lignes publiées avant viennent du moteur d'avant le
+# coupe-circuit, même sous les noms Sûr, Équilibré ou Grosse cote. Elles restent dans le journal (immuable) mais ne sont plus
+# comptées dans les mesures (résumé, historique, soirées, critère d'arrêt).
+CIRCUIT_START = pd.Timestamp("2026-11-05T18:27:00Z")
+# Critère d'arrêt (décision du 6 novembre 2026, docs/betting-lab.md) : contrôlé le 18 décembre 2026.
+CRITERION_DATE = "2026-12-18"
+CRITERION_MIN_SETTLED = 30
 BILAN = RESEARCH / "product" / "bilan.json"
 EXPORT_DIR = ROOT / "public" / "data" / "forecast" / "suggestions"
 SEASON = "2026-27"
@@ -445,14 +452,15 @@ def playable(journal: pd.DataFrame) -> pd.DataFrame:
     """Paris jouables du journal : pour chaque match et profil, la dernière publication strictement avant le coup d'envoi
     (celle que l'on pouvait jouer). Les republications antérieures et les publications d'après le coup d'envoi ne sont
     pas des paris : les compter gonflerait les effectifs et biaiserait le rendement. Profils validés seulement : les
-    lignes déjà écrites des profils retirés restent dans le journal sans être comptées."""
+    lignes déjà écrites des profils retirés, et celles publiées avant le coupe-circuit (`CIRCUIT_START`), restent dans le
+    journal sans être comptées."""
     if journal.empty:
         return journal
     j = journal[journal["kind"] == "simple"] if "kind" in journal else journal
     j = j[j["profile"].isin(VALIDATED_PROFILES)]
     kick = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
     pub = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
-    j = j[pub < kick]
+    j = j[(pub < kick) & (pub >= CIRCUIT_START)]          # moteur d'avant le coupe-circuit : jamais compté
     if j.empty:
         return j
     pub = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
@@ -470,6 +478,25 @@ def journal_summary(journal: pd.DataFrame) -> dict:
         b = _block(g)
         by[profile] = {**b, **early_block(g)}
     return {"published": int(len(journal)), "playable": int(len(play)), "settled": int(len(settled)), "byProfile": by}
+
+
+def criterion_summary(journal: pd.DataFrame) -> dict:
+    """Critère d'arrêt du 18 décembre 2026, tel qu'il est écrit : paris passés par le coupe-circuit (publiés depuis
+    `CIRCUIT_START`), en sélections distinctes des trois profils validés réunis (une même sélection match:marché:issue
+    publiée dans plusieurs profils compte une fois) ; paris réglés, CLV face à la référence sharp avec son intervalle à
+    95 % par grappes de match. Stand-by si moins de 30 paris réglés ou si l'intervalle n'est pas entièrement positif."""
+    play = playable(journal) if not journal.empty else journal
+    if play.empty:
+        distinct = play
+    else:
+        distinct = play.sort_values("published_at", ascending=False).drop_duplicates(["match_id", "market_id", "outcome_id"])
+    settled = distinct[distinct["settled"].notna()] if not distinct.empty else distinct
+    clv = clv_block(settled) if not settled.empty else clv_block(pd.DataFrame(columns=["clv", "match_id"]))
+    enough = int(len(settled)) >= CRITERION_MIN_SETTLED
+    positive = clv["clvLow"] is not None and clv["clvLow"] > 0
+    return {"checkDate": CRITERION_DATE, "since": CIRCUIT_START.isoformat(), "profiles": list(VALIDATED_PROFILES),
+            "selections": int(len(distinct)), "settled": int(len(settled)), "matches": int(settled["match_id"].nunique()) if len(settled) else 0,
+            **clv, "minSettled": CRITERION_MIN_SETTLED, "enoughBets": enough, "clvPositive": positive, "standBy": not (enough and positive)}
 
 
 # ----- rencontres à venir, journal, export -----
@@ -651,6 +678,7 @@ def history(journal: pd.DataFrame, results: pd.DataFrame, names: dict, now: dt.d
     j = journal[(journal["kind"] == "simple") & journal["profile"].isin(VALIDATED_PROFILES)].copy()
     j["kick"] = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
     j["pub"] = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
+    j = j[j["pub"] >= CIRCUIT_START]                      # moteur d'avant le coupe-circuit : non montré
     now = pd.Timestamp(now)
     j = j[(j["pub"] < j["kick"]) & (j["kick"] <= now) & (j["kick"] >= now - pd.Timedelta(days=days))]
     if j.empty:
@@ -740,6 +768,7 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
                "reference": {"bookmakers": list(sharp.SHARP_BOOKMAKERS), "method": "shin", "poolWeights": sharp.PoolWeights.load().weights, "calibrationMargins": sharp.PoolWeights.load().margins,
                              "blockLabels": circuit.BLOCK_LABELS, "warningLabels": circuit.WARNING_LABELS},
                "matches": [_validated_only(e) for e in entries], "bilan": bilan, "journal": js, "evenings": evenings[-30:],
+               "circuitStart": CIRCUIT_START.isoformat(), "criterion": criterion_summary(journal),
                "history": history(journal, results, names, generated_at)}
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = EXPORT_DIR / "index.json"

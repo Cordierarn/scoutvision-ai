@@ -377,5 +377,89 @@ class RetiredProfilesTests(unittest.TestCase):
         self.assertEqual(payload["schemaVersion"], "2.0.0")
 
 
+
+class _Market:
+    def spec(self, outcome_id):
+        return mk.Spec("1x2", "fulltime", 0.0, "1")
+
+
+class _Cat(dict):
+    def __missing__(self, key):
+        return _Market()
+
+
+CAT_STUB = _Cat()
+
+
+class CircuitStartTests(unittest.TestCase):
+    """Paris d'avant le coupe-circuit (5 novembre 2026, 18 h 27 UTC) exclus des mesures ; résumé du critère d'arrêt du
+    18 décembre 2026 : sélections distinctes des trois profils validés réunis."""
+
+    BEFORE = dt.datetime(2026, 11, 5, 12, 44, tzinfo=dt.timezone.utc)
+    AFTER = dt.datetime(2026, 11, 6, 10, 59, tzinfo=dt.timezone.utc)
+    KICK = dt.datetime(2026, 11, 6, 19, 0, tzinfo=dt.timezone.utc)
+
+    def row(self, mid, profile, published, market=101, outcome=101, settled=1.0, realised=1.0, clv=0.02):
+        return {"suggestion_id": f"{mid}{profile}{market}{outcome}{published}", "published_at": published.isoformat(), "match_id": mid, "fixture_id": "f" + mid,
+                "competition": "AAA", "kickoff_utc": self.KICK.isoformat(), "profile": profile, "rank": 1, "kind": "simple", "market_id": market, "outcome_id": outcome,
+                "family": "résultat", "label": "Club A gagne", "odds": 2.0, "odds_at": published.isoformat(), "p": 0.5, "ev": 0.0, "stake_fraction": 0.01,
+                "stake_mode": "shrink_kelly", "settled": settled, "realised": realised, "settled_at": None, "clv": clv, "closing_odds": 1.9,
+                "p_sharp": 0.5, "p_ref": 0.5, "ev_ref": 0.05, "pool_w": 0.0, "sharp_bookmaker": "pinnacle", "closing_p_sharp": 0.51}
+
+    def journal(self):
+        return pd.DataFrame([
+            self.row("m0", "equilibre", self.BEFORE, clv=None, realised=0.8),                  # moteur d'avant le coupe-circuit
+            self.row("m1", "sur", self.AFTER), self.row("m1", "equilibre", self.AFTER),          # même sélection dans deux profils
+            self.row("m2", "grosse_cote", self.AFTER, market=102, outcome=103, settled=0.0, realised=-1.0, clv=-0.01),
+            self.row("m3", "sur", self.AFTER, settled=None, realised=None, clv=None),           # en attente
+        ])
+
+    def test_circuit_start_is_the_first_publication_of_the_circuit_breaker(self):
+        self.assertEqual(product.CIRCUIT_START, pd.Timestamp("2026-11-05T18:27:00Z"))
+
+    def test_measures_ignore_bets_published_before_the_circuit_breaker(self):
+        j = self.journal()
+        self.assertNotIn("m0", set(product.playable(j)["match_id"]))
+        self.assertEqual(product.journal_summary(j)["byProfile"]["equilibre"]["bets"], 1)
+        days = product.history(j, pd.DataFrame([{"match_id": m, "ft_home": 1, "ft_away": 0} for m in ("m0", "m1", "m2")]), {}, self.KICK + dt.timedelta(hours=3))
+        self.assertNotIn("m0", {m["matchId"] for d in days for m in d["matches"]})
+        self.assertEqual(len(j), 5)                                                           # journal intact
+
+    def test_criterion_counts_distinct_selections_of_the_three_profiles_together(self):
+        c = product.criterion_summary(self.journal())
+        self.assertEqual(c["checkDate"], "2026-12-18")
+        self.assertEqual((c["selections"], c["settled"], c["clvBets"]), (3, 2, 2))   # m1 compté une fois, m0 exclu, m3 en attente
+        self.assertAlmostEqual(c["meanClv"], 0.005)
+        self.assertIn("clvLow", c); self.assertIn("clvHigh", c)
+        self.assertEqual((c["minSettled"], c["enoughBets"], c["clvPositive"], c["standBy"]), (30, False, False, True))
+
+    def test_evenings_only_use_bets_published_after_the_circuit_breaker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = product.JOURNAL
+            product.JOURNAL = Path(tmp) / "journal.parquet"
+            try:
+                self.journal().to_parquet(product.JOURNAL, index=False)
+                from betting import evening
+                bets = evening.journal_bets("equilibre", cat=CAT_STUB)
+            finally:
+                product.JOURNAL = saved
+        self.assertEqual([b["match_id"] for day in bets.values() for b in day], ["m1"])
+
+    def test_export_carries_the_criterion_and_the_circuit_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            saved = (product.JOURNAL, product.BILAN, product.EXPORT_DIR, product.RESEARCH, product.load_results, product.match_names)
+            product.JOURNAL, product.BILAN, product.EXPORT_DIR, product.RESEARCH = tmp / "journal.parquet", tmp / "bilan.json", tmp / "export", tmp
+            product.load_results = lambda: pd.DataFrame(columns=["match_id", "ft_home", "ft_away", "home_team_name", "away_team_name"])
+            product.match_names = lambda results: {}
+            try:
+                self.journal().to_parquet(product.JOURNAL, index=False)
+                payload = json.loads(product.export([], self.KICK + dt.timedelta(hours=3)).read_text(encoding="utf-8"))
+            finally:
+                product.JOURNAL, product.BILAN, product.EXPORT_DIR, product.RESEARCH, product.load_results, product.match_names = saved
+        self.assertEqual(payload["criterion"]["selections"], 3)
+        self.assertEqual(payload["circuitStart"], "2026-11-05T18:27:00+00:00")
+
+
 if __name__ == "__main__":
     unittest.main()
