@@ -318,8 +318,8 @@ vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étape
   Pinnacle sur toutes les rencontres des compétitions du Labo et Betfair Exchange (prix « back » bruts) sur
   une partie, trois marchés (1N2, plus/moins et handicap asiatique à la ligne principale), écrits dans
   l'archive sous les mêmes noms et au même schéma, datés de l'heure de l'appel. Coût : un crédit par marché
-  et par compétition ayant une rencontre sous 36 h (3 marchés), plan gratuit de 500 crédits par mois lus
-  dans les en-têtes, réserve de 25 ; premier relevé réel : 8 compétitions, 36 crédits, 77 rencontres
+  et par compétition ayant une rencontre dans la fenêtre (3 marchés), plan gratuit de 500 crédits par mois lus
+  dans les en-têtes, réserve de 25 (budget quotidien : voir « Budget The Odds API ») ; premier relevé réel : 8 compétitions, 36 crédits, 77 rencontres
   appariées sur 126 (les autres sont au-delà de la fenêtre OddsPapi, plus quelques noms non reconnus).
   Appariement des rencontres : même compétition, coup d'envoi à ± 2 h, les deux noms similaires (seuil
   0,5) ; sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau suffit et l'autre nom
@@ -386,6 +386,22 @@ le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est ar
 « clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (dernier passage
 du cycle avant le match) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
 les ligues principales (étape 2).
+
+### Budget The Odds API (6 novembre 2026)
+
+Audit du 6 novembre : trois passages par jour sur les rencontres des 36 h suivantes consommaient le plan gratuit en
+quelques jours (de l'ordre de 1 000 crédits par mois sur le calendrier réel pour 500), après quoi plus aucune
+référence sharp, donc plus aucun pari validé. Décision du propriétaire (option a) : **un passage sharp par jour**, le
+premier passage du cycle à partir de 09 h UTC (`sharpfeed pull --daily --not-before 09:00`, `daily_pull_due`), sur les
+rencontres des **24 h** suivantes. Un passage sauté est repris au créneau suivant du même jour ; un appel refusé ne
+compte pas comme fait.
+
+Calcul : 3 crédits (1N2, plus/moins, handicap) par compétition couverte ayant une rencontre dans la fenêtre, soit de
+l'ordre de 300 crédits par mois sur le calendrier réel des 11 compétitions (`credits_per_day`, affiché par
+`sharpfeed status` pour la fin du mois en cours), sous les 475 utilisables. Contrepartie : la « clôture » sharp du CLV
+est un relevé du matin pour les matchs du soir, plus éloigné du coup d'envoi qu'avec trois passages ; le CLV reste une
+clôture approchée tant que la référence ne vient pas d'un flux couvrant la dernière heure (plan payant ou clôture
+Pinnacle de football-data).
 
 ## Étape 2 du moteur quantitatif : porte de validation par segment, catégorie A (5 novembre 2026)
 

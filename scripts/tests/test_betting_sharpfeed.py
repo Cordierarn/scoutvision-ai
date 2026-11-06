@@ -136,6 +136,37 @@ class ClientCreditsTests(unittest.TestCase):
         self.assertNotIn("cle-test", str(ctx.exception))
 
 
+class DailyBudgetTests(unittest.TestCase):
+    """Un passage sharp par jour, rencontres sous 24 h, dans le plan gratuit (500 crédits, réserve 25)."""
+
+    UTC = dt.timezone.utc
+
+    def credits(self, log):
+        c = sharpfeed.Credits(path=None, month="2026-11")
+        c.log = log
+        return c
+
+    def test_one_pull_per_day_from_the_first_pass_after_the_threshold(self):
+        early = dt.datetime(2026, 11, 6, 5, 40, tzinfo=self.UTC)
+        late = dt.datetime(2026, 11, 6, 9, 20, tzinfo=self.UTC)
+        self.assertFalse(sharpfeed.daily_pull_due(self.credits([]), early, dt.time(9, 0))[0])            # trop tôt
+        self.assertTrue(sharpfeed.daily_pull_due(self.credits([]), late, dt.time(9, 0))[0])
+        done = [{"at": "2026-11-06T09:21:00+00:00", "sport": "soccer_epl", "cost": 3}]
+        self.assertFalse(sharpfeed.daily_pull_due(self.credits(done), dt.datetime(2026, 11, 6, 13, 45, tzinfo=self.UTC), dt.time(9, 0))[0])   # déjà fait aujourd'hui
+        self.assertTrue(sharpfeed.daily_pull_due(self.credits(done), dt.datetime(2026, 11, 7, 9, 15, tzinfo=self.UTC), dt.time(9, 0))[0])     # nouveau jour
+        refused = [{"at": "2026-11-06T09:21:00+00:00", "sport": "soccer_epl", "cost": 0}]               # appel refusé, rien relevé : à refaire
+        self.assertTrue(sharpfeed.daily_pull_due(self.credits(refused), dt.datetime(2026, 11, 6, 13, 45, tzinfo=self.UTC), dt.time(9, 0))[0])
+
+    def test_monthly_cost_counts_three_credits_per_competition_with_a_fixture_in_the_window(self):
+        t = lambda d, h: pd.Timestamp(f"2026-11-{d:02d}T{h:02d}:00:00Z")
+        fx = pd.DataFrame([{"fixture_id": "a", "competition": "ENG", "status_id": 0, "start_time": t(7, 15)},
+                           {"fixture_id": "b", "competition": "ENG", "status_id": 0, "start_time": t(7, 17)},      # même compétition : un seul appel
+                           {"fixture_id": "c", "competition": "ESP", "status_id": 0, "start_time": t(8, 8)},       # avant 09 h 13 le 8 : fenêtre du 7
+                           {"fixture_id": "d", "competition": "XXX", "status_id": 0, "start_time": t(7, 15)}])     # hors The Odds API
+        per_day = sharpfeed.credits_per_day(fx, dt.date(2026, 11, 7), dt.date(2026, 11, 8), hours=24, at=dt.time(9, 13))
+        self.assertEqual(per_day, {dt.date(2026, 11, 7): 6, dt.date(2026, 11, 8): 0})
+
+
 class OddsPapiRestrictedTests(unittest.TestCase):
     def test_restricted_bookmakers_are_dropped_and_the_call_retried(self):
         self.assertEqual(cl.restricted_bookmakers('{"error":{"message":"Restricted bookmaker(s).","code":"RESTRICTED_ACCESS","details":"Restricted bookmakers: pinnacle, betfair-ex. You do not have access to these bookmakers."}}'),

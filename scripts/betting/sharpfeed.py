@@ -9,13 +9,15 @@ toutes les rencontres des compétitions du Labo et Betfair Exchange sur une part
 principaux (1N2, plus/moins ligne principale, handicap asiatique ligne principale).
 
   cd scripts
-  python3 -m betting.sharpfeed pull [--hours 36] [--markets h2h,totals,spreads]   relevé des sports qui ont une
-                                                                                   rencontre dans la fenêtre
-  python3 -m betting.sharpfeed status                                              crédits du mois
+  python3 -m betting.sharpfeed pull [--hours 24] [--daily [--not-before 09:00]] [--markets h2h,totals,spreads]
+                                        relevé des sports qui ont une rencontre dans la fenêtre ; --daily : un seul
+                                        passage par jour, le premier à partir de --not-before (UTC)
+  python3 -m betting.sharpfeed status   crédits du mois et coût prévu du passage quotidien jusqu'à la fin du mois
 
 Crédits : un appel coûte un crédit par marché demandé (3 par sport et par passage) ; le plan gratuit en donne
 500 par mois, lus dans les en-têtes `x-requests-*`. Seuls les sports avec une rencontre dans la fenêtre sont
-appelés, et une réserve de 25 crédits est gardée. Clé dans `THE_ODDS_API_KEY` (variable d'environnement ou
+appelés, et une réserve de 25 crédits est gardée. Le cycle fait un passage par jour sur les rencontres des 24 h
+suivantes (`daily_pull_due`, `credits_per_day`), de l'ordre de 300 crédits par mois sur le calendrier réel. Clé dans `THE_ODDS_API_KEY` (variable d'environnement ou
 `.env.local`, jamais affichée). Les prix sont datés de l'heure de l'appel : attestés à cet instant, comme les
 cotes courantes Winamax. Betfair : prix « back » bruts (les marchés `*_lay` sont ignorés), sans commission.
 """
@@ -48,6 +50,11 @@ SPORT_KEYS = {"ENG": "soccer_epl", "ESP": "soccer_spain_la_liga", "GER": "soccer
               "UCL": "soccer_uefa_champs_league", "UEL": "soccer_uefa_europa_league", "UECL": "soccer_uefa_europa_conference_league"}
 BUDGET = 500
 RESERVE = 25
+# Un passage par jour (audit du 6 novembre 2026 : trois passages sur 36 h coûtaient de l'ordre de 1 000 crédits par mois
+# pour un plan de 500) : le premier passage du cycle à partir de DAILY_NOT_BEFORE, sur les rencontres des DAILY_HOURS
+# suivantes. Environ 3 crédits par compétition et par jour de match : de l'ordre de 300 par mois sur le calendrier réel.
+DAILY_HOURS = 24
+DAILY_NOT_BEFORE = dt.time(9, 0)
 NAME_THRESHOLD = 0.5
 STRONG_THRESHOLD = 0.8       # un côté sûr suffit quand il désigne une seule rencontre du créneau : l'autre nom est appris
 KICKOFF_TOLERANCE = dt.timedelta(hours=2)
@@ -268,6 +275,32 @@ def sports_to_pull(fixtures: pd.DataFrame, now: pd.Timestamp, hours: float) -> l
     return list(f.sort_values("start_time")["competition"].drop_duplicates())
 
 
+def daily_pull_due(credits: "Credits", now: dt.datetime, not_before: dt.time = DAILY_NOT_BEFORE) -> tuple[bool, str]:
+    """Le passage sharp du jour est-il à faire ? Non avant `not_before` (UTC), non si des crédits ont déjà été dépensés
+    aujourd'hui ; un appel refusé (coût 0) ne compte pas comme un relevé fait."""
+    if now.time() < not_before:
+        return False, f"passage sharp du jour à partir de {not_before:%H:%M} UTC"
+    today = now.date().isoformat()
+    if any(str(e.get("at", ""))[:10] == today and int(e.get("cost", 0)) > 0 for e in credits.log):
+        return False, "passage sharp du jour déjà fait"
+    return True, "passage sharp du jour"
+
+
+def credits_per_day(fixtures: pd.DataFrame, start: dt.date, end: dt.date, hours: float = DAILY_HOURS, at: dt.time = dt.time(9, 13),
+                    markets: int = len(MARKETS)) -> dict[dt.date, int]:
+    """Coût estimé d'un passage quotidien à l'heure `at` : `markets` crédits par compétition couverte par The Odds API ayant
+    une rencontre dans les `hours` heures suivantes (calendrier de l'archive)."""
+    f = fixtures[fixtures["competition"].isin(SPORT_KEYS)]
+    start_times = pd.to_datetime(f["start_time"], utc=True)
+    out, day = {}, start
+    while day <= end:
+        t0 = pd.Timestamp(dt.datetime.combine(day, at), tz="UTC")
+        window = f[(start_times >= t0) & (start_times < t0 + pd.Timedelta(hours=hours))]
+        out[day] = markets * int(window["competition"].nunique())
+        day += dt.timedelta(days=1)
+    return out
+
+
 # ----- ligne de commande -----
 
 def cmd_pull(args) -> int:
@@ -277,6 +310,11 @@ def cmd_pull(args) -> int:
         print("Aucune rencontre OddsPapi en archive : lancer `betting.fetch fixtures` d'abord.")
         return 2
     now = pd.Timestamp.now(tz="UTC")
+    if args.daily:
+        due, why = daily_pull_due(Credits.load(), now.to_pydatetime(), dt.time.fromisoformat(args.not_before))
+        print(f"{why} : {'relevé' if due else 'rien à faire'}")
+        if not due:
+            return 0
     comps = sports_to_pull(fixtures, now, args.hours)
     markets = tuple(args.markets.split(","))
     client = TheOddsApiClient()
@@ -312,15 +350,25 @@ def cmd_pull(args) -> int:
 
 
 def cmd_status(args) -> int:
+    from .fetch import load_fixtures
     c = Credits.load()
     print(f"The Odds API {c.month} : {c.used} crédits utilisés, {c.available} disponibles (budget {c.budget}, réserve {RESERVE})")
+    today = dt.datetime.now(dt.timezone.utc).date()
+    month_end = (today.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    planned = credits_per_day(load_fixtures(), today, month_end)
+    known = sum(planned.values())
+    print(f"Passage quotidien d'ici la fin du mois : {known} crédits sur les rencontres connues de l'archive "
+          f"({sum(1 for v in planned.values() if v)} jours de match connus) ; solde prévu en fin de mois : {c.available - known} crédits "
+          f"(réserve de {RESERVE} comprise)")
     return 0
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("pull"); p.add_argument("--hours", type=float, default=36); p.add_argument("--markets", default=",".join(MARKETS)); p.set_defaults(fn=cmd_pull)
+    p = sub.add_parser("pull"); p.add_argument("--hours", type=float, default=DAILY_HOURS); p.add_argument("--markets", default=",".join(MARKETS))
+    p.add_argument("--daily", action="store_true", help="un seul passage par jour, à partir de --not-before (UTC)")
+    p.add_argument("--not-before", default=DAILY_NOT_BEFORE.strftime("%H:%M")); p.set_defaults(fn=cmd_pull)
     p = sub.add_parser("status"); p.set_defaults(fn=cmd_status)
     args = parser.parse_args(argv)
     return args.fn(args)
