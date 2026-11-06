@@ -7,7 +7,7 @@ import { PlayerData, TeamStats } from '../types';
 
 /**
  * Clé d'équipe unique : une même équipe a une entrée par compétition et par saison
- * (ex. "Bayern München · Bundesliga 2024-25" et "Bayern München · Champions League 2024-25")
+ * (ex. "Club A · Ligue X 2024-25" et "Club A · Coupe d'Europe 2024-25")
  */
 export function getTeamKey(team: string, league: string): string {
   return `${team} · ${league}`;

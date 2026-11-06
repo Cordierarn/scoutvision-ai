@@ -15,9 +15,9 @@ describe('coordonnées des cases', () => {
     expect(isValidSlotPosition({ x: 0, y: 0.5 })).toBe(true);
   });
 
-  it('Crvena Zvezda 2026-27, 3-2-4-1 (7 matchs) : 4 cases sans position, rien placé en (0, 0)', () => {
+  it('équipe SRB 2026-27, 3-2-4-1 (7 matchs) : 4 cases sans position, rien placé en (0, 0)', () => {
     const f = normalizeFormation({ formation: '3-2-4-1', matches: 7, slots: [
-      slot(0, 0, 0, [['p_2cMfLv', 'Matheus Lima Magalhães', 7]]), slot(1, 0, 0), slot(2, 0, 0), slot(3, 0, 0),
+      slot(0, 0, 0, [['p_1', 'Joueur 1', 7]]), slot(1, 0, 0), slot(2, 0, 0), slot(3, 0, 0),
     ] });
     expect(f).toMatchObject({ slots: [], invalidSlots: 4, status: 'incomplete' });
   });
@@ -125,7 +125,7 @@ describe('formation des besoins de recrutement', () => {
     expect(recruitmentFormation(f)).toEqual({ index: 0 });
   });
 
-  it('cas Crvena Zvezda : 3-2-4-1 sans case placée → repli sur la plus utilisée exploitable, annoncé', () => {
+  it('cas SRB 2026-27 : 3-2-4-1 sans case placée → repli sur la plus utilisée exploitable, annoncé', () => {
     const f = orderFormations(lineups([
       { formation: '4-1-4-1', matches: 2, slots: eleven() }, { formation: '3-4-3', matches: 1, slots: eleven(20) },
       { formation: '3-2-4-1', matches: 7, slots: empty(4) },

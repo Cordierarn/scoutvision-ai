@@ -54,7 +54,7 @@ def _token_equal(x: str, y: str) -> bool:
 
 def similarity(a: str, b: str) -> float:
     """Jaccard des jetons avec égalité floue (« munchen » ≈ « munich ») ; un nom entièrement contenu dans
-    l'autre (« Real Sociedad » ⊂ « Real Sociedad San Sebastian ») vaut au moins SUBSET_SCORE."""
+    l'autre (« Union Vallée » ⊂ « Union Vallée Nord ») vaut au moins SUBSET_SCORE."""
     ta, tb = normalize(a), normalize(b)
     if not ta or not tb:
         return 0.0
