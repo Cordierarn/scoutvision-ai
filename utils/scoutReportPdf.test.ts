@@ -35,9 +35,9 @@ const full = () => record({
 
 describe('pdfText / pdfFileName', () => {
   it('garde Latin-1 et la ponctuation WinAnsi, translittère le reste, ne produit jamais un nom vide', () => {
-    expect(pdfText('Mbappé — « élite » → 2 ≥ 1 Łukasz Đorđe • …')).toBe('Mbappé — « élite » -> 2 >= 1 Lukasz Dorde • …');
+    expect(pdfText('Lefèvre — « élite » → 2 ≥ 1 Łukasz Đorđe • …')).toBe('Lefèvre — « élite » -> 2 >= 1 Lukasz Dorde • …');
     expect(pdfText((1692).toLocaleString('fr-FR') + ' min')).toBe('1 692 min');   // espace fine insécable → espace
-    expect(pdfFileName(record({ player: { ...playerRef(STRIKER), name: 'Kylian Mbappé' } }), NOW)).toBe('ScoutVision_Kylian-Mbappe_2026-27_2026-10-29.pdf');
+    expect(pdfFileName(record({ player: { ...playerRef(STRIKER), name: 'Zoé Lefèvre' } }), NOW)).toBe('ScoutVision_Zoe-Lefevre_2026-27_2026-10-29.pdf');
     expect(pdfFileName(record({ player: { ...playerRef(STRIKER), name: 'Đorđe Đurić-Ñ' } }), NOW)).toBe('ScoutVision_Dorde-Duric-N_2026-27_2026-10-29.pdf');
     expect(pdfFileName(record({ player: { ...playerRef(STRIKER), name: '!!!', season: '' } }), NOW)).toBe('ScoutVision_joueur_saison_2026-10-29.pdf');
   });

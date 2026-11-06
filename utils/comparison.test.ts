@@ -109,18 +109,18 @@ describe('sélection', () => {
   });
 
   it('noms distinctifs : nom de famille, puis nom complet, puis club', () => {
-    const a = row({ Player: 'Enzo Giménez', Team: 'Rosario' });
-    const b = row({ Player: 'Enzo Giménez', Team: 'Querétaro' });
-    const c = row({ Player: 'Lucas Giménez' });
-    expect(distinctNames([a, c])).toEqual(['Enzo Giménez', 'Lucas Giménez']);
-    expect(distinctNames([a, b])).toEqual(['Enzo Giménez · Rosario', 'Enzo Giménez · Querétaro']);
-    expect(distinctNames([a, row({ Player: 'Ludovic Ajorque' })])).toEqual(['Giménez', 'Ajorque']);
+    const a = row({ Player: 'Enzo Dupont', Team: 'Club A' });
+    const b = row({ Player: 'Enzo Dupont', Team: 'Club B' });
+    const c = row({ Player: 'Lucas Dupont' });
+    expect(distinctNames([a, c])).toEqual(['Enzo Dupont', 'Lucas Dupont']);
+    expect(distinctNames([a, b])).toEqual(['Enzo Dupont · Club A', 'Enzo Dupont · Club B']);
+    expect(distinctNames([a, row({ Player: 'Ludovic Martin' })])).toEqual(['Dupont', 'Martin']);
     // même joueur, même club, championnat et coupe la même saison, puis une autre saison
-    const league = row({ Player: 'Ludovic Ajorque', League: 'Ligue 1 2024-25', Season: '2024-25' });
-    const cup = row({ Player: 'Ludovic Ajorque', Competition: 'UCL', League: 'UCL 2024-25', Season: '2024-25' });
-    const later = row({ Player: 'Ludovic Ajorque' });
+    const league = row({ Player: 'Ludovic Martin', League: 'Ligue 1 2024-25', Season: '2024-25' });
+    const cup = row({ Player: 'Ludovic Martin', Competition: 'UCL', League: 'UCL 2024-25', Season: '2024-25' });
+    const later = row({ Player: 'Ludovic Martin' });
     expect(distinctNames([league, cup, later], p => (p.Competition === 'UCL' ? 'Champions League' : 'Ligue 1')))
-      .toEqual(['Ludovic Ajorque · Ligue 1 · 24-25', 'Ludovic Ajorque · Champions League · 24-25', 'Ludovic Ajorque · Ligue 1 · 26-27']);
+      .toEqual(['Ludovic Martin · Ligue 1 · 24-25', 'Ludovic Martin · Champions League · 24-25', 'Ludovic Martin · Ligue 1 · 26-27']);
   });
 });
 
