@@ -11,6 +11,7 @@ import type { BetStatus, ComboHistoryEntry, EveningBet, EveningSummary, HistoryB
 import { CompetitionBadge } from '../Media';
 import { EmptyState, LoadError, Panel, Skeleton, Stat, StatStrip } from '../ui';
 import { ProfileBankroll } from './Suggestions';
+import { RESPONSIBLE_GAMBLING } from './assistantLogic';
 import {
   CIRCUIT_NOTE, PROFILE_LABELS, STATUS_LABELS, betNet, comboSummary, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, historySummary, sharpLabel, stakeEuros, statusClass,
 } from './suggestionsLogic';
@@ -192,11 +193,21 @@ const HistoryMatchBlock: React.FC<{ m: HistoryMatch; bets: HistoryBet[]; bankrol
   </div>
 );
 
-export const BetHistory: React.FC<{
+type BetHistoryProps = {
   index: SuggestionsIndex | null | undefined; failed?: boolean; onRetry?: () => void;
   profile: SuggestionProfile; onProfile: (p: SuggestionProfile) => void;
   bankrollInput: string; bankroll: number | null; onBankroll: (raw: string) => void;
-}> = ({ index, failed = false, onRetry, profile, onProfile, bankrollInput, bankroll, onBankroll }) => {
+};
+
+/** Onglet Suivi des paris : le message de jeu responsable reste visible sous chaque état (chargement, absence, erreur, contenu). */
+export const BetHistory: React.FC<BetHistoryProps> = props => (
+  <div className="space-y-4">
+    <BetHistoryContent {...props} />
+    <p className="text-2xs text-ink-4 border-t border-line pt-2">{RESPONSIBLE_GAMBLING}</p>
+  </div>
+);
+
+const BetHistoryContent: React.FC<BetHistoryProps> = ({ index, failed = false, onRetry, profile, onProfile, bankrollInput, bankroll, onBankroll }) => {
   if (failed) return <LoadError message="Suivi des paris indisponible : chargement impossible." onRetry={onRetry} />;
   if (index === undefined) return <div role="status" aria-label="Chargement du suivi des paris"><Skeleton className="h-64" /></div>;
   if (index === null) {
