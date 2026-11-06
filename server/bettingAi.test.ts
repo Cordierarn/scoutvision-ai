@@ -145,12 +145,25 @@ describe('plan du jour', () => {
   });
 
   it('refuse un profil retiré (Ancien moteur, Exploratoire) ou inconnu ; le profil absent reste Équilibré', async () => {
-    for (const profile of ['exploratoire', 'ancien', 'inconnu']) {
+    for (const profile of ['exploratoire', 'ancien', 'inconnu', null]) {
       const out = await handleBettingPlan({ matchIds: ['m1'], profile }, deps({ generateJson: async () => { throw new Error('le modèle ne doit pas être appelé'); } }));
       expect(out.status).toBe(400);
+      expect((out.body as { error: string }).error).toContain('Rechargez la page');
     }
     const none = await handleBettingPlan({ matchIds: ['m2'] }, deps({ generateJson: async () => ({ text: JSON.stringify(GOOD_PLAN), modelVersion: 'modele-test' }) }));
     expect((none.body as { profile?: string }).profile).toBe('equilibre');
+  });
+
+  it('ignore les blocs des profils retirés d\'un artefact ancien encore servi (références m1#1 en collision)', async () => {
+    const retired = { suggestions: [sug(1, 'Sélection retirée', 'résultat', 3.1, 0.4, 0.2)], combo: null };
+    const old = JSON.parse(JSON.stringify(INDEX)) as SuggestionsIndexFile;
+    (old.matches[0].profiles as Record<string, unknown>).exploratoire = retired;
+    (old.matches[0].profiles as Record<string, unknown>).ancien = retired;
+    const f = buildPlanFacts(old, ['m1'], 'equilibre', '2026-11-07');
+    expect(JSON.stringify(f)).not.toContain('Sélection retirée');
+    const out = await handleBettingPlan({ matchIds: ['m1', 'm2'], profile: 'equilibre' }, deps({ loadIndex: () => old, generateJson: async () => ({ text: JSON.stringify(GOOD_PLAN), modelVersion: 'modele-test' }) }));
+    expect(out.status).toBe(200);
+    expect(JSON.stringify(out.body)).not.toContain('Sélection retirée');
   });
 
   it('transmet un « pas de pari » du moteur avec ses motifs, sans suggestion', () => {

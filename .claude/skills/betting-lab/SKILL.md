@@ -37,10 +37,11 @@ règle, de chiffre ou de comportement.
   « pas de pari » du moteur. Tout changement de prompt incrémente `BETTING_PROMPT_VERSIONS` et ajoute un cas de test.
 - **Règlement** : mi-temps et ordre des buts inconnus restent inconnus (`markets.Result` à `None`), jamais 0-0 ; la sélection
   qui en dépend reste en attente. Le règlement est dérivé du résultat courant à chaque passage (`product.resettle`).
-- **Mesure** : un pari = la dernière publication d'un match et d'un profil avant le coup d'envoi (`product.playable`) ; rendement
+- **Mesure** : un pari = la dernière publication d'un match et d'un profil validé avant le coup d'envoi (`product.playable`) ; rendement
   et CLV avec intervalle à 95 % par grappes de match (`cluster_ci`) ; bilan daté du moteur (`engine_fingerprint`), recalculé
   quand il change ; soirées suivies sur la bankroll courante, jamais plus (`evening.rebuild`).
-- **Un résultat négatif est un résultat** : il s'affiche tel quel (profils non validés, porte à poids nul, espérance négative).
+- **Un résultat négatif est un résultat** : il s'affiche tel quel (porte à poids nul, espérance négative) ; les profils retirés
+  restent documentés avec leur résultat dans `docs/betting-lab.md`.
 
 ## Règles d'interface
 

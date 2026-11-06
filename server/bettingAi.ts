@@ -534,7 +534,7 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
   if (!ids.length || ids.length > MAX_PLAN_MATCHES) return { status: 400, body: { error: `Entre 1 et ${MAX_PLAN_MATCHES} matchs attendus.` } };
   // profil absent : Équilibré ; profil retiré (Ancien moteur, Exploratoire) ou inconnu : refusé, jamais remplacé en silence
   if (body.profile !== undefined && !PROFILES.includes(body.profile as Profile)) {
-    return { status: 400, body: { error: `Profil inconnu ou retiré : seuls ${PROFILES.join(', ')} sont publiés.` } };
+    return { status: 400, body: { error: 'Profil retiré ou inconnu : seuls Sûr, Équilibré et Grosse cote sont publiés. Rechargez la page.' } };
   }
   const profile: Profile = (body.profile as Profile | undefined) ?? 'equilibre';
   const index = deps.loadIndex();
