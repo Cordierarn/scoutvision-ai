@@ -1,0 +1,71 @@
+# Intégration continue : types, tests et build à chaque PR vers main et à chaque push sur main.
+#
+# Deux jobs en parallèle, sans aucun secret, sans accès au dépôt de données (PitchApi-big-5),
+# sans data:pull et sans déploiement : rien de privé n'entre dans ce workflow, rien ne peut en sortir.
+# Les tests Vitest et unittest tournent sur des données fictives ; les quelques tests Vitest qui lisent
+# public/data/ s'ignorent d'eux-mêmes quand le dossier manque (c'est le cas ici).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend (tsc, vitest, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Types
+        run: npx tsc --noEmit -p .
+
+      - name: Tests Vitest
+        run: npm test
+
+      - name: Build (client et serveur SSR)
+        run: npm run build
+
+  python:
+    name: python (unittest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Même version que update-data.yml, qui exécute le pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      # npm run test:data est une commande Python ; Node sert seulement à lire package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Dépendances Python
+        run: pip install -r scripts/requirements.txt
+
+      - name: Tests unittest
+        run: npm run test:data
