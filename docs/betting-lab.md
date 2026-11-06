@@ -729,6 +729,14 @@ Mise en œuvre :
 - Serveur : l'assistant IA refuse un profil retiré ou inconnu (400) au lieu de le remplacer en silence ; règles des
   profils non validés retirées du prompt du plan (`BETTING_PROMPT_VERSIONS.plan` en v4 ; prompt d'actualité inchangé).
 
+## Critère d'arrêt (décision du 6 novembre 2026)
+
+Contrôle le vendredi 18 décembre 2026. On ne compte que les paris passés par le coupe-circuit, publiés depuis le 5
+novembre 2026, en sélections distinctes des trois profils validés réunis (une même sélection match:marché:issue
+publiée dans plusieurs profils compte une fois). Si moins de 30 paris sont réglés, OU si l'intervalle à 95 % par
+grappes de match du CLV face à la référence sharp n'est pas entièrement positif, le Labo passe en stand-by. Ce critère
+ne se modifie pas après coup.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans
