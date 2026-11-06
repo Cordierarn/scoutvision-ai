@@ -103,14 +103,15 @@ jobs:
           python3 -m betting.fetch status
 
       - name: "Référence sharp (The Odds API : Pinnacle, Betfair Exchange)"
-        # Un crédit par marché et par compétition ayant une rencontre sous 36 h (3 marchés) ; plan gratuit 500 par mois,
-        # réserve de 25. Écrit dans l'archive sous les bookmakers pinnacle / betfair-ex, lus par le coupe-circuit.
+        # Un passage par jour (le premier passage du cycle à partir de 09 h UTC), rencontres des 24 h suivantes : un crédit par
+        # marché et par compétition ayant une rencontre dans la fenêtre (3 marchés), de l'ordre de 300 crédits par mois pour un
+        # plan gratuit de 500, réserve de 25. Écrit dans l'archive sous les bookmakers pinnacle / betfair-ex.
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
           if [ -z "$THE_ODDS_API_KEY" ]; then echo "::warning::Secret THE_ODDS_API_KEY absent : pas de référence sharp, donc aucun pari validé."; exit 0; fi
           cd scripts
-          python3 -m betting.sharpfeed pull --hours 36 || echo "::warning::référence sharp indisponible à ce passage (voir ci-dessus)"
+          python3 -m betting.sharpfeed pull --daily --hours 24 --not-before 09:00 || echo "::warning::référence sharp indisponible à ce passage (voir ci-dessus)"
           python3 -m betting.sharpfeed status
 
       - name: Résultats de la veille (ESPN) et règlement
