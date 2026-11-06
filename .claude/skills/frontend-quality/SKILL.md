@@ -10,7 +10,7 @@ Layout / navigation, Base joueurs, Fiche joueur, Chasseur de pépites, Comparais
 
 ## Périmètre et méthode
 - Mesurer avant de corriger. Classer P0 à P3 et ne présenter comme confirmé que ce qui a été reproduit dans un vrai navigateur, sur les vraies données (`npm run data:pull`). Aucune donnée fictive.
-- Une passe qualité ne change pas l'apparence (pas de redesign) et ne touche ni aux modèles statistiques, ni à `utils/rolePresets.ts`, ni au pipeline Python, ni à `server/` (rapports Gemini).
+- Une passe qualité ne change pas l'apparence (pas de redesign) et ne touche ni aux modèles statistiques, ni à `utils/rolePresets.ts`, ni au pipeline Python, ni à `server/` (fonctions IA).
 - Pas de nouvelle dépendance UI. Réutiliser `components/ui` (Panel, Stat, StatStrip, Delta, LoadError, EmptyState, Skeleton…) et les jetons de `styles/index.css` / `tailwind.config.js`. Pas de couleur codée en dur hors `theme/`.
 - Un composant de `components/ui` sert à des pages hors périmètre : après l'avoir modifié, vérifier aussi Analyse d'équipe et Recrutement (bandeaux flex de `Stat`).
 
@@ -41,6 +41,6 @@ Layout / navigation, Base joueurs, Fiche joueur, Chasseur de pépites, Comparais
 ## Validation d'une modification visible
 1. `npx tsc --noEmit -p .`
 2. `npm test`, et `npm run test:data` si des données ou des modèles sont concernés.
-3. `npm run build`, puis supprimer `dist/`.
+3. `npm run build`, puis supprimer `dist/` et `dist-server/`.
 4. Navigateur réel (bibliothèque Playwright, build de production servi par `vite preview`) : largeurs 375, 390, 768, 1024, 1440 et 1600, zoom 200 % ; navigation au clavier seul ; mouvement réduit ; console sans erreur ; aucun échec réseau ; états chargement, vide et erreur avec Réessayer.
 5. Test de non-régression Vitest pour chaque bogue confirmé quand la logique est extractible (pas d'instantanés massifs).
