@@ -91,3 +91,5 @@ règle, de chiffre ou de comportement.
    `public/data/`, `.research/`, `.env*`.
 6. Une mesure sur données réelles avant d'annoncer un effet (nombre de matchs, de sélections, période), sans la coller dans un
    artefact public.
+7. Un effet s'annonce par le CLV face à la référence sharp et par le rendement hors échantillon après marge, jamais par des
+   soirées gagnantes ni par le rejeu seul.
