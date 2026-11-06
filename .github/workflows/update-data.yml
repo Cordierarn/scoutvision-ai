@@ -69,7 +69,14 @@ jobs:
           cd scripts
           python3 -m backtest.build --download-odds
           python3 -m backtest.run_models --phase all
-          python3 -m backtest.market_benchmark --odds-dir ../.cache/pitchapi/football-data || echo "benchmark marché non calculé (cotes indisponibles) : replays sans référence marché"
+          # market_benchmark lève FileNotFoundError sans CSV (odds.load_directory ignore les fichiers absents) :
+          # le cas « football-data n'a pas répondu » est testé ici ; toute autre erreur garde sa trace et son code.
+          if ls ../.cache/pitchapi/football-data/*.csv >/dev/null 2>&1; then
+            python3 -m backtest.market_benchmark --odds-dir ../.cache/pitchapi/football-data \
+              || { rc=$?; echo "::warning::benchmark marché non calculé (code de sortie $rc, trace ci-dessus) : replays publiés sans référence marché"; }
+          else
+            echo "::warning::aucun CSV football-data dans le cache (téléchargement échoué, voir backtest.build ci-dessus) : replays publiés sans référence marché"
+          fi
           python3 -m backtest.season_replay
           python3 -m backtest.export_replays
 
@@ -81,7 +88,10 @@ jobs:
           python3 -m betting.phase2 variant
           python3 -m betting.phase2 calibrate
           python3 -m betting.adjust
-          python3 -m betting.gate --write || echo "porte de validation non calculée (clôture Pinnacle indisponible) : poids du pool à 0"
+          # Sans replay_market.parquet, gate.py reprend lui-même la catégorie A précédente et sort en 0 : ici, seules
+          # les vraies erreurs arrivent, avec leur trace ; l'amorce part alors sans pool_weights.json recalculé.
+          python3 -m betting.gate --write \
+            || { rc=$?; echo "::warning::porte de validation non recalculée (code de sortie $rc, trace ci-dessus) : amorce publiée sans pool_weights.json recalculé, le cycle quotidien la recalcule"; }
           cd ..
           tar -czf "$RUNNER_TEMP/betting-seed.tar.gz" .research/forecast/predictions .research/forecast/replay_pitchapi.parquet .research/forecast/replay_pitchapi.meta.json $(ls .research/forecast/replay_market.parquet 2>/dev/null) .research/betting/results.parquet .research/betting/phase2
           gh release view betting-odds -R "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds -R "$DATA_REPO" --latest=false --prerelease --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (amorce, cotes Winamax FR via OddsPapi, journal, historique des soirées)."
@@ -91,9 +101,14 @@ jobs:
         # Les suggestions du Labo paris (forecast/suggestions) sont ajoutées à l'archive par betting-odds.yml :
         # on reprend celles de l'archive en ligne pour ne pas les effacer jusqu'au prochain passage du Labo.
         run: |
-          if gh release download "$DATA_RELEASE" -R "$DATA_REPO" -p scoutvision-data.tar.gz -D "$RUNNER_TEMP/previous" --clobber 2>/dev/null; then
-            tar -xzf "$RUNNER_TEMP/previous/scoutvision-data.tar.gz" -C public/data --wildcards "*forecast/suggestions/*" 2>/dev/null \
-              && echo "Suggestions du Labo paris reprises de l'archive en ligne" || echo "Pas de suggestions du Labo paris dans l'archive en ligne"
+          if gh release download "$DATA_RELEASE" -R "$DATA_REPO" -p scoutvision-data.tar.gz -D "$RUNNER_TEMP/previous" --clobber; then
+            if tar -xzf "$RUNNER_TEMP/previous/scoutvision-data.tar.gz" -C public/data --wildcards "*forecast/suggestions/*"; then
+              echo "Suggestions du Labo paris reprises de l'archive en ligne"
+            else
+              echo "::warning::suggestions du Labo paris non reprises de l'archive en ligne (code de sortie $?, trace ci-dessus) : absentes de la publication jusqu'au prochain passage du Labo"
+            fi
+          else
+            echo "::warning::archive scoutvision-data précédente non téléchargée (code de sortie $?, trace ci-dessus) : première publication, ou release indisponible ; suggestions du Labo paris absentes jusqu'au prochain passage du Labo"
           fi
           tar -czf "$RUNNER_TEMP/scoutvision-data.tar.gz" -C public/data .
           if ! gh release view "$DATA_RELEASE" -R "$DATA_REPO" >/dev/null 2>&1; then
