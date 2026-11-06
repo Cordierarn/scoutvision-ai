@@ -4,7 +4,7 @@ Tests de la porte de validation universelle (scripts/betting/gate.py), sur des d
 porte de calibration par bande qui bloque un modèle biaisé vers le côté « bas », ECE), catégorie C (fréquence de
 base), assemblage des poids / marges / références écrits pour le produit.
 
-  python3 -m unittest test_betting_gate -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_gate -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

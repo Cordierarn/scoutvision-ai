@@ -2,7 +2,7 @@
 Tests des expériences du Laboratoire (scripts/lab.py) sur données simulées : chaque expérience
 doit retrouver un effet connu, ou son absence.
 
-  python3 -m unittest discover -s scripts -p "test_*.py"      # ou : npm run test:data
+  python3 -m unittest discover -s scripts/tests -t scripts -p "test_*.py"      # ou : npm run test:data
 """
 
 from __future__ import annotations
@@ -232,7 +232,7 @@ class StyleFrictionTest(unittest.TestCase):
         """Les 9 dimensions copiées de utils/recruitment.ts (clés et métriques) restent identiques."""
         import re
         from pathlib import Path
-        ts = (Path(__file__).resolve().parent.parent / "utils" / "recruitment.ts").read_text(encoding="utf-8")
+        ts = (Path(__file__).resolve().parents[2] / "utils" / "recruitment.ts").read_text(encoding="utf-8")
         block = ts.split("SQUAD_DIMENSIONS")[1].split("];")[0]
         found = {}
         for m in re.finditer(r"key: '([a-z]+)'.*?metrics: \{([^}]*)\}(.*?)\}", block):

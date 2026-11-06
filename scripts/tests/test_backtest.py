@@ -3,7 +3,7 @@ Tests du dataset point-in-time (scripts/backtest) sur des fixtures synthétiques
 cotes fictifs. Huit tests anti-fuite obligatoires, invariants de qualité, adaptateur de cotes,
 reproductibilité.
 
-  python3 -m unittest test_backtest -v        # ou : npm run test:data
+  python3 -m unittest tests.test_backtest -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

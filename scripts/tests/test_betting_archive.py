@@ -2,7 +2,7 @@
 Tests de l'archive de cotes (scripts/betting/archive.py) sur des réponses OddsPapi synthétiques calquées
 sur la forme réelle (phase 0) : équipes « Club A / Club B », joueurs « Joueur 1 ». Sans réseau.
 
-  python3 -m unittest test_betting_archive -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_archive -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

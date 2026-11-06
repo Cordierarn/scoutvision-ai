@@ -3,7 +3,7 @@ Tests du moteur de suggestions (scripts/betting/suggest.py) et du produit (produ
 données réelles : classement par profil, doublons, cote ancienne, famille exclue, combiné, mises (Kelly rétréci), bilan et
 journal. Le coupe-circuit et la référence sharp sont testés dans test_betting_quant.
 
-  python3 -m unittest test_betting_suggest -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_suggest -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

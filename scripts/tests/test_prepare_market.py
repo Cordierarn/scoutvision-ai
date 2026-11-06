@@ -2,7 +2,7 @@
 Lecture des valeurs Transfermarkt (scripts/prepare_data.py) : une valeur implausible, sous 10 k€,
 vient d'une unité mal lue par market-values et ne doit entrer ni dans l'app ni dans le modèle.
 
-  python3 -m unittest test_prepare_market -v        # ou : npm run test:data
+  python3 -m unittest tests.test_prepare_market -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

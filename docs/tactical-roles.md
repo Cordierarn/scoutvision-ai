@@ -7,7 +7,7 @@ recruitment, the AI report and the validation of the transfer model.
 - Source of truth: [`utils/rolePresets.json`](../utils/rolePresets.json), read by the app
   ([`utils/rolePresets.ts`](../utils/rolePresets.ts)) and by
   [`scripts/models.py`](../scripts/models.py), which validates the role index of the transfer model.
-- The former `ROLE_DEFINITIONS` (`utils/scoringUtils.ts`) are deprecated and no longer displayed.
+- The former `ROLE_DEFINITIONS` (`utils/scoringUtils.ts`) were removed in November 2026: the presets above are the only role source.
 
 ## Categories
 

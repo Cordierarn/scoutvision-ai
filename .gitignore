@@ -9,7 +9,6 @@ lerna-debug.log*
 
 node_modules
 dist
-dist-ssr
 *.local
 
 # Editor directories and files
@@ -25,16 +24,12 @@ dist-ssr
 
 # Data files - Add your own CSV files
 public/data/*.csv
-data/*.csv
 *.csv
 
 # Environment variables
 .env
 .env.local
 .env.*.local
-
-# Old project folders
-ScoutVisonV2/
 
 # Données générées par scripts/prepare_data.py (source privée PitchApi-big-5)
 .cache/

@@ -3,7 +3,7 @@ Tests de la fiabilité des métriques par 90 (scripts/reliability.py), sur donn�
 constante de PitchAPI retrouvée, calibration pair / impair qui retrouve la constante théorique d'un
 modèle de Poisson, percentiles, joueurs sous le seuil et fichier publié.
 
-  python3 -m unittest test_reliability -v        # ou : npm run test:data
+  python3 -m unittest tests.test_reliability -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

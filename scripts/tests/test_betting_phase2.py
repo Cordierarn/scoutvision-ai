@@ -3,7 +3,7 @@ Tests de la phase 2 (scripts/betting/phase2.py) sans réseau ni données réelle
 des scores simulés à partir de buts attendus connus, anti-fuite sur les prévisions et les relevés, marge
 retirée, bootstrap par match.
 
-  python3 -m unittest test_betting_phase2 -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_phase2 -v        # ou : npm run test:data
 """
 
 from __future__ import annotations

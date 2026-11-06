@@ -3,7 +3,7 @@ Taxonomie des marchés Winamax (scripts/betting/markets_catalog.py) : classifica
 catalogue OddsPapi, règles de famille (période → mi-temps), de catégorie (A sharp, B fermé, C multiple / joueur)
 et audit de l'archive sur des relevés synthétiques.
 
-  python3 -m unittest test_betting_markets_catalog -v        # ou : npm run test:data
+  python3 -m unittest tests.test_betting_markets_catalog -v        # ou : npm run test:data
 """
 
 from __future__ import annotations
