@@ -52,7 +52,7 @@ verdict on a player.
 
 | Step | In ScoutVision |
 |---|---|
-| **Explore** | Search and filter players across 35 competitions and six seasons. |
+| **Explore** | Search and filter players across 75 competitions and six seasons. |
 | **Profile** | Read a player through role-adjusted percentiles, role indices and impact indicators (RAPM, finishing, pass network). |
 | **Compare** | Put up to four players side by side, or find statistically similar alternatives. |
 | **Shortlist** | Use tactical role profiles and constraints (age, minutes, value, contract, competition) to reduce the pool to relevant candidates. |
@@ -102,6 +102,8 @@ verdict on a player.
 - Win / draw / loss probabilities and expected xG of upcoming matches.
 - Season simulations: probabilities of title, top 4 and bottom 3; leverage of each match.
 - Model vs market comparison against closing odds (no edge found, and shown as such).
+- Betting lab (upcoming matches, bet tracking, personal test): a separate research module,
+  described in [betting lab](docs/betting-lab.md) (in French).
 
 ### Research lab
 - 17 experiments on match-by-match data: coaches, momentum, goal value, pass chemistry,
@@ -111,14 +113,14 @@ verdict on a player.
 
 ### AI scout reports (optional)
 - Optional grounded scouting summaries written from ScoutVision's structured analyses.
-- Gemini writes the text only; it does not compute any ScoutVision model.
+- The AI (Claude first, Gemini as fallback) writes the text only; it does not compute any ScoutVision model.
 - Same guard for the comparative synthesis (Comparison, Recruitment), the opposition briefing
   (Team analysis) and the natural-language assistant of the Gem Hunter, which only proposes
   filters validated against the catalogue.
 
 ## Key numbers
 
-- **35** competitions, **6** seasons (2021-22 → 2026-27)
+- **75** competitions, **6** seasons (2021-22 → 2026-27)
 - **27** tactical roles
 - **405** league changes in the held-out transfer validation (test season 2025-26)
 - Role-index error of the transfer projection: **12.18** points, vs 13.88 with age curves alone
@@ -150,7 +152,7 @@ See the methodology documentation for details, assumptions and limitations:
 ### Requirements
 
 **Required**
-- Node.js 18+ (Vite 6: 18, 20 or 22+)
+- Node.js 22 (`engines` in `package.json`; the Heroku dyno runs Node 22)
 - npm
 
 **Data access**
@@ -158,8 +160,8 @@ See the methodology documentation for details, assumptions and limitations:
   `Cordierarn/PitchApi-big-5`
 
 **Optional**
-- Python 3 (3.11 in CI), to rebuild the datasets
-- A Gemini API key, to generate the AI scouting summaries
+- Python 3 (3.11 for the data workflow, 3.12 for the odds workflows), to rebuild the datasets
+- An Anthropic API key (Claude), or a Gemini key as fallback, to generate the AI scouting summaries
 
 ### Installation
 
@@ -213,8 +215,8 @@ Variables, first deployment, password change, session revocation and limits:
 | Charts | Recharts |
 | Data preparation | Python, pandas, pyarrow |
 | Statistical models | NumPy and custom modelling code (`scripts/models.py`, `scripts/lab.py`) |
-| AI summaries | Gemini through a server-side endpoint (`server/`) |
-| Exports | jsPDF (texte natif, radar vectoriel), JSON des dossiers |
+| AI summaries | Claude first, Gemini as fallback, through server-side endpoints (`server/`) |
+| Exports | jsPDF (native text, vector radar), JSON dossiers |
 | Server | Node (`node:http`), session guard in front of the app, data, images and AI (`server/`) |
 | Hosting | Heroku Basic dyno, private single-user instance |
 | Automation | GitHub Actions |
@@ -242,8 +244,8 @@ consumed by `npm run data:pull`. See [data pipeline](docs/data-pipeline.md).
 
 ScoutVision can optionally generate a textual scouting summary from its structured analyses.
 
-- Gemini is called on the server only (`POST /api/scout-report`); the API key never reaches the
-  browser.
+- The AI provider (Claude first, Gemini as fallback) is called on the server only
+  (`POST /api/scout-report`); the API key never reaches the browser.
 - The model receives structured ScoutVision facts (percentiles with their comparison group,
   role indices, Transfermarkt value and ScoutVision estimate kept separate, indicators with their
   limits), not the raw data.
@@ -283,6 +285,9 @@ a simulated effect, or its absence.
 | [Deployment](docs/deployment.md) | private Heroku instance, cost, authentication, Config Vars, password rotation, limits |
 | [AI reports](docs/ai-reports.md) | endpoint, facts, grounding rules, checks, retry, deployment |
 | [Design system](docs/design-system.md) | tokens, primitives, percentile tiers, chart palette, accessibility |
+| [Forecast research](docs/forecast-research.md) | point-in-time dataset, baseline models, walk-forward scoring, season replays |
+| [Betting lab](docs/betting-lab.md) (French) | odds archive, market probabilities, validation gate, suggestions, bet tracking |
+| [Roadmap](docs/roadmap.md) (French) | module status, owner decisions, deferred ideas |
 
 ## License
 
