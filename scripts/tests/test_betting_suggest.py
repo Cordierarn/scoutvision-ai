@@ -9,6 +9,7 @@ journal. Le coupe-circuit et la référence sharp sont testés dans test_betting
 from __future__ import annotations
 
 import datetime as dt
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -220,19 +221,6 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(j3["realised"].tolist(), [1.0, -1.0, 1.0])
             self.assertEqual(j3.iloc[1]["settled_at"], (NOW + dt.timedelta(days=2)).isoformat())
 
-    def test_combo_with_a_leg_lacking_its_half_time_is_not_settled(self):
-        from betting import catalogue
-        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
-                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]},
-                               {"marketId": 201, "marketType": "totals", "period": "p1", "handicap": 1.5, "sportId": 10, "playerProp": False,
-                                "outcomes": [{"outcomeId": 201, "outcomeName": "Over"}, {"outcomeId": 202, "outcomeName": "Under"}]}])
-        legs = [{"matchId": "m1", "marketId": 101, "outcomeId": 101, "odds": 1.5}, {"matchId": "m2", "marketId": 201, "outcomeId": 202, "odds": 1.6}]
-        res = pd.DataFrame([{"match_id": "m1", "ft_home": 1, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
-                            {"match_id": "m2", "ft_home": 2, "ft_away": 2, "ht_home": None, "ht_away": None, "first_goal": None, "last_goal": None}])
-        self.assertIsNone(product.settle_combo(legs, res, cat))
-        res.loc[1, ["ht_home", "ht_away"]] = [0, 0]
-        self.assertEqual(product.settle_combo(legs, res, cat), ("won", round(1.5 * 1.6 - 1, 4)))
-
 
 class HistoryTests(unittest.TestCase):
     def row(self, mid, profile, rank, published, kick, settled=None, realised=None, label="Club A gagne"):
@@ -302,24 +290,91 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(product.cluster_ci(np.array([0.1]), np.array(["a"])), (None, None))
 
     def test_clv_block_has_a_match_cluster_interval_on_playable_bets(self):
-        rows = [self.row(f"m{i}", "exploratoire", NOW, KO, clv=c) for i, c in enumerate([-0.12, -0.10, -0.09, -0.11])]
-        rows.append(self.row("m0", "exploratoire", NOW - dt.timedelta(hours=2), KO, clv=0.5))   # republication remplacée : ignorée
-        b = product.journal_summary(pd.DataFrame(rows))["byProfile"]["exploratoire"]
+        rows = [self.row(f"m{i}", "sur", NOW, KO, clv=c) for i, c in enumerate([-0.12, -0.10, -0.09, -0.11])]
+        rows.append(self.row("m0", "sur", NOW - dt.timedelta(hours=2), KO, clv=0.5))   # republication remplacée : ignorée
+        b = product.journal_summary(pd.DataFrame(rows))["byProfile"]["sur"]
         self.assertEqual(b["clvBets"], 4); self.assertAlmostEqual(b["meanClv"], -0.105)
         self.assertLess(b["clvHigh"], 0); self.assertLess(b["clvLow"], b["meanClv"]); self.assertEqual(b["clvMatches"], 4)
 
-    def test_bilan_covers_every_profile_and_records_the_engine(self):
+    def test_bilan_records_the_engine_and_has_intervals(self):
         tab = pd.DataFrame([{"match_id": f"m{i}", "competition": "AAA", "kickoff_utc": KO + dt.timedelta(days=i), "profile": p, "kind": "simple", "rank": 1, "family": "résultat",
                              "odds": 2.0, "p": 0.5, "ev": 0.0, "stake_fraction": 0.01, "stake_mode": "fixed", "p_sharp": None, "p_ref": None, "ev_ref": None,
-                             "clv": None, "settled": 1.0, "realised": 1.0} for i in range(3) for p in ("sur", "exploratoire", "ancien")])
+                             "clv": None, "settled": 1.0, "realised": 1.0} for i in range(3) for p in ("sur", "equilibre")])
         b = product.summarise(tab)
-        self.assertEqual(set(b["profiles"]), {"sur", "equilibre", "grosse_cote", "exploratoire", "ancien"})
-        self.assertEqual(b["profiles"]["ancien"]["overall"]["bets"], 3)
+        self.assertEqual(set(b["profiles"]), {"sur", "equilibre", "grosse_cote"})
+        self.assertEqual(b["profiles"]["sur"]["overall"]["bets"], 3)
         self.assertEqual(b["engine"], product.engine_fingerprint())
         self.assertIn("returnLow", b["profiles"]["sur"]["overall"])
         self.assertFalse(product.bilan_is_stale(b))
-        self.assertTrue(product.bilan_is_stale({**b, "engine": "ancien"}))
+        self.assertTrue(product.bilan_is_stale({**b, "engine": "moteur-precedent"}))
         self.assertTrue(product.bilan_is_stale(None))
+
+class RetiredProfilesTests(unittest.TestCase):
+    """Ancien moteur et Exploratoire retirés : le journal déjà écrit reste intact, mais rien de ces profils n'est plus
+    journalisé, résumé, rejoué ni exporté."""
+
+    def row(self, mid, profile, settled=1.0, realised=1.0, sid=None):
+        return {"suggestion_id": sid or f"{mid}{profile}", "published_at": NOW.isoformat(), "match_id": mid, "fixture_id": "f" + mid, "competition": "AAA",
+                "kickoff_utc": KO.isoformat(), "profile": profile, "rank": 1, "kind": "simple", "market_id": 101, "outcome_id": 101, "family": "résultat",
+                "label": "Club A gagne", "odds": 2.0, "odds_at": NOW.isoformat(), "p": 0.5, "ev": 0.0, "stake_fraction": 0.02, "stake_mode": "fixed",
+                "settled": settled, "realised": realised, "settled_at": None, "clv": 0.01, "closing_odds": 1.9, "p_sharp": 0.5, "p_ref": 0.5, "ev_ref": 0.0,
+                "pool_w": None, "sharp_bookmaker": "pinnacle", "closing_p_sharp": 0.51}
+
+    def written(self):
+        return pd.DataFrame([self.row("m1", "sur"), self.row("m1", "exploratoire"), self.row("m1", "ancien"), self.row("m2", "equilibre", 0.0, -1.0)])
+
+    def test_summary_and_history_ignore_rows_already_written_for_retired_profiles(self):
+        j = self.written()
+        summary = product.journal_summary(j)
+        self.assertEqual(set(summary["byProfile"]), {"sur", "equilibre"})
+        self.assertEqual((summary["published"], summary["playable"], summary["settled"]), (2, 2, 2))   # totaux des profils validés
+        days = product.history(j, pd.DataFrame([{"match_id": "m1", "ft_home": 1, "ft_away": 0}]), {"m1": ("Club A", "Club B")}, KO + dt.timedelta(hours=3))
+        self.assertEqual({p for d in days for m in d["matches"] for p in m["profiles"]}, {"sur", "equilibre"})
+
+    def test_retired_profiles_are_never_journaled_again(self):
+        from betting import catalogue
+        cat = catalogue.parse([{"marketId": 101, "marketType": "1x2", "period": "fulltime", "handicap": 0.0, "sportId": 10, "playerProp": False,
+                                "outcomes": [{"outcomeId": 101, "outcomeName": "1"}, {"outcomeId": 102, "outcomeName": "X"}, {"outcomeId": 103, "outcomeName": "2"}]}])
+        s = {"rank": 1, "marketId": 101, "outcomeId": 101, "family": "résultat", "label": "Club A gagne", "odds": 2.0, "oddsAt": NOW.isoformat(), "p": 0.5, "ev": 0.0,
+             "stakeFraction": 0.01, "stakeMode": "shrink_kelly"}
+        entries = [{"status": "ok", "matchId": "m9", "competition": "AAA", "kickoff": KO.isoformat(),
+                    "profiles": {p: {"suggestions": [s], "combo": None} for p in ("sur", "exploratoire", "ancien")}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            product.JOURNAL = Path(tmp) / "journal.parquet"
+            self.written().to_parquet(product.JOURNAL, index=False)                     # journal déjà écrit : immuable
+            j = product.journal_append(entries, NOW, pd.DataFrame(columns=["match_id"]), cat)
+        new = j[j["match_id"] == "m9"]
+        self.assertEqual(new["profile"].tolist(), ["sur"])
+        old = j[j["match_id"] != "m9"]
+        self.assertEqual(sorted(old["profile"]), ["ancien", "equilibre", "exploratoire", "sur"])     # rien d'effacé ni de réécrit
+
+    def test_bilan_only_covers_validated_profiles(self):
+        tab = pd.DataFrame([{"match_id": "m1", "competition": "AAA", "kickoff_utc": KO, "profile": "sur", "kind": "simple", "rank": 1, "family": "résultat", "odds": 2.0,
+                             "p": 0.5, "ev": 0.0, "stake_fraction": 0.01, "stake_mode": "fixed", "p_sharp": 0.5, "p_ref": 0.5, "ev_ref": 0.0, "clv": 0.01, "settled": 1.0, "realised": 1.0}])
+        self.assertEqual(set(product.summarise(tab)["profiles"]), {"sur", "equilibre", "grosse_cote"})
+
+    def test_export_has_no_trace_of_retired_profiles(self):
+        old_entry = {"status": "ok", "matchId": "m9", "competition": "AAA", "kickoff": KO.isoformat(), "home": "Club A", "away": "Club B",
+                     "profiles": {p: {"suggestions": [], "combo": None} for p in ("sur", "equilibre", "grosse_cote", "exploratoire", "ancien")}}
+        stale_bilan = {"start": 300.0, "engine": "moteur-precedent", "profiles": {p: {"overall": {"bets": 1}} for p in ("sur", "exploratoire", "ancien")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            saved = (product.JOURNAL, product.BILAN, product.EXPORT_DIR, product.RESEARCH, product.load_results, product.match_names)
+            product.JOURNAL, product.BILAN, product.EXPORT_DIR, product.RESEARCH = tmp / "journal.parquet", tmp / "bilan.json", tmp / "export", tmp
+            product.load_results = lambda: pd.DataFrame(columns=["match_id", "ft_home", "ft_away", "home_team_name", "away_team_name"])
+            product.match_names = lambda results: {}
+            try:
+                self.written().to_parquet(product.JOURNAL, index=False)
+                product.BILAN.write_text(json.dumps(stale_bilan), encoding="utf-8")
+                payload = json.loads(product.export([old_entry], KO + dt.timedelta(hours=3)).read_text(encoding="utf-8"))
+            finally:
+                product.JOURNAL, product.BILAN, product.EXPORT_DIR, product.RESEARCH, product.load_results, product.match_names = saved
+        text = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("exploratoire", text); self.assertNotIn("ancien", text.replace("ancienne", ""))
+        self.assertEqual([p["id"] for p in payload["profiles"]], ["sur", "equilibre", "grosse_cote"])
+        self.assertNotIn("exploreCombos", payload); self.assertNotIn("comboHistory", payload); self.assertNotIn("explore", payload["rules"])
+        self.assertEqual(set(payload["matches"][0]["profiles"]), {"sur", "equilibre", "grosse_cote"})
+        self.assertEqual(payload["schemaVersion"], "2.0.0")
 
 
 if __name__ == "__main__":

@@ -323,34 +323,13 @@ class SuggestMatchTests(unittest.TestCase):
         res = product.suggest_match(self.sims, outcomes, KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B", snaps=snaps, cat=CAT, quant=self.quant, team_ids=("tA", "tB"))
         self.assertEqual(res["excluded"].get("marche_retire"), 1)
 
-    def test_exploratory_profile_lists_refused_outcomes_ranked_by_market_expected_value(self):
-        res = self.run_match(self.archive(winamax_home=1.80, pinnacle_home=1.80))  # Winamax trop proche de Pinnacle : rien de validé
-        self.assertEqual(res["profiles"]["equilibre"]["suggestions"], [])
-        expl = res["profiles"]["exploratoire"]["suggestions"]
-        self.assertTrue(expl)
-        self.assertLessEqual(len(expl), 3)
-        for s in expl:
-            self.assertTrue(1.60 <= s["odds"] <= 6.00); self.assertEqual((s["stakeMode"], s["stakeFraction"], s["verdict"]), ("fixed", 0.005, "exploratoire"))
-            self.assertAlmostEqual(s["evRef"], s["pSharp"] * s["odds"] - 1, places=3)
-            self.assertGreaterEqual(s["p"], s["pSharp"])                              # le moteur au moins d'accord avec le marché
-            self.assertTrue(s["reasons"][0].startswith("Hors coupe-circuit"))
-        evs = [s["evRef"] for s in expl]
-        self.assertEqual(evs, sorted(evs, reverse=True))
-        bare = product.suggest_match(self.sims, product.outcomes_from_snapshots(self.archive(), CAT, pd.Timestamp(self.now), "Club A", "Club B"), KO.to_pydatetime(), self.now, "AAA", set(), {}, "Club A", "Club B")
-        self.assertEqual(bare["profiles"]["exploratoire"]["suggestions"], [])     # sans archive : aucune probabilité de marché inventée
-        self.assertIsNone(res["profiles"]["exploratoire"]["combo"])                  # jamais de combiné d'un même match
-
-    def test_legacy_profile_ranks_on_the_model_alone_with_sharp_probability_for_clv(self):
-        res = self.run_match(self.archive(winamax_home=1.80, pinnacle_home=1.80))
-        self.assertEqual(res["profiles"]["equilibre"]["suggestions"], [])
-        legacy = res["profiles"]["ancien"]["suggestions"]
-        self.assertTrue(legacy)
-        self.assertTrue(all(s["verdict"] == "ancien" and s["pRef"] == s["p"] for s in legacy))
-        with_sharp = [s for s in legacy if s["pSharp"] is not None]
-        self.assertTrue(with_sharp)
-        for s in with_sharp:
-            self.assertAlmostEqual(s["evRef"], s["pSharp"] * s["odds"] - 1, places=3)
-        self.assertEqual(res["profiles"]["ancien"]["combo"], None)
+    def test_only_validated_profiles_are_published(self):
+        # Ancien moteur et Exploratoire retirés (décision du propriétaire) : ni publiés, ni journalisés, ni exportés
+        for archive in (self.archive(winamax_home=1.80, pinnacle_home=1.80), self.archive()):
+            res = self.run_match(archive)
+            self.assertEqual(set(res["profiles"]), {"sur", "equilibre", "grosse_cote"})
+        self.assertEqual(product.VALIDATED_PROFILES, ("sur", "equilibre", "grosse_cote"))
+        self.assertFalse(hasattr(sg, "LEGACY_PROFILE") or hasattr(sg, "EXPLORE_PROFILE"))
 
     def test_early_block_measures_odds_taken_against_winamax_closing(self):
         j = pd.DataFrame({"odds": [2.0, 1.5, 1.8], "closing_odds": [1.8, 1.5, None]})
@@ -371,41 +350,6 @@ class SuggestMatchTests(unittest.TestCase):
         self.assertEqual(journal["closing_odds"].tolist()[:2], [1.85, 2.0])       # hors fenêtre de recalcul : inchangée
         self.assertTrue(pd.isna(journal.iloc[2]["closing_odds"]))                 # match pas commencé
 
-    def test_combo_settlement_follows_winamax_rules_and_history_keeps_the_last_version(self):
-        res = pd.DataFrame([{"match_id": "a", "ft_home": 2, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
-                            {"match_id": "b", "ft_home": 1, "ft_away": 1, "ht_home": 0, "ht_away": 1, "first_goal": "away", "last_goal": "home"}])
-        home_a = {"matchId": "a", "marketId": 101, "outcomeId": 101, "odds": 1.8}                 # Club A gagne : gagné
-        home_b = {"matchId": "b", "marketId": 101, "outcomeId": 101, "odds": 2.0}                 # perdu (nul)
-        draw_b = {"matchId": "b", "marketId": 101, "outcomeId": 102, "odds": 3.5}                 # gagné
-        self.assertEqual(product.settle_combo([home_a, draw_b], res, CAT), ("won", round(1.8 * 3.5 - 1, 4)))
-        self.assertEqual(product.settle_combo([home_a, home_b], res, CAT), ("lost", -1.0))
-        self.assertIsNone(product.settle_combo([home_a, {"matchId": "zz", "marketId": 101, "outcomeId": 101, "odds": 2.0}], res, CAT))
-        self.assertEqual(product.LEG_FACTOR[0.5](2.0), 1.5); self.assertEqual(product.LEG_FACTOR[-0.5](2.0), 0.5); self.assertEqual(product.LEG_FACTOR[-2.0](2.0), 1.0)
-        legs = lambda odds: json.dumps([{**home_a, "label": "x", "match": "A"}, {**draw_b, "label": "y", "match": "B", "odds": odds}])
-        j = pd.DataFrame([{"combo_id": "1", "published_at": "2026-11-07T10:00:00+00:00", "date": "2026-11-07", "legs": legs(3.4), "odds": 6.1, "joint_p": 0.12, "joint_model": 0.15, "ev": -0.2,
-                           "stake_fraction": 0.005, "status": None, "realised": None, "settled_at": None},
-                          {"combo_id": "2", "published_at": "2026-11-07T14:00:00+00:00", "date": "2026-11-07", "legs": legs(3.5), "odds": 6.3, "joint_p": 0.12, "joint_model": 0.15, "ev": -0.19,
-                           "stake_fraction": 0.005, "status": "won", "realised": 5.3, "settled_at": "x"}])
-        hist = product.combo_history(j, dt.datetime(2026, 11, 8, tzinfo=dt.timezone.utc))
-        self.assertEqual(len(hist), 1); self.assertEqual((hist[0]["odds"], hist[0]["status"], hist[0]["realised"]), (6.3, "won", 5.3))
-        self.assertEqual(product.combo_history(j.iloc[:1], dt.datetime(2026, 11, 8, tzinfo=dt.timezone.utc))[0]["status"], "pending")
-
-    def test_day_combos_join_different_matches_within_odds_bounds_and_best_market_value(self):
-        legs = [{"matchId": "a", "match": "A", "label": "x", "odds": 1.8, "pRef": 0.53, "p": 0.6, "kickoff": "2026-11-07T15:00:00Z"},
-                {"matchId": "b", "match": "B", "label": "y", "odds": 2.1, "pRef": 0.45, "p": 0.5, "kickoff": "2026-11-07T17:00:00Z"},
-                {"matchId": "c", "match": "C", "label": "z", "odds": 1.7, "pRef": 0.55, "p": 0.57, "kickoff": "2026-11-07T19:00:00Z"},
-                {"matchId": "d", "match": "D", "label": "w", "odds": 9.0, "pRef": 0.09, "p": 0.12, "kickoff": "2026-11-07T19:00:00Z"}]
-        combos = sg.day_combos(legs)
-        self.assertEqual([len(c["legs"]) for c in combos], [2, 3])
-        for c in combos:
-            self.assertTrue(2.0 <= c["odds"] <= 12.0); self.assertEqual(len({l["matchId"] for l in c["legs"]}), len(c["legs"]))
-            self.assertAlmostEqual(c["jointP"], np.prod([l["pRef"] for l in c["legs"]]), places=3); self.assertAlmostEqual(c["ev"], c["jointP"] * c["odds"] - 1, places=2)
-        entries = [{"matchId": l["matchId"], "home": l["match"], "away": "Z", "status": "ok", "kickoff": l["kickoff"],
-                    "profiles": {"exploratoire": {"suggestions": [{"label": l["label"], "odds": l["odds"], "pRef": l["pRef"], "p": l["p"]}]}}} for l in legs]
-        days = product.explore_day_combos(entries)
-        self.assertEqual([d["date"] for d in days], ["2026-11-07"]); self.assertEqual(len(days[0]["combos"]), 2)
-        self.assertEqual(product.explore_day_combos(entries[:1]), [])                  # un seul match : pas de combiné
-
     def test_winamax_late_on_pinnacle_is_a_bet_with_sharp_probability(self):
         res = self.run_match(self.archive(winamax_home=2.05, pinnacle_home=1.72))      # Winamax paie 2,05 un favori que Pinnacle met à 1,72
         sug = res["profiles"]["equilibre"]["suggestions"]
@@ -422,13 +366,13 @@ class SuggestMatchTests(unittest.TestCase):
 
     def test_fair_winamax_price_means_no_bet(self):
         res = self.run_match(self.archive(winamax_home=1.85, pinnacle_home=1.80))
-        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k not in ("exploratoire", "ancien")), 0)
+        self.assertEqual(sum(len(b["suggestions"]) for b in res["profiles"].values()), 0)
         self.assertIn("ev_insuffisant", res["excluded"])
         self.assertIsNotNone(res["noBet"]); self.assertIn("espérance insuffisante", res["noBet"]["reasons"][0])
 
     def test_without_sharp_reference_nothing_is_bet(self):
         res = self.run_match(self.archive(winamax_home=2.05, with_pinnacle=False))
-        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k not in ("exploratoire", "ancien")), 0)
+        self.assertEqual(sum(len(b["suggestions"]) for b in res["profiles"].values()), 0)
         self.assertEqual(set(res["excluded"]), {"reference_absente"})
         self.assertEqual(res["sharpCoverage"], 0.0)
         self.assertEqual(res["noBet"]["codes"], ["reference_absente"])

@@ -119,7 +119,8 @@ function loadOptional<T>(path: string): Promise<T | null> {
 
 
 // ----- Suggestions de paris (Labo paris, onglet Matchs à venir) : artefact privé calculé par le pipeline -----
-export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote' | 'exploratoire' | 'ancien';
+/** Profils publiés : les seuls validés par le coupe-circuit (« Ancien moteur » et « Exploratoire » retirés le 6 novembre 2026). */
+export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote';
 export type StakeMode = 'shrink_kelly' | 'kelly' | 'fixed';
 export interface Suggestion {
   rank: number; marketId: number; outcomeId: number; family: string; label: string;
@@ -127,12 +128,7 @@ export interface Suggestion {
   stakeFraction: number; stakeMode: StakeMode; reasons: string[];
   /** Étape 1 du moteur quantitatif : probabilité sharp (Shin), probabilité de référence (pool), espérance face à elle */
   pSharp?: number | null; pRef?: number; evRef?: number | null; poolW?: number | null; sharpBookmaker?: string | null; sharpAt?: string | null;
-  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue' | 'exploratoire' | 'ancien';
-}
-/** Combiné du jour du profil exploratoire : une sélection par match, matchs différents. */
-export interface ExploreDayCombo {
-  legs: { matchId: string; match: string; label: string; odds: number; pRef: number; p: number; kickoff: string }[];
-  odds: number; jointP: number; jointModel: number; ev: number; stakeFraction: number; stakeMode: StakeMode;
+  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue';
 }
 export interface SuggestionCombo {
   labels: string[]; marketIds: number[]; outcomeIds: number[]; jointP: number; odds: number; ev: number;
@@ -170,12 +166,10 @@ export interface SuggestionsIndex {
   };
   reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; calibrationMargins?: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
   matches: SuggestionMatch[];
-  exploreCombos?: { date: string; combos: ExploreDayCombo[] }[];
   bilan: { start: number; engine?: string; generatedAt?: string; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
   journal: { published: number; playable?: number; settled: number; byProfile: Record<string, BilanBlock & { closeBets?: number; earlyEdge?: number | null; oddsDroppedRate?: number | null }> };
   evenings?: EveningSummary[];
   history?: HistoryDay[];
-  comboHistory?: ComboHistoryEntry[];
 }
 /** Statut d'un pari réglé sur le score réel (demi-gains et remboursements des handicaps asiatiques). */
 export type BetStatus = 'won' | 'lost' | 'void' | 'half_won' | 'half_lost' | 'pending';
@@ -196,11 +190,6 @@ export interface HistoryMatch {
   profiles: Partial<Record<SuggestionProfile, HistoryBet[]>>;
 }
 export interface HistoryDay { date: string; matches: HistoryMatch[] }
-/** Combiné du jour journalisé (profil exploratoire) : dernière version publiée avant le premier coup d'envoi, avec son règlement. */
-export interface ComboHistoryEntry {
-  date: string; legs: { matchId: string; match: string; label: string; odds: number }[];
-  odds: number; jointP: number; ev: number; stakeFraction: number; status: BetStatus; realised: number | null;
-}
 
 export const replayData = {
   marketBenchmark: () => loadOptional<MarketBenchmark>('/data/forecast/market_benchmark.json'),

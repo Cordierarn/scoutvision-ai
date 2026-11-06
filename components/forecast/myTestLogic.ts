@@ -6,6 +6,7 @@
  */
 
 import type { BetStatus, HistoryDay } from '../../services/replayData';
+import { isValidatedProfile } from './suggestionsLogic';
 
 export const MY_TEST_KEY = 'scoutvision.betting.mytest';
 export const MY_TEST_EVENT = 'scoutvision-mytest';
@@ -125,8 +126,9 @@ export function recordAuto(test: MyTest, history: HistoryDay[]): MyTest | null {
   return changed ? { ...test, bets } : null;
 }
 
-/** Ajoute un pari (ignoré s'il est déjà suivi). */
-export const addBet = (test: MyTest, bet: MyBet): MyTest => (test.bets.some(b => b.id === bet.id) ? test : { ...test, bets: [...test.bets, bet] });
+/** Ajoute un pari (ignoré s'il est déjà suivi, ou si son profil n'est pas un profil validé : Ancien moteur et Exploratoire sont retirés). */
+export const addBet = (test: MyTest, bet: MyBet): MyTest =>
+  (!isValidatedProfile(bet.profile) || test.bets.some(b => b.id === bet.id) ? test : { ...test, bets: [...test.bets, bet] });
 export const removeBet = (test: MyTest, id: string): MyTest => ({ ...test, bets: test.bets.filter(b => b.id !== id) });
 export const updateBet = (test: MyTest, id: string, patch: Partial<Pick<MyBet, 'stake' | 'odds' | 'manualStatus'>>): MyTest =>
   ({ ...test, bets: test.bets.map(b => (b.id === id ? { ...b, ...patch } : b)) });

@@ -1,6 +1,6 @@
 /**
- * Rendu statique (react-dom/server) du bloc Suggestions : profils, match sans cotes, bankroll invalide,
- * disposition téléphone (cote et mise dans le bloc empilé), cote ancienne.
+ * Rendu statique (react-dom/server) du bloc Suggestions : profils validés seulement (artefact ancien compris), match sans
+ * cotes, bankroll invalide, disposition téléphone (cote et mise dans le bloc empilé), cote ancienne.
  */
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -17,8 +17,6 @@ const match: SuggestionMatch = {
       pSharp: 0.54, pRef: 0.54, evRef: 0.053, poolW: 0, sharpBookmaker: 'pinnacle', warnings: ['dependance_joueur_cle'], verdict: 'bet' }],
       combo: { labels: ['Club A gagne', 'Plus de 2,5 buts'], marketIds: [101, 106], outcomeIds: [101, 106], jointP: 0.35, odds: 3.16, ev: 0.106, stakeFraction: 0.01, stakeMode: 'kelly' } },
     grosse_cote: { suggestions: [], combo: null },
-    exploratoire: { suggestions: [{ rank: 1, marketId: 104, outcomeId: 104, family: 'BTTS / clean sheet', label: 'Les deux équipes marquent', odds: 1.85, oddsAt: '2026-11-07T13:40:00Z', p: 0.55, ev: 0.0175, stakeFraction: 0.005, stakeMode: 'fixed',
-      reasons: ['Hors coupe-circuit : marché Winamax sans marge 52,0 %, moteur 55,0 %, cote 1,85 → espérance face au marché −3,8 %'], pSharp: 0.52, pRef: 0.52, evRef: -0.038, poolW: null, sharpBookmaker: 'winamax.fr', warnings: [], verdict: 'exploratoire' }], combo: null },
   },
   noBet: { label: 'Club B gagne', family: 'résultat', odds: 4.2, p: 0.3, pSharp: 0.22, evRef: -0.076, reasons: ['espérance insuffisante face au marché sharp'], codes: ['ev_insuffisant'] },
   sharpCoverage: 0.8,
@@ -28,11 +26,19 @@ const index: SuggestionsIndex = {
   profiles: [{ id: 'sur', label: 'Sûr' }, { id: 'equilibre', label: 'Équilibré' }, { id: 'grosse_cote', label: 'Grosse cote' }], defaultProfile: 'equilibre', defaultBankroll: 300,
   rules: { minOdds: 1.3, bigOdds: 3, maxAgeHours: 2, kellyFraction: 0.25, capPerBet: 0.05, capPerMatch: 0.15, fixedStake: 0.02 },
   matches: [match], bilan: null, journal: { published: 0, settled: 0, byProfile: {} },
+};
+
+/** Artefact antérieur au retrait (schéma 1.1.0) : profils « exploratoire » et « ancien » et combinés du jour encore présents. */
+const oldMatch = { ...match, profiles: { ...match.profiles,
+    exploratoire: { suggestions: [{ rank: 1, marketId: 104, outcomeId: 104, family: 'BTTS / clean sheet', label: 'Les deux équipes marquent', odds: 1.85, oddsAt: '2026-11-07T13:40:00Z', p: 0.55, ev: 0.0175, stakeFraction: 0.005, stakeMode: 'fixed',
+      reasons: ['Hors coupe-circuit : marché Winamax sans marge 52,0 %, moteur 55,0 %, cote 1,85 → espérance face au marché −3,8 %'], pSharp: 0.52, pRef: 0.52, evRef: -0.038, poolW: null, sharpBookmaker: 'winamax.fr', warnings: [], verdict: 'exploratoire' }], combo: null },
+    ancien: { suggestions: [{ rank: 1, marketId: 105, outcomeId: 105, family: 'résultat', label: 'Sélection retirée', odds: 2.4, oddsAt: '2026-11-07T13:40:00Z', p: 0.5, ev: 0.2, stakeFraction: 0.02, stakeMode: 'kelly', reasons: [], verdict: 'ancien' }], combo: null },
+} } as unknown as SuggestionMatch;
+const oldIndex = { ...index, matches: [oldMatch], profiles: [...index.profiles, { id: 'exploratoire', label: 'Exploratoire' }, { id: 'ancien', label: 'Ancien moteur' }],
   exploreCombos: [{ date: '2026-11-07', combos: [{ legs: [
     { matchId: 'm1', match: 'Club A – Club B', label: 'Les deux équipes marquent', odds: 1.85, pRef: 0.52, p: 0.55, kickoff: '2026-11-07T15:00:00Z' },
     { matchId: 'm2', match: 'Club C – Club D', label: 'Club C gagne', odds: 2.10, pRef: 0.45, p: 0.5, kickoff: '2026-11-07T17:00:00Z' }],
-    odds: 3.89, jointP: 0.234, jointModel: 0.275, ev: -0.09, stakeFraction: 0.005, stakeMode: 'fixed' }] }],
-};
+    odds: 3.89, jointP: 0.234, jointModel: 0.275, ev: -0.09, stakeFraction: 0.005, stakeMode: 'fixed' }] }] } as unknown as SuggestionsIndex;
 
 describe('Suggestions (rendu statique)', () => {
   it('affiche les suggestions du profil choisi avec la mise en euros', () => {
@@ -50,24 +56,14 @@ describe('Suggestions (rendu statique)', () => {
     expect(sur).toContain('6,00');
   });
 
-  it('affiche le profil exploratoire comme non validé, espérance face au marché et mise symbolique', () => {
-    const html = renderToStaticMarkup(<SuggestionsBlock match={match} profile="exploratoire" bankroll={300} open now={NOW} />);
-    expect(html).toContain('Sélections exploratoires');
-    expect(html).toContain('non validées');
-    expect(html).toContain('Esp. marché');
-    expect(html).toContain('Les deux équipes marquent');
-    expect(html).toContain('1,50'); // 300 × 0,005
-    expect(html).toContain('−4'); // espérance face au marché négative
-    const controls = renderToStaticMarkup(<SuggestionsControls index={index} profile="exploratoire" onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />);
-    expect(controls).toContain('Exploratoire');
-    expect(controls).toContain('ne sont pas des paris validés');
-    expect(controls).toContain('Combinés du jour');
-    expect(controls).toContain('Combiné 2 sélections');
-    expect(controls).toContain('3,89');
-    expect(controls).toContain('−9');
-    const empty = renderToStaticMarkup(<SuggestionsBlock match={{ ...match, profiles: { ...match.profiles, exploratoire: { suggestions: [], combo: null } } }} profile="exploratoire" bankroll={300} open now={NOW} />);
-    expect(empty).toContain('Aucune cote de 1,60 à 6,00');
-    expect(empty).not.toContain('Pas de pari.');
+  it('ne montre jamais les profils retirés, même avec un artefact ancien qui les contient encore', () => {
+    for (const profile of ['sur', 'equilibre', 'grosse_cote'] as const) {
+      const html = renderToStaticMarkup(<SuggestionsControls index={oldIndex} profile={profile} onProfile={() => {}} bankrollInput="300" bankroll={300} onBankroll={() => {}} />);
+      expect((html.match(/role="radio"/g) ?? []).length).toBe(3);
+      expect(html).not.toContain('Exploratoire'); expect(html).not.toContain('Ancien moteur'); expect(html).not.toContain('Combinés du jour');
+      const block = renderToStaticMarkup(<SuggestionsBlock match={oldMatch} profile={profile} bankroll={300} open now={NOW} />);
+      expect(block).not.toContain('Hors coupe-circuit'); expect(block).not.toContain('Sélection retirée');
+    }
   });
 
   it('signale une bankroll invalide par N/D et le champ en erreur', () => {

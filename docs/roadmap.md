@@ -40,6 +40,7 @@ décision de suite après re-mesure.
 | 2026-11-02 | Ouverture du Labo paris, seul module autorisé à afficher cotes, mises et bankroll | La recherche de rentabilité est l'objectif du module, assumé par le propriétaire. Elle s'appuie sur une nouvelle source (cotes Winamax horodatées avant le match, puis référence sharp Pinnacle et Betfair) et non sur les seuls modèles sportifs écartés le même jour. Les garde-fous restent : validation hors échantillon, coupe-circuit, résultat négatif affiché comme tel |
 | 2026-11-05 | Coupe-circuit « pas de pari » : un pari n'est validé que s'il passe la porte de validation face à la référence sharp | Le moteur seul surestime ses sélections ; la porte confirme w = 0 partout à ce jour |
 | 2026-11-05 | Profils « Exploratoire » puis « Ancien moteur » : publiés et suivis, explicitement non validés | Observer sur données réelles sans les présenter comme des paris validés |
+| 2026-11-06 | Profils « Ancien moteur » et « Exploratoire » retirés (publication, export, interface, prompt de l'IA) ; Mon test limité aux profils validés ; Sûr, Équilibré, Grosse cote inchangés | Ancien moteur : rejeu nettement négatif, intervalle entièrement sous zéro, et les soirées gagnantes qui l'avaient motivé venaient du règlement faux des mi-temps. Exploratoire : rejeu négatif, CLV négatif de l'ordre de la marge |
 | 2026-11-05 | Fonctions IA : Claude en tête, Gemini en secours | Meilleure qualité de rédaction constatée par le propriétaire, qui dispose d'une clé API Anthropic ; Gemini reste en secours |
 
 ## Idées reportées

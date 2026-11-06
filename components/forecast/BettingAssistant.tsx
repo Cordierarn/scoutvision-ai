@@ -14,7 +14,7 @@ import {
   AssistantVerdict, MAX_ASSISTANT_MATCHES, NEWS_CONCURRENCY, RESPONSIBLE_GAMBLING, VERDICT_LABELS, candidateMatches, defaultSelection, googleSearchUrl,
   mapLimited, planStake, verdictClass,
 } from './assistantLogic';
-import { PROFILE_LABELS, formatEuros, formatEv, formatOdds, formatPct, stakeEuros } from './suggestionsLogic';
+import { PROFILE_LABELS, formatEuros, formatEv, formatOdds, formatPct, isValidatedProfile, stakeEuros } from './suggestionsLogic';
 import { addBet, betId, proposedStake, saveMyTest, settle, summarise } from './myTestLogic';
 import { useMyTest } from './useMyTest';
 
@@ -33,9 +33,11 @@ const evClass = (ev: number) => (ev > 0 ? 'text-pos' : 'text-ink-2');
 
 type Pick = BettingPlan['picks'][number];
 
-/** Ajoute un pari du plan à « Mon test », avec la mise proposée sur la bankroll disponible (modifiable ensuite dans l'onglet). */
+/** Ajoute un pari du plan à « Mon test », avec la mise proposée sur la bankroll disponible (modifiable ensuite dans l'onglet).
+ * Seulement pour un profil validé : Mon test ne suit plus de pari d'un profil retiré. */
 export const FollowButton: React.FC<{ pick: Pick; profile: string; now?: Date }> = ({ pick, profile, now }) => {
   const test = useMyTest();
+  if (!isValidatedProfile(profile)) return null;
   const id = betId(pick.matchId, pick.marketId ?? null, pick.outcomeId ?? null, pick.label);
   if (test.bets.some(b => b.id === id)) return <span className="text-2xs text-accent whitespace-nowrap">Suivi dans Mon test</span>;
   const started = !!pick.kickoff && new Date(pick.kickoff).getTime() <= (now ?? new Date()).getTime();

@@ -7,13 +7,13 @@
  */
 
 import React from 'react';
-import type { BetStatus, ComboHistoryEntry, EveningBet, EveningSummary, HistoryBet, HistoryMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
+import type { BetStatus, EveningBet, EveningSummary, HistoryBet, HistoryMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
 import { CompetitionBadge } from '../Media';
 import { EmptyState, LoadError, Panel, Skeleton, Stat, StatStrip } from '../ui';
 import { ProfileBankroll } from './Suggestions';
 import { RESPONSIBLE_GAMBLING } from './assistantLogic';
 import {
-  CIRCUIT_NOTE, PROFILE_LABELS, STATUS_LABELS, betNet, comboSummary, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, historySummary, sharpLabel, stakeEuros, statusClass,
+  CIRCUIT_NOTE, PROFILE_LABELS, STATUS_LABELS, betNet, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, historySummary, sharpLabel, stakeEuros, statusClass,
 } from './suggestionsLogic';
 
 const dayLabel = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -23,44 +23,6 @@ const signedClass = (v: number | null) => (v === null ? 'text-ink-3' : v > 0 ? '
 const StatusTag: React.FC<{ status: BetStatus }> = ({ status }) => (
   <span className={`text-xs font-medium whitespace-nowrap ${statusClass(status)}`}>{STATUS_LABELS[status]}</span>
 );
-
-// ----- Combinés du jour (profil exploratoire) -----
-
-const ComboHistory: React.FC<{ combos: ComboHistoryEntry[]; bankroll: number | null }> = ({ combos, bankroll }) => {
-  const sum = comboSummary(combos, bankroll);
-  return (
-    <Panel title="Combinés du jour · Exploratoire" subtitle="Combinés entre matchs différents publiés avant le premier coup d'envoi (dernière version), réglés quand tous leurs matchs sont terminés. Mise fixe de 0,5 % de votre bankroll.">
-      {sum.settled > 0 && (
-        <p className="text-xs text-ink-2 mb-3">
-          {sum.settled} réglé{sum.settled > 1 ? 's' : ''}, {sum.won} gagné{sum.won > 1 ? 's' : ''}{bankroll === null ? '' : <>, net <span className={`num ${signedClass(sum.net)}`}>{formatSignedEuros(sum.net)}</span> pour {formatEuros(sum.staked)} misés</>}.
-        </p>
-      )}
-      <ul className="list-none m-0 p-0 space-y-2">
-        {combos.map(c => {
-          const stake = stakeEuros(bankroll, c.stakeFraction);
-          const net = c.realised === null || bankroll === null ? null : Math.round(stake * c.realised * 100) / 100;
-          return (
-            <li key={`${c.date}-${c.legs.map(l => l.matchId).join('-')}`} className="rounded border border-line px-3 py-2 text-sm">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="text-ink first-letter:uppercase">{dayLabel(c.date)} · {c.legs.length} sélections</span>
-                <span className="flex items-baseline gap-3 num text-xs">
-                  <span className="text-ink">cote {formatOdds(c.odds)}</span>
-                  <span className={signedClass(c.ev)}>esp. marché {formatEv(c.ev)}</span>
-                  <span className="text-ink">mise {bankroll === null ? 'N/D' : formatEuros(stake)}</span>
-                  <StatusTag status={c.status} />
-                  {net !== null && <span className={signedClass(net)}>{formatSignedEuros(net)}</span>}
-                </span>
-              </div>
-              <ul className="list-none m-0 p-0 text-xs text-ink-2 mt-0.5">
-                {c.legs.map(l => <li key={l.matchId}><span className="text-ink-4">{l.match} :</span> {l.label} <span className="num text-ink">{formatOdds(l.odds)}</span></li>)}
-              </ul>
-            </li>
-          );
-        })}
-      </ul>
-    </Panel>
-  );
-};
 
 // ----- Soirées suivies -----
 
@@ -248,8 +210,6 @@ const BetHistoryContent: React.FC<BetHistoryProps> = ({ index, failed = false, o
         )}
       </Panel>
 
-      {profile === 'exploratoire' && (index.comboHistory ?? []).length > 0 && <ComboHistory combos={index.comboHistory ?? []} bankroll={bankroll} />}
-
       {days.length === 0 ? (
         <EmptyState title={`Aucune suggestion ${PROFILE_LABELS[profile]} sur un match commencé ces 14 derniers jours.`}>
           Le suivi commence avec les suggestions publiées depuis le 3 novembre 2026 ; un match apparaît ici dès son coup d'envoi, et son résultat après le passage du matin.
@@ -267,7 +227,7 @@ const BetHistoryContent: React.FC<BetHistoryProps> = ({ index, failed = false, o
           ))}
         </div>
       )}
-      <p className="text-2xs text-ink-4">Cotes {index.bookmaker}. {index.reference ? `${CIRCUIT_NOTE} ` : ''}Les combinés des soirées suivies figurent en haut de page ; les combinés du jour du profil Exploratoire, dans leur propre bloc. Mises indicatives : rien n'est placé automatiquement.</p>
+      <p className="text-2xs text-ink-4">Cotes {index.bookmaker}. {index.reference ? `${CIRCUIT_NOTE} ` : ''}Les combinés des soirées suivies figurent en haut de page. Mises indicatives : rien n'est placé automatiquement.</p>
     </div>
   );
 };

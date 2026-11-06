@@ -59,6 +59,11 @@ describe('BettingAssistant (rendu statique)', () => {
     expect(renderToStaticMarkup(<PlanView plan={{ ...plan, picks: [] }} bankroll={null} />)).toContain('pas de pari sur ces matchs');
   });
 
+  it('ne propose de suivre que les paris des profils validés', () => {
+    for (const profile of ['exploratoire', 'ancien']) expect(renderToStaticMarkup(<FollowButton pick={plan.picks[0]} profile={profile} now={NOW} />)).not.toContain('<button');
+    expect(renderToStaticMarkup(<FollowButton pick={plan.picks[0]} profile="equilibre" now={NOW} />)).toContain('<button');
+  });
+
   it('le bouton Suivre disparaît une fois le match commencé', () => {
     const html = renderToStaticMarkup(<FollowButton pick={plan.picks[0]} profile="equilibre" now={new Date('2026-11-07T19:30:00Z')} />);
     expect(html).toContain('Match commencé');

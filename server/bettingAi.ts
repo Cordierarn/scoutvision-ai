@@ -29,7 +29,8 @@ import { NoModelAvailable } from './geminiModels';
 import { FetchHeadlines, Headline, articlesToRead, buildArticlesPrompt, buildHeadlinesPrompt } from './newsFeed';
 import { GenerateText, Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
-export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v3' } as const;
+// plan v4 : règles des profils « exploratoire » et « ancien » retirées avec ces profils (6 novembre 2026) ; actualité inchangée
+export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v4' } as const;
 export const BETTING_NEWS_PATH = '/api/ai/betting-news';
 export const BETTING_PLAN_PATH = '/api/ai/betting-plan';
 export const MAX_PLAN_MATCHES = 8;
@@ -38,10 +39,9 @@ export const NEWS_TTL_MS = 90 * 60 * 1000;
 export const NEWS_REFRESH_MIN_MS = 15 * 60 * 1000;   // « Actualiser » : pas plus d'un appel par quart d'heure et par match
 const MAX_TEXT = 700;
 
-export type Profile = 'sur' | 'equilibre' | 'grosse_cote' | 'exploratoire' | 'ancien';
-const PROFILES: Profile[] = ['sur', 'equilibre', 'grosse_cote', 'exploratoire', 'ancien'];
-/** Profils hors coupe-circuit : sélections publiées pour être suivies, jamais validées */
-const UNVALIDATED: Profile[] = ['exploratoire', 'ancien'];
+/** Profils validés par le coupe-circuit, les seuls publiés (« Ancien moteur » et « Exploratoire » retirés le 6 novembre 2026). */
+export type Profile = 'sur' | 'equilibre' | 'grosse_cote';
+const PROFILES: Profile[] = ['sur', 'equilibre', 'grosse_cote'];
 export type Verdict = 'garder' | 'prudence' | 'eviter';
 const VERDICTS: Verdict[] = ['garder', 'prudence', 'eviter'];
 
@@ -402,18 +402,10 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
   required: ['summary', 'matches', 'picks', 'combo', 'avoid', 'discipline'],
 };
 
-/** Profil exploratoire : sélections hors coupe-circuit, publiées à la demande du propriétaire ; l'IA doit le dire. */
-const EXPLORATORY_RULES = (profile: Profile) => profile === 'ancien' ? `
-Profile "ancien" (the old engine, before the circuit breaker): the listed selections were NOT validated by the engine. They are ranked on the engine's own probability, without any market reference; "sharpProbabilityPct" is the Pinnacle / Betfair no-vig probability when known and "expectedValuePct" is then measured against it (often negative). Treat each one as an unvalidated pick that is tracked to measure the old engine: say plainly in its reason when its expected value against the market is negative, never call it value. Verdicts and news checks work as for validated bets; "discipline" must recall that these picks are tracked to evaluate the old engine, not recommended.
-` : `
-Profile "exploratoire": the listed selections were NOT validated by the engine. They were refused by the circuit breaker and are ranked by expected value against the no-vig market, which is usually negative ("expectedValuePct"); "sharpProbabilityPct" is then the no-vig market probability (Pinnacle, Betfair or Winamax itself). Treat each one as an exploratory pick: say plainly in its reason that its expected value against the market is negative when it is, never call it value, and keep the fixed symbolic stake. Verdicts and news checks work as for validated bets; "discipline" must recall that these picks are for following the engine, not for profit.
-`;
-
 export function buildPlanPrompt(facts: PlanFacts, news: Record<string, string>): string {
   return `You are the news analyst of the ScoutVision betting lab. Write every text field in French.
 A deterministic Python engine has already decided everything numerical. For each match it either validated a few bets (profile "${facts.profile}") or decided "no bet". A validated bet carries: the ${facts.bookmaker} odds (where the bet is placed), the engine probability, the sharp-market probability (Pinnacle or Betfair Exchange, margin removed with Shin's method), the reference probability used for the decision, the expected value of the ${facts.bookmaker} odds against that reference, and the stake (percent of bankroll, shrunk Kelly). A "no bet" match carries the engine's best idea and the computed reasons it was refused (no sharp reference, expected value under the threshold, suspicious gap, contrary sharp move, over-performing favourite).
 Your only job: confront each validated bet with the pre-match news below (absences, doubts, rotation, line-ups), which the engine cannot see, and write a short factual plan.
-${UNVALIDATED.includes(facts.profile) ? EXPLORATORY_RULES(facts.profile) : ''}
 Hard rules:
 - The engine's verdict is final. Never present a "no bet" match as worth betting, never suggest a selection, market or line that is not listed, never say a validated bet is "value" because of your own reasoning: the value was computed, you only check the news.
 - Never compute, estimate or adjust a probability, odds, expected value or stake. Write only numbers that appear in the facts or in the news, as written there (percentages like "78,7 %").
@@ -540,7 +532,11 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
   if (!isObject(body) || !Array.isArray(body.matchIds)) return { status: 400, body: { error: 'Champ « matchIds » manquant.' } };
   const ids = [...new Set(body.matchIds)].filter((id): id is string => typeof id === 'string' && MATCH_ID.test(id));
   if (!ids.length || ids.length > MAX_PLAN_MATCHES) return { status: 400, body: { error: `Entre 1 et ${MAX_PLAN_MATCHES} matchs attendus.` } };
-  const profile: Profile = PROFILES.includes(body.profile as Profile) ? body.profile as Profile : 'equilibre';
+  // profil absent : Équilibré ; profil retiré (Ancien moteur, Exploratoire) ou inconnu : refusé, jamais remplacé en silence
+  if (body.profile !== undefined && !PROFILES.includes(body.profile as Profile)) {
+    return { status: 400, body: { error: `Profil inconnu ou retiré : seuls ${PROFILES.join(', ')} sont publiés.` } };
+  }
+  const profile: Profile = (body.profile as Profile | undefined) ?? 'equilibre';
   const index = deps.loadIndex();
   if (!index) return noIndex();
 
