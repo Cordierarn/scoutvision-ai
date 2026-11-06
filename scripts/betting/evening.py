@@ -9,7 +9,7 @@ Historique des soirées : les paris recommandés chaque soir, réglés sur les s
   python3 -m betting.evening settle --date 2026-11-02 [--scores scores.json]
                                                                        règle la soirée : scores fournis, sinon résultats
                                                                        PitchAPI + web (results_web) par identifiant de match
-  python3 -m betting.evening settle --pending                          règle toutes les soirées en attente des 7 derniers jours
+  python3 -m betting.evening settle --pending                          règle à nouveau les soirées des 7 derniers jours (scores corrigés compris)
   python3 -m betting.evening show                                      tableau des soirées et cumul
 
 Fichiers (hors Git) : `.research/betting/product/evenings.json`. Un pari enregistré n'est jamais modifié ;
@@ -52,8 +52,9 @@ def _spec(d: dict) -> mk.Spec:
 
 
 def _result(s: dict) -> mk.Result:
-    ft, ht = s["ft"], s.get("ht") or [0, 0]
-    return mk.Result(int(ft[0]), int(ft[1]), int(ht[0]), int(ht[1]), s.get("first_goal", "none"), s.get("last_goal", "none"))
+    """Score d'un match : mi-temps et ordre des buts absents restent inconnus (jamais 0-0)."""
+    ft, ht = s["ft"], s.get("ht") or [None, None]
+    return mk.result_from(ft[0], ft[1], ht[0], ht[1], s.get("first_goal"), s.get("last_goal"))
 
 
 def add(date: str, bets: list[dict]) -> dict:
@@ -69,14 +70,25 @@ def add(date: str, bets: list[dict]) -> dict:
     return data["evenings"][-1]
 
 
-def settle_bet(b: dict, scores: dict) -> tuple[str | None, float | None]:
-    """Renvoie (résultat lisible, gain net) ou (None, None) si un score manque."""
+MISSING_SCORE = object()      # score d'un match du pari absent : le règlement connu est conservé
+
+
+def settle_bet(b: dict, scores: dict):
+    """Renvoie (résultat lisible, gain net), (None, None) si un marché du pari ne peut pas être réglé avec le score
+    connu (mi-temps ou ordre des buts inconnus : en attente), ou MISSING_SCORE si un score manque."""
+    try:
+        return _settle_bet(b, scores)
+    except mk.MissingResult:
+        return None, None
+
+
+def _settle_bet(b: dict, scores: dict):
     if "combo" in b:
         legs = []
         for leg in b["combo"]:
             s = scores.get(leg.get("key") or b.get("match"))
             if s is None:
-                return None, None
+                return MISSING_SCORE
             legs.append(mk.settle(_spec(leg["spec"]), _result(s)))
         if any(x in (0.0, -0.5) for x in legs):
             return "perdu", -b["stake"]
@@ -89,7 +101,7 @@ def settle_bet(b: dict, scores: dict) -> tuple[str | None, float | None]:
         return ("remboursé" if odds == 1.0 else "gagné"), round(b["stake"] * (odds - 1.0), 2)
     s = scores.get(b["match"])
     if s is None:
-        return None, None
+        return MISSING_SCORE
     x = mk.settle(_spec(b["spec"]), _result(s))
     label = {None: "remboursé", 1.0: "gagné", 0.0: "perdu", 0.5: "moitié gagnée", -0.5: "moitié perdue"}[x]
     return label, round(b["stake"] * mk.realised_return(x, float(b["odds"])), 2)
@@ -116,29 +128,34 @@ def auto_bets(date: str, profile: str = "equilibre", bankroll: float = 300.0) ->
 
 
 def scores_from_results(date: str) -> dict:
-    """Scores des matchs du jour, par identifiant PitchAPI (résultats PitchAPI complétés par le web)."""
+    """Scores des matchs du jour, par identifiant PitchAPI (résultats PitchAPI complétés par le web) ; mi-temps et ordre
+    des buts inconnus valent None."""
     from .product import load_results
     r = load_results()
     r = r[pd.to_datetime(r["kickoff_utc"], utc=True).dt.strftime("%Y-%m-%d") == date]
-    return {m.match_id: {"ft": [int(m.ft_home), int(m.ft_away)], "ht": [int(m.ht_home), int(m.ht_away)], "first_goal": m.first_goal, "last_goal": m.last_goal} for m in r.itertuples()}
+    out = {}
+    for m in r.itertuples():
+        res = mk.result_from_row(m)
+        out[m.match_id] = {"ft": [res.ft_home, res.ft_away], "ht": [res.ht_home, res.ht_away] if res.has_half_time else None,
+                           "first_goal": res.first_goal, "last_goal": res.last_goal}
+    return out
 
 
 def settle(date: str, scores: dict) -> dict | None:
+    """Règle (ou règle à nouveau) chaque pari de la soirée dont les scores sont connus : un règlement fait sur un score
+    corrigé depuis est remplacé, un pari dont la mi-temps est inconnue repasse en attente. Un pari sans score garde son
+    règlement."""
     data = load()
     ev = next((e for e in data["evenings"] if e["date"] == date), None)
     if ev is None:
         print(f"Aucune soirée {date} : rien à régler.")
         return None
-    pending = 0
     for b in ev["bets"]:
-        if b["result"] is not None:
+        out = settle_bet(b, scores)
+        if out is MISSING_SCORE:
             continue
-        res, profit = settle_bet(b, scores)
-        if res is None:
-            pending += 1
-            continue
-        b["result"], b["profit"] = res, profit
-    ev["settled"] = pending == 0
+        b["result"], b["profit"] = out
+    ev["settled"] = all(b["result"] is not None for b in ev["bets"])
     ev["scores"] = {**ev.get("scores", {}), **scores}
     ev["stake"] = round(sum(b["stake"] for b in ev["bets"]), 2)
     ev["profit"] = round(sum(b["profit"] for b in ev["bets"] if b["profit"] is not None), 2)
@@ -148,10 +165,10 @@ def settle(date: str, scores: dict) -> dict | None:
 
 
 def settle_pending(today: dt.date, days: int = 7) -> list[dict]:
-    """Règle les soirées encore en attente des `days` derniers jours (combiné sur plusieurs soirs, résultat
-    publié en retard) avec les scores de leur date jusqu'à aujourd'hui, par identifiant de match."""
+    """Règle à nouveau les soirées des `days` derniers jours, réglées ou non (combiné sur plusieurs soirs, résultat
+    publié en retard, score corrigé depuis), avec les scores de leur date jusqu'à aujourd'hui, par identifiant de match."""
     done = []
-    for ev in [e for e in load()["evenings"] if not e.get("settled")]:
+    for ev in load()["evenings"]:
         d0 = dt.date.fromisoformat(ev["date"])
         if d0 > today or (today - d0).days > days:
             continue

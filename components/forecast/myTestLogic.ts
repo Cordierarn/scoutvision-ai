@@ -63,14 +63,27 @@ export function saveMyTest(test: MyTest): void {
 export const betId = (matchId: string, marketId: number | null, outcomeId: number | null, label: string) =>
   marketId !== null && outcomeId !== null ? `${matchId}:${marketId}:${outcomeId}` : `${matchId}:${label}`;
 
-/** Statut publié de chaque sélection réglée de l'historique, par identifiant match:marché:issue. */
-export function publishedStatus(history: HistoryDay[]): Map<string, BetStatus> {
+/** Statut publié de chaque sélection de l'historique, en attente comprise, par identifiant match:marché:issue. */
+function publishedAll(history: HistoryDay[]): Map<string, BetStatus> {
   const out = new Map<string, BetStatus>();
   for (const d of history) for (const m of d.matches) for (const bets of Object.values(m.profiles)) for (const b of bets ?? []) {
-    if (b.marketId === undefined || b.outcomeId === undefined || b.status === 'pending') continue;
-    out.set(`${m.matchId}:${b.marketId}:${b.outcomeId}`, b.status);
+    if (b.marketId === undefined || b.outcomeId === undefined) continue;
+    const id = `${m.matchId}:${b.marketId}:${b.outcomeId}`;
+    if (b.status !== 'pending' || !out.has(id)) out.set(id, b.status);   // un profil qui l'a réglée l'emporte sur un autre en attente
   }
   return out;
+}
+
+/** Statut publié de chaque sélection réglée de l'historique, par identifiant match:marché:issue. */
+export function publishedStatus(history: HistoryDay[]): Map<string, BetStatus> {
+  return new Map([...publishedAll(history)].filter(([, status]) => status !== 'pending'));
+}
+
+/** Règlement automatique d'un pari : le statut publié ; une sélection publiée de nouveau en attente (score corrigé, mi-temps
+ * inconnue) efface le statut mémorisé ; absente de l'historique (plus de 14 jours), le statut mémorisé reste. */
+function autoOf(b: MyBet, published: Map<string, BetStatus>): BetStatus | undefined {
+  const pub = published.get(b.id);
+  return pub === 'pending' ? undefined : pub ?? b.autoStatus;
 }
 
 /** Gain net pour 1 € misé selon le statut (règles Winamax des demi-gains et remboursements). */
@@ -88,24 +101,25 @@ export function netPerUnit(status: BetStatus, odds: number): number | null {
 export interface SettledBet extends MyBet { status: BetStatus; net: number | null; auto: boolean }
 
 export function settle(test: MyTest, history: HistoryDay[]): SettledBet[] {
-  const published = publishedStatus(history);
+  const published = publishedAll(history);
   return test.bets.map(b => {
-    const auto = published.get(b.id);
-    const autoStatus = auto ?? b.autoStatus;
+    const autoStatus = autoOf(b, published);
     const status: BetStatus = b.manualStatus ?? autoStatus ?? 'pending';
     const unit = netPerUnit(status, b.odds);
     return { ...b, status, net: unit === null ? null : Math.round(b.stake * unit * 100) / 100, auto: !b.manualStatus && !!autoStatus };
   });
 }
 
-/** Mémorise les règlements automatiques trouvés dans l'historique ; null si rien n'a changé. */
+/** Mémorise les règlements automatiques trouvés dans l'historique, et oublie ceux qui y sont repassés en attente ; null si
+ * rien n'a changé. */
 export function recordAuto(test: MyTest, history: HistoryDay[]): MyTest | null {
-  const published = publishedStatus(history);
+  const published = publishedAll(history);
   let changed = false;
   const bets = test.bets.map(b => {
-    const auto = published.get(b.id);
-    if (!auto || auto === b.autoStatus) return b;
+    const auto = autoOf(b, published);
+    if (auto === b.autoStatus) return b;
     changed = true;
+    if (auto === undefined) { const { autoStatus: _forgotten, ...rest } = b; return rest; }
     return { ...b, autoStatus: auto };
   });
   return changed ? { ...test, bets } : null;

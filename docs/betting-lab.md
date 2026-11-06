@@ -115,7 +115,8 @@ Points ouverts de la phase 1, tranchés sur de vraies réponses (2 novembre 2026
 
 Règlement (règles usuelles des paris football Winamax ; le site n'est pas consultable depuis
 l'environnement de développement, à confirmer sur la page « Règles des paris » de Winamax) : temps
-réglementaire, prolongations exclues ; but contre son camp crédité à l'équipe bénéficiaire ; remboursé si
+réglementaire, prolongations exclues ; but contre son camp crédité à l'équipe bénéficiaire ; mi-temps ou ordre des
+buts inconnus : sélection en attente (voir « Règlement depuis ESPN ») ; remboursé si
 nul et handicap entier remboursés en cas d'égalité ; ligne en quart = moitié de la mise sur chaque ligne
 voisine (moitié gagnée / moitié remboursée, moitié perdue / moitié remboursée) ; match reporté ou
 interrompu : hors périmètre (seuls les matchs terminés sont réglés, matchs à score administratif ou avec
@@ -246,7 +247,7 @@ encre neutre.
   au passage du matin seulement, ou tant que l'archive est incomplète. Les relevés sont écrits par lots
   (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison.
 - **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
-  (`betting/results_web.py`, scores finaux, mi-temps, premier et dernier but, sans clé), fusionnés aux
+  (`betting/results_web.py`, sans clé ; voir « Règlement depuis ESPN » plus bas), fusionnés aux
   résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis
   `betting.evening auto` enregistre les paris de la veille (dernière publication du profil Équilibré avant
   chaque coup d'envoi, mise = fraction × 300 €) et `betting.evening settle` les règle ; `evening show`
@@ -258,6 +259,26 @@ encre neutre.
 - Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement),
   `THE_ODDS_API_KEY` (référence sharp ; sans elle, aucun pari n'est validé) et `PITCHAPI_DATA_TOKEN`. Depuis l'environnement de développement, ESPN et les releases ne sont pas
   accessibles : l'historique se règle en CI.
+
+### Règlement depuis ESPN (correction du 6 novembre 2026)
+
+Audit du 6 novembre : le tableau de scores d'ESPN ne donne **pas** le score de mi-temps (pas de `linescores`), et le
+lecteur le remplaçait par 0-0. Tous les paris de mi-temps (1re mi-temps, mi-temps / fin de match, marque ou gagne dans
+les deux mi-temps…) réglés depuis ESPN l'ont été sur une mi-temps inventée, et les buts contre son camp étaient inversés
+une seconde fois alors qu'ESPN les crédite déjà à l'équipe bénéficiaire (premier et dernier but faux). Règles depuis :
+
+- **Mi-temps et ordre des buts reconstruits** à partir des buts listés (`details`) : minute affichée (« 43' », « 45'+2' »,
+  un but à 45'+n est en première mi-temps), équipe créditée telle quelle. Seulement si chaque minute est lisible et si les
+  buts listés redonnent exactement le score final ; sinon mi-temps et ordre des buts restent **inconnus**.
+- **Inconnu n'est jamais 0** (`markets.Result` accepte `None`, `markets.settleable`) : une sélection qui dépend de la
+  mi-temps ou de l'ordre des buts reste **en attente** ; les marchés du temps réglementaire se règlent normalement.
+- **Temps réglementaire seulement** : une rencontre terminée au-delà de la deuxième période (prolongation, tirs au but)
+  n'est pas réglée depuis ESPN (`regulation`).
+- **Re-règlement** : le règlement est dérivé du résultat courant à chaque passage (`product.resettle`, combinés et soirées
+  des 7 derniers jours compris) ; un score corrigé remplace l'ancien règlement, la publication n'est jamais réécrite.
+  `results_web --refresh-incomplete 14` relit les dates dont une rencontre terminée n'a pas de mi-temps reconstruite ; une
+  relecture ne perd jamais un appariement connu. Dans Mon test, une sélection publiée de nouveau en attente efface le
+  statut mémorisé.
 
 ## Étape 1 du moteur quantitatif : référence sharp, coupe-circuit, CLV (5 novembre 2026)
 
