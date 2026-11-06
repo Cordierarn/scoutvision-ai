@@ -119,7 +119,7 @@ function loadOptional<T>(path: string): Promise<T | null> {
 
 
 // ----- Suggestions de paris (Labo paris, onglet Matchs à venir) : artefact privé calculé par le pipeline -----
-export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote' | 'exploratoire';
+export type SuggestionProfile = 'sur' | 'equilibre' | 'grosse_cote' | 'exploratoire' | 'ancien';
 export type StakeMode = 'shrink_kelly' | 'kelly' | 'fixed';
 export interface Suggestion {
   rank: number; marketId: number; outcomeId: number; family: string; label: string;
@@ -127,7 +127,7 @@ export interface Suggestion {
   stakeFraction: number; stakeMode: StakeMode; reasons: string[];
   /** Étape 1 du moteur quantitatif : probabilité sharp (Shin), probabilité de référence (pool), espérance face à elle */
   pSharp?: number | null; pRef?: number; evRef?: number | null; poolW?: number | null; sharpBookmaker?: string | null; sharpAt?: string | null;
-  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue' | 'exploratoire';
+  warnings?: string[]; verdict?: 'bet' | 'no_bet' | 'non_evalue' | 'exploratoire' | 'ancien';
 }
 /** Combiné du jour du profil exploratoire : une sélection par match, matchs différents. */
 export interface ExploreDayCombo {
@@ -171,7 +171,7 @@ export interface SuggestionsIndex {
   matches: SuggestionMatch[];
   exploreCombos?: { date: string; combos: ExploreDayCombo[] }[];
   bilan: { start: number; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
-  journal: { published: number; settled: number; byProfile: Record<string, BilanBlock> };
+  journal: { published: number; settled: number; byProfile: Record<string, BilanBlock & { closeBets?: number; earlyEdge?: number | null; oddsDroppedRate?: number | null }> };
   evenings?: EveningSummary[];
   history?: HistoryDay[];
   comboHistory?: ComboHistoryEntry[];
@@ -188,6 +188,7 @@ export interface HistoryBet {
   label: string; family: string; odds: number; p: number; ev: number; stakeFraction: number; stakeMode: StakeMode;
   status: BetStatus; realised: number | null;
   pSharp?: number | null; evRef?: number | null; clv?: number | null;
+  marketId?: number; outcomeId?: number; closingOdds?: number | null;
 }
 export interface HistoryMatch {
   matchId: string; competition: string; kickoff: string; home: string | null; away: string | null; score: [number, number] | null;

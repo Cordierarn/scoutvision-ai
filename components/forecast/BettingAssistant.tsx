@@ -15,6 +15,8 @@ import {
   mapLimited, planStake, verdictClass,
 } from './assistantLogic';
 import { PROFILE_LABELS, formatEuros, formatEv, formatOdds, formatPct, stakeEuros } from './suggestionsLogic';
+import { addBet, betId, proposedStake, saveMyTest, settle, summarise } from './myTestLogic';
+import { useMyTest } from './useMyTest';
 
 type Phase = 'idle' | 'news' | 'plan' | 'done' | 'error';
 export interface NewsFailure { match: string; message: string }
@@ -26,6 +28,31 @@ let lastSelection: string[] | null = null;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const dateTime = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+const evClass = (ev: number) => (ev > 0 ? 'text-pos' : 'text-ink-2');
+
+type Pick = BettingPlan['picks'][number];
+
+/** Ajoute un pari du plan à « Mon test », avec la mise proposée sur la bankroll disponible (modifiable ensuite dans l'onglet). */
+export const FollowButton: React.FC<{ pick: Pick; profile: string; now?: Date }> = ({ pick, profile, now }) => {
+  const test = useMyTest();
+  const id = betId(pick.matchId, pick.marketId ?? null, pick.outcomeId ?? null, pick.label);
+  if (test.bets.some(b => b.id === id)) return <span className="text-2xs text-accent whitespace-nowrap">Suivi dans Mon test</span>;
+  const started = !!pick.kickoff && new Date(pick.kickoff).getTime() <= (now ?? new Date()).getTime();
+  if (started) return <span className="text-2xs text-ink-4 whitespace-nowrap">Match commencé</span>;
+  const available = summarise(test, settle(test, [])).available;
+  const stake = proposedStake(pick.stakeFraction, available);
+  const follow = () => saveMyTest(addBet(test, {
+    id, addedAt: new Date().toISOString(), kickoff: pick.kickoff || new Date().toISOString(), matchId: pick.matchId, match: pick.match, label: pick.label,
+    marketId: pick.marketId ?? null, outcomeId: pick.outcomeId ?? null, odds: pick.odds, stake, profile,
+  }));
+  return (
+    <button type="button" className="sv-btn sv-btn-secondary sv-btn-sm whitespace-nowrap" onClick={follow} disabled={available < 0.1}
+      title={`Ajouter à Mon test avec ${formatEuros(stake)} (fraction du moteur sur votre bankroll disponible de ${formatEuros(available)}) ; cote et mise modifiables dans l'onglet Mon test`}>
+      Suivre · {formatEuros(stake)}
+    </button>
+  );
+};
 
 const VerdictTag: React.FC<{ v: AssistantVerdict }> = ({ v }) => <span className={`text-xs font-medium whitespace-nowrap ${verdictClass(v)}`}>{VERDICT_LABELS[v]}</span>;
 
@@ -85,7 +112,7 @@ export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; ne
           <>
             <div className="hidden md:block overflow-x-auto">
               <table className="sv-table">
-                <thead><tr><th scope="col">Match</th><th scope="col">Sélection</th><th scope="col" className="text-right">Cote</th><th scope="col" className="text-right" title="Probabilité de référence du moteur (marché sharp sans marge)">Proba réf.</th><th scope="col" className="text-right" title="Espérance de la cote Winamax face à la référence">Esp.</th><th scope="col" className="text-right">Mise</th><th scope="col">Avis</th><th scope="col">Pourquoi</th></tr></thead>
+                <thead><tr><th scope="col">Match</th><th scope="col">Sélection</th><th scope="col" className="text-right">Cote</th><th scope="col" className="text-right" title="Probabilité de référence du moteur (marché sharp sans marge)">Proba réf.</th><th scope="col" className="text-right" title="Espérance de la cote Winamax face à la référence">Esp.</th><th scope="col" className="text-right">Mise</th><th scope="col">Avis</th><th scope="col">Pourquoi</th><th scope="col">Mon test</th></tr></thead>
                 <tbody>
                   {plan.picks.map(p => (
                     <tr key={p.ref}>
@@ -93,10 +120,11 @@ export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; ne
                       <td className="text-ink">{p.label}</td>
                       <td className="text-right num text-ink">{formatOdds(p.odds)}</td>
                       <td className="text-right num text-ink-2" title={p.sharpProbability === null ? undefined : `moteur ${formatPct(p.engineProbability)} · sharp ${formatPct(p.sharpProbability)}`}>{formatPct(p.probability)}</td>
-                      <td className="text-right num text-pos">{formatEv(p.expectedValue)}</td>
+                      <td className={`text-right num ${evClass(p.expectedValue)}`}>{formatEv(p.expectedValue)}</td>
                       <td className="text-right num text-ink">{bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, p.stakeFraction))}</td>
                       <td><VerdictTag v={p.verdict} /></td>
                       <td className="text-ink-2 text-xs">{p.why}</td>
+                      <td><FollowButton pick={p} profile={plan.profile} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -110,15 +138,16 @@ export const PlanView: React.FC<{ plan: BettingPlan; bankroll: number | null; ne
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 num text-xs mt-0.5">
                     <span className="text-ink">cote {formatOdds(p.odds)}</span>
                     <span className="text-ink-2">proba réf. {formatPct(p.probability)}</span>
-                    <span className="text-pos">esp. {formatEv(p.expectedValue)}</span>
+                    <span className={evClass(p.expectedValue)}>esp. {formatEv(p.expectedValue)}</span>
                     <span className="text-ink">mise {bankroll === null ? 'N/D' : formatEuros(stakeEuros(bankroll, p.stakeFraction))}</span>
                     <VerdictTag v={p.verdict} />
                   </div>
                   {p.why && <div className="text-2xs text-ink-3 mt-0.5">{p.why}</div>}
+                  <div className="mt-1"><FollowButton pick={p} profile={plan.profile} /></div>
                 </li>
               ))}
             </ul>
-            <p className="text-2xs text-ink-3 mt-1 num">Total misé : {bankroll === null ? 'N/D' : formatEuros(planStake(plan.picks, bankroll))} (mises du moteur sur votre bankroll).</p>
+            <p className="text-2xs text-ink-3 mt-1 num">Total misé : {bankroll === null ? 'N/D' : formatEuros(planStake(plan.picks, bankroll))} (mises du moteur sur votre bankroll). « Suivre » ajoute le pari à l'onglet Mon test, avec la même fraction appliquée à votre bankroll de test.</p>
           </>
         )}
         {plan.combo && <p className="text-xs text-ink-2 mt-2"><span className="text-ink">Combiné : </span>{plan.combo.labels.join(' + ')}{plan.combo.why ? ` · ${plan.combo.why}` : ''}</p>}

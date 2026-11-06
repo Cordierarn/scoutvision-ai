@@ -139,6 +139,7 @@ describe('plan du jour', () => {
     const expl = { ...buildPlanFacts(INDEX, ['m1'], 'equilibre', '2026-11-07'), profile: 'exploratoire' as const };
     expect(buildPlanPrompt(expl, {})).toContain('were NOT validated by the engine');
     expect(buildPlanPrompt(facts, {})).not.toContain('were NOT validated by the engine');
+    expect(buildPlanPrompt({ ...expl, profile: 'ancien' as const }, {})).toContain('the old engine, before the circuit breaker');
   });
 
   it('transmet un « pas de pari » du moteur avec ses motifs, sans suggestion', () => {
