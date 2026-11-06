@@ -18,8 +18,9 @@ règle, de chiffre ou de comportement.
   Gemini en secours).
 - Pipeline : `scripts/betting/` (client OddsPapi, archive, simulation, coupe-circuit, porte de validation, suggestions, journal,
   règlement, export), tests dans `scripts/tests/test_betting_*.py`.
-- Cycle : `.github/workflows/betting-odds.yml` (06 h 30 UTC : résultats et règlement ; 10 h, 14 h, 17 h UTC : cotes, suggestions,
-  export). Les commandes se lancent depuis `scripts/` : `cd scripts && python3 -m betting.<module> …`. Le serveur Heroku
+- Cycle : `.github/workflows/betting-odds.yml`, quatre passages identiques (05 h 37, 09 h 13, 13 h 41, 16 h 47 UTC, alignés sur
+  `betting/cycle.py:SLOTS`) ; le travail lourd (fenêtre de rencontres, historiques) est décidé par l'état de l'archive
+  (`cycle plan`), jamais par l'heure ; chaque passage est journalisé et un créneau manqué est signalé (`cycle record`). Les commandes se lancent depuis `scripts/` : `cd scripts && python3 -m betting.<module> …`. Le serveur Heroku
   recharge l'artefact au démarrage puis toutes les 6 h (`SCOUTVISION_DATA_REFRESH_HOURS`).
 
 ## Invariants
