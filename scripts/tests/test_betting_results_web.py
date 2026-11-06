@@ -275,5 +275,13 @@ class EveningTests(unittest.TestCase):
             self.assertEqual(first, again)
 
 
+    def test_rebuild_refuses_a_retired_profile(self):
+        # Ancien moteur et Exploratoire retirés : aucune soirée ne se reconstruit depuis leurs lignes déjà écrites
+        import contextlib, io
+        for profile in ("ancien", "exploratoire"):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                evening.main(["rebuild", "--profile", profile])
+
+
 if __name__ == "__main__":
     unittest.main()

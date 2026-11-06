@@ -54,6 +54,12 @@ describe('myTestLogic', () => {
     expect(settle(memorised, [])[0]).toMatchObject({ status: 'won' });          // absente de l'historique (14 jours) : le mémorisé reste
   });
 
+  it('garde le règlement mémorisé d\'un pari déjà enregistré sous un profil retiré, absent de l\'historique publié', () => {
+    const stored = { start: 20, startedAt: '', bets: [bet({ profile: 'exploratoire', autoStatus: 'won' })] };
+    expect(settle(stored, [])[0]).toMatchObject({ status: 'won', net: 1, auto: true });
+    expect(recordAuto(stored, [])).toBeNull();                                   // rien d'effacé
+  });
+
   it('refuse un pari hors des profils validés', () => {
     for (const profile of ['exploratoire', 'ancien', 'inconnu']) expect(addBet(emptyTest(), bet({ profile })).bets).toHaveLength(0);
     for (const profile of ['sur', 'equilibre', 'grosse_cote']) expect(addBet(emptyTest(), bet({ profile })).bets).toHaveLength(1);
