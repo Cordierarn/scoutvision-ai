@@ -3,8 +3,9 @@ Produit Labo paris : suggestions de paris pour l'onglet « Matchs à venir », r
 journal immuable des suggestions publiées et export de l'artefact privé lu par le frontend.
 
   cd scripts
-  python3 -m betting.product replay        rejeu 2026-27 (cotes du dernier relevé avant coup d'envoi, données
-                                           antérieures au match seulement) → bilan par profil, famille, compétition
+  python3 -m betting.product replay [--if-stale]   rejeu 2026-27 (cotes du dernier relevé avant coup d'envoi, données
+                                           antérieures au match seulement) → bilan par profil (les cinq), famille,
+                                           compétition, daté du moteur ; --if-stale : seulement si le moteur a changé
   python3 -m betting.product suggest       suggestions des rencontres à venir (archive des cotes, âge ≤ 2 h),
                                            journal, règlement des suggestions passées
   python3 -m betting.product export        public/data/forecast/suggestions/index.json
@@ -408,28 +409,82 @@ def bankroll_curve(bets: pd.DataFrame, start: float = START_BANKROLL) -> tuple[l
     return curve, bank, drawdown
 
 
+CI_LEVEL = 0.95
+CI_BOOT = 2000
+CI_SEED = 11
+ALL_PROFILES = (*sg.PROFILES, sg.EXPLORE_PROFILE, sg.LEGACY_PROFILE)
+
+
+def cluster_ci(values, groups, level: float = CI_LEVEL, n_boot: int = CI_BOOT, seed: int = CI_SEED) -> tuple[float | None, float | None]:
+    """Intervalle de la moyenne par bootstrap des grappes (`groups`, un match) : les paris d'un même match sont liés (même
+    score), les tirer un par un surestimerait la précision. (None, None) avec moins de deux grappes."""
+    v = np.asarray(values, dtype=float)
+    g = np.asarray(groups)
+    ok = np.isfinite(v)
+    v, g = v[ok], g[ok]
+    keys, inverse = np.unique(g, return_inverse=True)
+    if len(keys) < 2:
+        return None, None
+    sums = np.bincount(inverse, weights=v, minlength=len(keys))
+    counts = np.bincount(inverse, minlength=len(keys)).astype(float)
+    rng = np.random.default_rng(seed)
+    draws = rng.integers(0, len(keys), size=(n_boot, len(keys)))
+    means = sums[draws].sum(axis=1) / counts[draws].sum(axis=1)
+    lo, hi = np.percentile(means, [(1 - level) / 2 * 100, (1 + level) / 2 * 100])
+    return round(float(lo), 4), round(float(hi), 4)
+
+
 def _block(g: pd.DataFrame) -> dict:
     settled = g[g["settled"].notna()]
-    out = {"bets": int(len(g)), "hitRate": round(float((settled["settled"] > 0).mean()), 4) if len(settled) else None,
-           "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None}
+    realised = pd.to_numeric(settled["realised"], errors="coerce")
+    lo, hi = cluster_ci(realised, settled["match_id"]) if len(settled) else (None, None)
+    out = {"bets": int(len(settled)), "matches": int(settled["match_id"].nunique()),
+           "hitRate": round(float((settled["settled"] > 0).mean()), 4) if len(settled) else None,
+           "returnFlat": round(float(realised.mean()), 4) if len(settled) else None, "returnLow": lo, "returnHigh": hi}
     out.update(clv_block(g))
     return out
 
 
 def clv_block(g: pd.DataFrame) -> dict:
-    """CLV moyen et part des paris qui battent la clôture juste, sur les paris où la clôture sharp est connue."""
+    """CLV moyen, intervalle par grappes de match et part des paris qui battent la clôture juste, sur les paris où la
+    clôture sharp est connue."""
     if "clv" not in g:
-        return {"clvBets": 0, "meanClv": None, "clvBeatRate": None}
-    c = pd.to_numeric(g["clv"], errors="coerce").dropna()
-    return {"clvBets": int(len(c)), "meanClv": round(float(c.mean()), 4) if len(c) else None, "clvBeatRate": round(float((c > 0).mean()), 4) if len(c) else None}
+        return {"clvBets": 0, "clvMatches": 0, "meanClv": None, "clvLow": None, "clvHigh": None, "clvBeatRate": None}
+    c = pd.to_numeric(g["clv"], errors="coerce")
+    known = c.notna()
+    lo, hi = cluster_ci(c[known], g.loc[known, "match_id"]) if known.any() else (None, None)
+    c = c[known]
+    return {"clvBets": int(len(c)), "clvMatches": int(g.loc[known, "match_id"].nunique()), "meanClv": round(float(c.mean()), 4) if len(c) else None,
+            "clvLow": lo, "clvHigh": hi, "clvBeatRate": round(float((c > 0).mean()), 4) if len(c) else None}
+
+
+ENGINE_MODULES = ("suggest", "circuit", "sharp", "markets", "simulate", "adjust", "opd", "dependency", "product")
+ENGINE_INPUTS = ("variant.json", "adjustment.json")
+
+
+def engine_fingerprint() -> str:
+    """Empreinte du moteur : sources des modules qui produisent les suggestions et paramètres figés (variante, ajustements).
+    Un bilan calculé par un autre moteur est périmé (`bilan_is_stale`) et le rejeu est relancé."""
+    h = hashlib.sha1()
+    here = Path(__file__).resolve().parent
+    for name in ENGINE_MODULES:
+        h.update((here / f"{name}.py").read_bytes())
+    for name in ENGINE_INPUTS:
+        f = PHASE2 / name
+        h.update(f.read_bytes() if f.exists() else b"-")
+    return h.hexdigest()[:12]
+
+
+def bilan_is_stale(bilan: dict | None) -> bool:
+    return not bilan or bilan.get("engine") != engine_fingerprint()
 
 
 def summarise(tab: pd.DataFrame) -> dict:
-    out = {"start": START_BANKROLL, "profiles": {}}
+    out = {"start": START_BANKROLL, "engine": engine_fingerprint(), "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "profiles": {}}
     if tab.empty:
         tab = pd.DataFrame(columns=["match_id", "competition", "kickoff_utc", "profile", "kind", "rank", "family", "odds", "p", "ev", "stake_fraction", "stake_mode",
                                     "p_sharp", "p_ref", "ev_ref", "clv", "settled", "realised"])
-    for profile in sg.PROFILES:
+    for profile in ALL_PROFILES:
         g = tab[tab["profile"] == profile]
         simple = g[g["kind"] == "simple"]
         curve, final, dd = bankroll_curve(simple)
@@ -438,6 +493,34 @@ def summarise(tab: pd.DataFrame) -> dict:
                                     "byFamily": {f: _block(gg) for f, gg in simple.groupby("family")},
                                     "byCompetition": {c: _block(gg) for c, gg in simple.groupby("competition")}}
     return out
+
+
+def playable(journal: pd.DataFrame) -> pd.DataFrame:
+    """Paris jouables du journal : pour chaque match et profil, la dernière publication strictement avant le coup d'envoi
+    (celle que l'on pouvait jouer). Les republications antérieures et les publications d'après le coup d'envoi ne sont
+    pas des paris : les compter gonflerait les effectifs et biaiserait le rendement."""
+    if journal.empty:
+        return journal
+    j = journal[journal["kind"] == "simple"] if "kind" in journal else journal
+    kick = pd.to_datetime(j["kickoff_utc"], utc=True, format="ISO8601")
+    pub = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
+    j = j[pub < kick]
+    if j.empty:
+        return j
+    pub = pd.to_datetime(j["published_at"], utc=True, format="ISO8601")
+    return j[pub == pub.groupby([j["match_id"], j["profile"]]).transform("max")]
+
+
+def journal_summary(journal: pd.DataFrame) -> dict:
+    """Résumé du journal sur les seuls paris jouables (`playable`) : par profil, paris réglés, réussite, rendement à mise
+    fixe et CLV avec intervalle par grappes de match, effet « cote du matin »."""
+    play = playable(journal)
+    settled = play[play["settled"].notna()]
+    by = {}
+    for profile, g in play.groupby("profile"):
+        b = _block(g)
+        by[profile] = {**b, **early_block(g)}
+    return {"published": int(len(journal)), "playable": int(len(play)), "settled": int(len(settled)), "byProfile": by}
 
 
 # ----- rencontres à venir, journal, export -----
@@ -768,11 +851,7 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     for col in JOURNAL_COLUMNS:
         if col not in journal.columns:
             journal[col] = None
-    settled = journal[journal["settled"].notna()]
-    js = {"published": int(len(journal)), "settled": int(len(settled)),
-          "byProfile": {p: {"bets": int(len(g)), "hitRate": round(float((g["settled"] > 0).mean()), 4) if len(g) else None, "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None,
-                            **clv_block(journal[journal["profile"] == p]), **early_block(journal[journal["profile"] == p])}
-                        for p, g in settled.groupby("profile")}}
+    js = journal_summary(journal)
     results = load_results()
     names = match_names(results)
     evenings_path = RESEARCH / "product" / "evenings.json"
@@ -783,7 +862,8 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
             profit = e.get("profit")
             cumul += profit or 0.0
             evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
-                             "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")), "details": evening_details(e, names)})
+                             "bankroll": e.get("bankroll"), "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")),
+                             "details": evening_details(e, names)})
     payload = {"schemaVersion": "1.1.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
                "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in (*sg.PROFILES, sg.EXPLORE_PROFILE, sg.LEGACY_PROFILE)], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
                "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kappa": circuit.KAPPA, "capPerBet": circuit.CAP_PER_BET,
@@ -805,13 +885,19 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("cmd", choices=["replay", "suggest", "export", "all"])
+    parser.add_argument("--if-stale", action="store_true", help="replay : seulement si le bilan manque ou vient d'un autre moteur (engine_fingerprint)")
     args = parser.parse_args(argv)
     now = dt.datetime.now(dt.timezone.utc)
     if args.cmd in ("replay", "all"):
-        b = replay()
-        for p, v in b["profiles"].items():
-            o = v["overall"]
-            print(f"{sg.PROFILE_LABELS[p]:12s} paris {o['bets']:5d} réussite {o['hitRate']} rendement {o['returnFlat']} bankroll finale {o['finalBankroll']} creux {o['maxDrawdown']}")
+        current = json.loads(BILAN.read_text(encoding="utf-8")) if BILAN.exists() else None
+        if args.if_stale and not bilan_is_stale(current):
+            print(f"Bilan à jour (moteur {current['engine']}) : rejeu non relancé")
+        else:
+            b = replay()
+            for p, v in b["profiles"].items():
+                o = v["overall"]
+                print(f"{sg.PROFILE_LABELS[p]:14s} paris {o['bets']:5d} réussite {o['hitRate']} rendement {o['returnFlat']} [{o['returnLow']} ; {o['returnHigh']}] "
+                      f"CLV {o['meanClv']} sur {o['clvBets']} bankroll finale {o['finalBankroll']} creux {o['maxDrawdown']}")
     if args.cmd in ("suggest", "export", "all"):
         entries = upcoming_suggestions(now)
         snaps = pd.concat([pd.read_parquet(p) for c in COMPETITIONS for p in sorted((RESEARCH / "odds" / c).glob("*.parquet"))], ignore_index=True)

@@ -7,6 +7,7 @@ Tests du lecteur de résultats web (scripts/betting/results_web.py) et de l'hist
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import tempfile
 import unittest
@@ -240,6 +241,38 @@ class EveningTests(unittest.TestCase):
         finally:
             product.load_results = original
         self.assertEqual(s["m1"]["ft"], [2, 0]); self.assertIsNone(s["m1"]["ht"]); self.assertIsNone(s["m1"]["first_goal"])
+
+
+    def test_rebuilt_evenings_stake_the_running_bankroll_and_never_more(self):
+        from betting import product
+        with tempfile.TemporaryDirectory() as tmp:
+            evening.EVENINGS = Path(tmp) / "evenings.json"
+            under = {"market_type": "totals", "handicap": 2.5, "outcome": "Under"}
+            manual = [{"match": "mx", "label": "U2,5", "spec": under, "odds": 2.0, "stake": 5}]
+            evening.add("2026-11-01", manual)                                       # soirée saisie à la main : jamais touchée
+            evening.settle("2026-11-01", {"mx": {"ft": [0, 0], "ht": [0, 0], "first_goal": "none", "last_goal": "none"}})
+            bets = {"2026-11-02": [{"match": f"a{i}", "match_id": f"a{i}", "label": "U2,5", "spec": under, "odds": 2.0, "fraction": 0.3, "suggestion_id": f"s{i}"} for i in range(5)],
+                    "2026-11-03": [{"match": "b0", "match_id": "b0", "label": "U2,5", "spec": under, "odds": 2.0, "fraction": 0.1, "suggestion_id": "t0"}]}
+            scores = {"2026-11-02": {f"a{i}": {"ft": [3, 0] if i else [0, 0], "ht": [1, 0], "first_goal": "home", "last_goal": "home"} for i in range(5)},
+                      "2026-11-03": {"b0": {"ft": [0, 0], "ht": [0, 0], "first_goal": "none", "last_goal": "none"}}}
+            originals = (evening.journal_bets, evening.scores_from_results)
+            evening.journal_bets = lambda profile: bets
+            evening.scores_from_results = lambda d: scores.get(d, {})
+            try:
+                first = evening.rebuild(today=dt.date(2026, 11, 4), bankroll=100.0)
+                again = evening.rebuild(today=dt.date(2026, 11, 4), bankroll=100.0)
+            finally:
+                evening.journal_bets, evening.scores_from_results = originals
+            data = evening.load()["evenings"]
+            self.assertEqual([e["date"] for e in data], ["2026-11-01", "2026-11-02", "2026-11-03"])
+            self.assertEqual(data[0]["bets"][0]["stake"], 5)                         # manuelle : inchangée
+            e2, e3 = data[1], data[2]
+            self.assertEqual(e2["bankroll"], 105.0)                                   # 100 + gain de la soirée manuelle
+            self.assertAlmostEqual(sum(b["stake"] for b in e2["bets"]), 105.0, places=1)   # 5 × 30 % = 150 % : ramené à la bankroll
+            self.assertLessEqual(sum(b["stake"] for b in e2["bets"]), 105.0)
+            self.assertEqual(e3["bankroll"], round(105.0 + e2["profit"], 2))
+            self.assertEqual(e3["bets"][0]["stake"], round(0.1 * e3["bankroll"], 2))
+            self.assertEqual(first, again)
 
 
 if __name__ == "__main__":

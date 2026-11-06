@@ -271,5 +271,56 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual((combo["label"], combo["legs"], combo["odds"], combo["status"]), ("x + y", 2, 3.0, "pending"))
 
 
+
+class MeasureTests(unittest.TestCase):
+    """Mesure : paris jouables seulement, intervalles par grappes de match, bilan daté du moteur."""
+
+    def row(self, mid, profile, published, kick, settled=None, realised=None, clv=None, rank=1, sid=None):
+        return {"suggestion_id": sid or f"{mid}{profile}{rank}{published}", "published_at": published.isoformat(), "match_id": mid, "fixture_id": "f" + mid, "competition": "AAA",
+                "kickoff_utc": kick.isoformat(), "profile": profile, "rank": rank, "kind": "simple", "market_id": 101, "outcome_id": 101, "family": "résultat",
+                "label": "Club A gagne", "odds": 2.0, "odds_at": published.isoformat(), "p": 0.5, "ev": 0.0, "stake_fraction": 0.02, "stake_mode": "fixed",
+                "settled": settled, "realised": realised, "settled_at": None, "clv": clv, "closing_odds": None}
+
+    def test_summary_counts_each_playable_bet_once(self):
+        # republiée trois fois avant le coup d'envoi, puis une fois après : un seul pari jouable, la dernière publication d'avant
+        rows = [self.row("m1", "sur", NOW - dt.timedelta(hours=h), KO, settled=1.0, realised=1.0) for h in (6, 3, 1)]
+        rows.append(self.row("m1", "sur", KO + dt.timedelta(minutes=30), KO, settled=0.0, realised=-1.0))
+        rows.append(self.row("m2", "sur", NOW, KO, settled=0.0, realised=-1.0))
+        rows.append(self.row("m3", "sur", NOW, KO))                                   # en attente
+        out = product.journal_summary(pd.DataFrame(rows))
+        sur = out["byProfile"]["sur"]
+        self.assertEqual((out["published"], out["playable"], out["settled"]), (6, 3, 2))
+        self.assertEqual(sur["bets"], 2); self.assertAlmostEqual(sur["returnFlat"], 0.0); self.assertEqual(sur["hitRate"], 0.5)
+        self.assertEqual(sur["matches"], 2)
+
+    def test_cluster_interval_resamples_matches_not_bets(self):
+        values = np.array([1.0] * 10 + [-1.0] * 10)
+        one_match = product.cluster_ci(values, np.array(["a"] * 10 + ["b"] * 10))
+        many = product.cluster_ci(values, np.arange(20).astype(str))
+        self.assertGreater(one_match[1] - one_match[0], many[1] - many[0])         # deux matchs : bien moins d'information que vingt
+        self.assertEqual(product.cluster_ci(values, np.arange(20).astype(str)), many)   # graine fixe
+        self.assertEqual(product.cluster_ci(np.array([0.1]), np.array(["a"])), (None, None))
+
+    def test_clv_block_has_a_match_cluster_interval_on_playable_bets(self):
+        rows = [self.row(f"m{i}", "exploratoire", NOW, KO, clv=c) for i, c in enumerate([-0.12, -0.10, -0.09, -0.11])]
+        rows.append(self.row("m0", "exploratoire", NOW - dt.timedelta(hours=2), KO, clv=0.5))   # republication remplacée : ignorée
+        b = product.journal_summary(pd.DataFrame(rows))["byProfile"]["exploratoire"]
+        self.assertEqual(b["clvBets"], 4); self.assertAlmostEqual(b["meanClv"], -0.105)
+        self.assertLess(b["clvHigh"], 0); self.assertLess(b["clvLow"], b["meanClv"]); self.assertEqual(b["clvMatches"], 4)
+
+    def test_bilan_covers_every_profile_and_records_the_engine(self):
+        tab = pd.DataFrame([{"match_id": f"m{i}", "competition": "AAA", "kickoff_utc": KO + dt.timedelta(days=i), "profile": p, "kind": "simple", "rank": 1, "family": "résultat",
+                             "odds": 2.0, "p": 0.5, "ev": 0.0, "stake_fraction": 0.01, "stake_mode": "fixed", "p_sharp": None, "p_ref": None, "ev_ref": None,
+                             "clv": None, "settled": 1.0, "realised": 1.0} for i in range(3) for p in ("sur", "exploratoire", "ancien")])
+        b = product.summarise(tab)
+        self.assertEqual(set(b["profiles"]), {"sur", "equilibre", "grosse_cote", "exploratoire", "ancien"})
+        self.assertEqual(b["profiles"]["ancien"]["overall"]["bets"], 3)
+        self.assertEqual(b["engine"], product.engine_fingerprint())
+        self.assertIn("returnLow", b["profiles"]["sur"]["overall"])
+        self.assertFalse(product.bilan_is_stale(b))
+        self.assertTrue(product.bilan_is_stale({**b, "engine": "ancien"}))
+        self.assertTrue(product.bilan_is_stale(None))
+
+
 if __name__ == "__main__":
     unittest.main()

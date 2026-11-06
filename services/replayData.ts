@@ -152,9 +152,10 @@ export interface SuggestionMatch {
   profiles?: Partial<Record<SuggestionProfile, { suggestions: Suggestion[]; combo: SuggestionCombo | null }>>;
   noBet?: NoBet | null; sharpCoverage?: number | null; teams?: { home: TeamFlags; away: TeamFlags };
 }
-/** CLV : part des paris où la clôture sharp est connue, CLV moyen et part des paris qui la battent. */
-export interface ClvBlock { clvBets?: number; meanClv?: number | null; clvBeatRate?: number | null }
-export interface BilanBlock extends ClvBlock { bets: number; hitRate: number | null; returnFlat: number | null }
+/** CLV : part des paris où la clôture sharp est connue, CLV moyen (intervalle à 95 % par grappes de match) et part des paris qui la battent. */
+export interface ClvBlock { clvBets?: number; clvMatches?: number; meanClv?: number | null; clvLow?: number | null; clvHigh?: number | null; clvBeatRate?: number | null }
+/** Paris réglés (jouables seulement pour le journal), rendement à mise fixe et intervalle à 95 % par grappes de match. */
+export interface BilanBlock extends ClvBlock { bets: number; matches?: number; hitRate: number | null; returnFlat: number | null; returnLow?: number | null; returnHigh?: number | null }
 export interface BilanProfile {
   overall: BilanBlock & { finalBankroll: number; maxDrawdown: number; curve: { date: string; bankroll: number }[] };
   combos: BilanBlock; byFamily: Record<string, BilanBlock>; byCompetition: Record<string, BilanBlock>;
@@ -170,18 +171,18 @@ export interface SuggestionsIndex {
   reference?: { bookmakers: string[]; method: string; poolWeights: Record<string, number>; calibrationMargins?: Record<string, number>; blockLabels: Record<string, string>; warningLabels: Record<string, string> };
   matches: SuggestionMatch[];
   exploreCombos?: { date: string; combos: ExploreDayCombo[] }[];
-  bilan: { start: number; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
-  journal: { published: number; settled: number; byProfile: Record<string, BilanBlock & { closeBets?: number; earlyEdge?: number | null; oddsDroppedRate?: number | null }> };
+  bilan: { start: number; engine?: string; generatedAt?: string; profiles: Partial<Record<SuggestionProfile, BilanProfile>> } | null;
+  journal: { published: number; playable?: number; settled: number; byProfile: Record<string, BilanBlock & { closeBets?: number; earlyEdge?: number | null; oddsDroppedRate?: number | null }> };
   evenings?: EveningSummary[];
   history?: HistoryDay[];
   comboHistory?: ComboHistoryEntry[];
 }
 /** Statut d'un pari réglé sur le score réel (demi-gains et remboursements des handicaps asiatiques). */
 export type BetStatus = 'won' | 'lost' | 'void' | 'half_won' | 'half_lost' | 'pending';
-/** Pari d'une soirée suivie (profil Équilibré, mises sur 300 €) ; `legs` > 0 pour un combiné. */
+/** Pari d'une soirée suivie (profil Équilibré, mises sur la bankroll courante, plafonnées) ; `legs` > 0 pour un combiné. */
 export interface EveningBet { match: string; label: string; legs: number; odds: number; stake: number; status: BetStatus; profit: number | null }
 export interface EveningSummary {
-  date: string; bets: number; won: number; stake: number; profit: number | null; cumulative: number; settled: boolean; details?: EveningBet[];
+  date: string; bets: number; won: number; stake: number; bankroll?: number | null; profit: number | null; cumulative: number; settled: boolean; details?: EveningBet[];
 }
 /** Suggestion publiée avant le coup d'envoi (dernière publication), avec son règlement ; `realised` pour 1 € misé. */
 export interface HistoryBet {

@@ -3,17 +3,18 @@ Historique des soirées : les paris recommandés chaque soir, réglés sur les s
 
   cd scripts
   python3 -m betting.evening add --date 2026-11-02 --bets bets.json      enregistre les paris du soir (figés)
-  python3 -m betting.evening auto --date 2026-11-02 [--profile equilibre] [--bankroll 300]
-                                                                       paris du soir lus dans le journal des suggestions
-                                                                       (dernière publication avant le coup d'envoi de chaque match)
+  python3 -m betting.evening rebuild [--profile equilibre] [--bankroll 300]
+                                                                       soirées reconstruites depuis le journal des suggestions
+                                                                       (dernière publication avant le coup d'envoi de chaque
+                                                                       match), mises sur la bankroll courante, plafonnées
   python3 -m betting.evening settle --date 2026-11-02 [--scores scores.json]
                                                                        règle la soirée : scores fournis, sinon résultats
                                                                        PitchAPI + web (results_web) par identifiant de match
   python3 -m betting.evening settle --pending                          règle à nouveau les soirées des 7 derniers jours (scores corrigés compris)
   python3 -m betting.evening show                                      tableau des soirées et cumul
 
-Fichiers (hors Git) : `.research/betting/product/evenings.json`. Un pari enregistré n'est jamais modifié ;
-le règlement suit `markets.settle` (remboursements, demi-gains). Un combiné est réglé sélection par
+Fichiers (hors Git) : `.research/betting/product/evenings.json`. Une soirée saisie à la main n'est jamais modifiée ;
+une soirée reconstruite depuis le journal (immuable) en est une projection, recalculée à chaque passage ; le règlement suit `markets.settle` (remboursements, demi-gains). Un combiné est réglé sélection par
 sélection : une perdue → perdu ; une remboursée → sa cote est retirée.
 
 `bets.json` : liste de {"match": "...", "label": "...", "spec": {market_type, period, handicap, outcome},
@@ -27,6 +28,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -107,24 +109,76 @@ def _settle_bet(b: dict, scores: dict):
     return label, round(b["stake"] * mk.realised_return(x, float(b["odds"])), 2)
 
 
-def auto_bets(date: str, profile: str = "equilibre", bankroll: float = 300.0) -> list[dict]:
-    """Paris de la soirée depuis le journal : pour chaque match du jour, la dernière publication avant le coup
-    d'envoi, profil choisi, mise = fraction publiée × bankroll (arrondie au centime)."""
+START_BANKROLL = 300.0
+
+
+def journal_bets(profile: str = "equilibre") -> dict[str, list[dict]]:
+    """Paris de chaque soirée (date UTC du coup d'envoi) depuis le journal : pour chaque match, la dernière publication du
+    profil avant le coup d'envoi, avec sa fraction de mise publiée."""
     from .catalogue import load as load_catalogue
     from .product import JOURNAL
     if not JOURNAL.exists():
-        return []
+        return {}
     cat = load_catalogue()
     j = pd.read_parquet(JOURNAL)
-    j = j[(j["profile"] == profile) & (j["kickoff_utc"].astype(str).str.startswith(date)) & (j["published_at"] < j["kickoff_utc"])]
-    bets = []
+    j = j[(j["profile"] == profile) & (j["kind"] == "simple") & (j["published_at"] < j["kickoff_utc"])]
+    out: dict[str, list[dict]] = {}
     for match_id, g in j.groupby("match_id"):
         last = g[g["published_at"] == g["published_at"].max()].sort_values("rank")
         for r in last.itertuples(index=False):
             spec = cat[int(r.market_id)].spec(int(r.outcome_id))
-            bets.append({"match": match_id, "match_id": match_id, "label": r.label, "spec": {"market_type": spec.market_type, "period": spec.period, "handicap": spec.handicap, "outcome": spec.outcome},
-                         "odds": float(r.odds), "stake": round(bankroll * float(r.stake_fraction), 2), "suggestion_id": r.suggestion_id})
-    return bets
+            out.setdefault(str(r.kickoff_utc)[:10], []).append({
+                "match": match_id, "match_id": match_id, "label": r.label, "odds": float(r.odds), "fraction": float(r.stake_fraction), "suggestion_id": r.suggestion_id,
+                "spec": {"market_type": spec.market_type, "period": spec.period, "handicap": spec.handicap, "outcome": spec.outcome}})
+    return out
+
+
+def is_auto(ev: dict) -> bool:
+    """Soirée produite à partir du journal (chaque pari porte son identifiant de suggestion), par opposition à une soirée
+    saisie à la main (`add`), qui n'est jamais modifiée."""
+    return bool(ev.get("bets")) and all(b.get("suggestion_id") for b in ev["bets"])
+
+
+def capped_stakes(fractions: list[float], bankroll: float) -> list[float]:
+    """Mises d'une soirée : fraction publiée × bankroll courante, ramenées proportionnellement à la bankroll si leur somme
+    la dépasse (arrondi au centime par défaut : la somme ne dépasse jamais la bankroll)."""
+    if bankroll <= 0:
+        return [0.0 for _ in fractions]
+    stakes = [round(bankroll * f, 2) for f in fractions]
+    total = sum(stakes)
+    if total > bankroll:
+        stakes = [math.floor(s * bankroll / total * 100) / 100 for s in stakes]
+    return stakes
+
+
+def rebuild(today: dt.date, profile: str = "equilibre", bankroll: float = START_BANKROLL) -> list[dict]:
+    """Soirées suivies, reconstruites à partir du journal (immuable) jusqu'à la veille de `today` : chaque soirée mise sur la
+    bankroll courante (départ + gains nets des soirées précédentes, manuelles comprises), jamais plus que cette bankroll,
+    puis est réglée sur les scores connus. Une soirée est une projection du journal : la reconstruire est idempotent, et
+    un règlement corrigé ou une règle de mise corrigée s'y propagent. Les soirées saisies à la main ne changent pas."""
+    data = load()
+    existing = {e["date"]: e for e in data["evenings"]}
+    by_date = {d: bets for d, bets in journal_bets(profile).items() if dt.date.fromisoformat(d) < today}
+    dates = sorted(set(by_date) | {d for d, e in existing.items() if not is_auto(e)})
+    out, bank = [], bankroll
+    for d in dates:
+        if d in existing and not is_auto(existing[d]):
+            ev = existing[d]
+        else:
+            fractions = [b["fraction"] for b in by_date[d]]
+            bets = [{**b, "stake": s, "result": None, "profit": None} for b, s in zip(by_date[d], capped_stakes(fractions, bank))]
+            ev = {"date": d, "recorded_at": existing.get(d, {}).get("recorded_at") or dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                  "profile": profile, "bankroll": round(bank, 2), "bets": bets, "settled": False}
+            scores: dict = {}
+            d0 = dt.date.fromisoformat(d)
+            for k in range((today - d0).days + 1):
+                scores.update(scores_from_results((d0 + dt.timedelta(days=k)).isoformat()))
+            _settle_evening(ev, scores)
+        out.append(ev)
+        bank = round(bank + (ev.get("profit") or 0.0), 2)
+    data["evenings"] = out
+    save(data)
+    return out
 
 
 def scores_from_results(date: str) -> dict:
@@ -141,15 +195,7 @@ def scores_from_results(date: str) -> dict:
     return out
 
 
-def settle(date: str, scores: dict) -> dict | None:
-    """Règle (ou règle à nouveau) chaque pari de la soirée dont les scores sont connus : un règlement fait sur un score
-    corrigé depuis est remplacé, un pari dont la mi-temps est inconnue repasse en attente. Un pari sans score garde son
-    règlement."""
-    data = load()
-    ev = next((e for e in data["evenings"] if e["date"] == date), None)
-    if ev is None:
-        print(f"Aucune soirée {date} : rien à régler.")
-        return None
+def _settle_evening(ev: dict, scores: dict) -> dict:
     for b in ev["bets"]:
         out = settle_bet(b, scores)
         if out is MISSING_SCORE:
@@ -160,6 +206,19 @@ def settle(date: str, scores: dict) -> dict | None:
     ev["stake"] = round(sum(b["stake"] for b in ev["bets"]), 2)
     ev["profit"] = round(sum(b["profit"] for b in ev["bets"] if b["profit"] is not None), 2)
     ev["won"] = sum(1 for b in ev["bets"] if b["result"] in ("gagné", "moitié gagnée"))
+    return ev
+
+
+def settle(date: str, scores: dict) -> dict | None:
+    """Règle (ou règle à nouveau) chaque pari de la soirée dont les scores sont connus : un règlement fait sur un score
+    corrigé depuis est remplacé, un pari dont la mi-temps est inconnue repasse en attente. Un pari sans score garde son
+    règlement."""
+    data = load()
+    ev = next((e for e in data["evenings"] if e["date"] == date), None)
+    if ev is None:
+        print(f"Aucune soirée {date} : rien à régler.")
+        return None
+    _settle_evening(ev, scores)
     save(data)
     return ev
 
@@ -196,22 +255,17 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add"); a.add_argument("--date", required=True); a.add_argument("--bets", type=Path, required=True)
-    au = sub.add_parser("auto"); au.add_argument("--date", required=True); au.add_argument("--profile", default="equilibre"); au.add_argument("--bankroll", type=float, default=300.0)
+    au = sub.add_parser("rebuild"); au.add_argument("--profile", default="equilibre"); au.add_argument("--bankroll", type=float, default=START_BANKROLL)
     s = sub.add_parser("settle"); s.add_argument("--date"); s.add_argument("--scores", type=Path); s.add_argument("--pending", action="store_true")
     sub.add_parser("show")
     args = p.parse_args(argv)
     if args.cmd == "add":
         e = add(args.date, json.loads(args.bets.read_text(encoding="utf-8")))
         print(f"{len(e['bets'])} paris enregistrés pour {args.date}, misé {sum(b['stake'] for b in e['bets']):.2f} €")
-    elif args.cmd == "auto":
-        bets = auto_bets(args.date, args.profile, args.bankroll)
-        if not bets:
-            print(f"Aucune suggestion publiée avant coup d'envoi pour {args.date} (profil {args.profile}).")
-        elif any(ev["date"] == args.date for ev in load()["evenings"]):
-            print(f"Soirée {args.date} déjà enregistrée : inchangée.")
-        else:
-            e = add(args.date, bets)
-            print(f"{len(e['bets'])} paris enregistrés pour {args.date} depuis le journal, misé {sum(b['stake'] for b in e['bets']):.2f} €")
+    elif args.cmd == "rebuild":
+        evs = rebuild(dt.datetime.now(dt.timezone.utc).date(), args.profile, args.bankroll)
+        auto = [e for e in evs if is_auto(e)]
+        print(f"{len(auto)} soirée(s) reconstruites depuis le journal (profil {args.profile}, bankroll de départ {args.bankroll:.2f} €, mises plafonnées à la bankroll courante)")
     elif args.cmd == "settle" and args.pending:
         for e in settle_pending(dt.datetime.now(dt.timezone.utc).date()):
             print(f"Soirée {e['date']} : gain net {e['profit']:+.2f} €, {e['won']} gagnés sur {len(e['bets'])}{'' if e['settled'] else ' (scores manquants)'}")

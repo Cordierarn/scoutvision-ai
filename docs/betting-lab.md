@@ -197,10 +197,16 @@ Gains réels mais faibles : l'essentiel de l'information est déjà dans la base
 - Raisons : forme à domicile / à l'extérieur sur 5 matchs, buts attendus du modèle, confrontations
   directes, part de 1re mi-temps pour les marchés de mi-temps.
 - Rejeu 2026-27 (`product replay`) : prévisions figées, features point-in-time, dernier relevé avant le
-  coup d'envoi, bankroll de 300 € par profil misée sur la bankroll courante, arrondie au centime.
+  coup d'envoi, bankroll de 300 € par profil misée sur la bankroll courante, arrondie au centime. Depuis l'audit du
+  6 novembre 2026, le bilan couvre les cinq profils, porte l'empreinte du moteur qui l'a calculé (`engine`, sources
+  des modules et paramètres figés) et est recalculé dès qu'elle change (`replay --if-stale`) : un bilan d'un ancien
+  moteur n'est plus affiché comme celui du moteur courant. Rendement et CLV ont un intervalle à 95 % par bootstrap des
+  matchs (`cluster_ci`, `returnLow`/`returnHigh`, `clvLow`/`clvHigh`) : les paris d'un même match sont liés.
 - Journal (`.research/betting/journal/suggestions.parquet`) : chaque suggestion publiée est enregistrée
   avec l'horodatage du relevé et n'est jamais réécrite ; réglée après le match (remboursements et
-  demi-gains compris).
+  demi-gains compris). Le résumé exporté (`journal`, `product.journal_summary`) ne compte que les **paris jouables**
+  (`product.playable`) : pour chaque match et profil, la dernière publication avant le coup d'envoi ; les
+  republications d'une même sélection et les publications d'après le coup d'envoi ne sont pas des paris.
 - Export `public/data/forecast/suggestions/index.json` (artefact privé) : rencontres à venir, profils,
   bilan du rejeu, résumé du journal.
 
@@ -253,9 +259,12 @@ encre neutre.
 - **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
   (`betting/results_web.py`, sans clé ; voir « Règlement depuis ESPN » plus bas), fusionnés aux
   résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis
-  `betting.evening auto` enregistre les paris de la veille (dernière publication du profil Équilibré avant
-  chaque coup d'envoi, mise = fraction × 300 €) et `betting.evening settle` les règle ; `evening show`
-  donne le tableau soirée par soirée avec le cumul.
+  `betting.evening rebuild` reconstruit les soirées depuis le journal (dernière publication du profil Équilibré
+  avant chaque coup d'envoi) : chaque soirée mise la fraction publiée de la **bankroll courante** (300 € au départ,
+  plus les gains nets des soirées précédentes), et jamais plus que cette bankroll (mises ramenées
+  proportionnellement), puis est réglée ; `evening show` donne le tableau soirée par soirée avec le cumul. Avant
+  l'audit du 6 novembre 2026, chaque soirée misait la fraction de 300 € sans plafond : la somme des mises d'un soir
+  dépassait plusieurs fois la bankroll et le cumul affiché n'était pas jouable.
 - Publication : archive du Labo (odds, vues, journal, historique des soirées, phase 2, résultats) dans la
   release privée `betting-odds` ; artefact des suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
 - Premier passage : l'archive de cotes se reconstitue par lots de 400 matchs par passage (non décomptés) ;
@@ -346,9 +355,9 @@ sélections validées, sur p_ref.
 
 - Journal : chaque suggestion publiée porte p_sharp, p_ref, espérance de référence, poids du pool,
   bookmaker de référence ; après le coup d'envoi, `closing_p_sharp` (dernier marché complet avant le coup
-  d'envoi, sans borne d'âge) et `clv = cote prise × p_clôture − 1`. Le rejeu et le résumé du journal donnent
-  le CLV moyen et la part des paris qui battent la clôture (Buchdahl : le CLV juge une sélection bien plus
-  vite que le résultat, bruité par le hasard).
+  d'envoi, sans borne d'âge) et `clv = cote prise × p_clôture − 1`. Le rejeu et le résumé du journal (paris
+  jouables seulement) donnent le CLV moyen avec son intervalle par grappes de match et la part des paris qui
+  battent la clôture (Buchdahl : le CLV juge une sélection bien plus vite que le résultat, bruité par le hasard).
 - Export : `pSharp`, `pRef`, `evRef`, `poolW`, `sharpBookmaker`, `warnings`, `verdict` par suggestion ;
   `noBet` par match (meilleure idée du moteur et motifs du refus), `sharpCoverage`, `teams` (OPD,
   dépendance) ; `rules` et `reference` (bookmakers, méthode, poids, libellés) ; `schemaVersion` 1.1.0.
@@ -671,7 +680,8 @@ handicaps asiatiques, match reporté, combinés).
 
 Ce qui a été suggéré et ce que cela a donné, lu dans l'export (`history`, `evenings[].details`) :
 
-- **Soirées suivies** : profil Équilibré, mises du moteur sur 300 € ; chaque soirée se déplie pari par pari
+- **Soirées suivies** : profil Équilibré, mises du moteur sur la bankroll courante, plafonnées à cette bankroll
+  (`evening.rebuild`, bankroll de chaque soirée exportée en `bankroll`) ; chaque soirée se déplie pari par pari
   (match, sélection, cote, mise, résultat, net), combinés compris ; gagnés et en attente comptés pari par pari.
 - **Suggestions publiées et résultats** : 14 derniers jours, matchs commencés ; pour chaque match et profil,
   la dernière publication avant le coup d'envoi (`product.history`), réglée sur le score réel au passage du
