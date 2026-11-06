@@ -49,7 +49,7 @@ explicitement demandée. Liste à jour : [`.claude/skills/frontend-quality/SKILL
 | `server/` | Serveur privé (session, `/data`, `/cdn`, `/api/*`), fonctions IA (Claude en tête, Gemini en secours) |
 | `scripts/` | Pipeline Python : `prepare_data.py`, `models.py`, `lab.py`, `backtest/` (prévisions), `betting/` (Labo paris), `tests/` (unittest) |
 | `docs/` | Méthodologie, modèles, déploiement, Labo paris |
-| `.github/workflows/` | Données (lundi et vendredi), cotes de recherche, cycle quotidien du Labo paris |
+| `.github/workflows/` | Données (lundi et vendredi), cotes de recherche, cycle quotidien du Labo paris, `ci.yml` (types, Vitest, build et unittest à chaque PR) |
 
 ## Commandes
 
