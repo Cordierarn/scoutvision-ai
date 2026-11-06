@@ -26,6 +26,9 @@
 Le Labo paris n'a pas encore suivi la méthode complète (audit, fermeture, gel) : c'est la prochaine étape
 avant de le considérer comme stable.
 
+Audit du Labo paris (6 novembre) : règlement des mi-temps et clôture faussés, aucune preuve d'avantage à ce stade ;
+décision de suite après re-mesure.
+
 ## Décisions
 
 | Date | Décision | Raison |
