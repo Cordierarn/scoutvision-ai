@@ -72,7 +72,7 @@ Besoin mensuel Big 5 décompté : 150 relevés quotidiens et 3 fenêtres de fixt
 Rattrapage initial (2 novembre 2026) : 447 matchs terminés de 2026-27, 9,1 millions de relevés, 23 Mo
 en parquet, 58 à 98 marchés par match, médiane 20 000 relevés par match ; vues dérivées sur 103 870
 lignes avec H−1 disponible à 99,5 % (manque surtout sur les scores exacts par équipe, 7,7 %) ;
-appariement avec PitchAPI 447/447 après deux alias saisis à la main (Bilbao, Cologne).
+appariement avec PitchAPI 447/447 après deux alias saisis à la main (deux clubs dont le nom OddsPapi diffère du nom PitchAPI).
 Deux processus ne doivent jamais écrire l'archive en même temps (verrou `.research/betting/.lock`).
 
 Tests sans réseau (`npm run test:data`) : `scripts/tests/test_betting_client.py`, `test_betting_archive.py`,
@@ -281,7 +281,8 @@ vivent dans le code Python ; le LLM ne fait que commenter. Plan en quatre étape
   appariées sur 126 (les autres sont au-delà de la fenêtre OddsPapi, plus quelques noms non reconnus).
   Appariement des rencontres : même compétition, coup d'envoi à ± 2 h, les deux noms similaires (seuil
   0,5) ; sinon un seul côté sûr (≥ 0,8) qui ne désigne qu'une rencontre du créneau suffit et l'autre nom
-  est appris dans `aliases_theoddsapi.json` (Red Star Belgrade → nom OddsPapi, Köln / Cologne…) ; deux
+  est appris dans `aliases_theoddsapi.json` (nom anglais d'un club serbe → nom OddsPapi, nom allemand / français
+  d'un club allemand…) ; deux
   rencontres désignées = aucun appariement, jamais le plus proche.
   Un plan OddsPapi incluant Pinnacle suffirait à revenir à une seule source (`BOOKMAKERS`).
 - **Devigging.** Méthode de Shin (part de parieurs informés z, marge plus lourde sur les outsiders),

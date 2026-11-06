@@ -20,15 +20,15 @@ contract end, expected decline and lack of cover are flagged.
   after merging duplicated slots). Team Analysis still shows the most used formation as it is
   (e.g. *3-2-4-1 · 7 matchs · Incomplète*); when it has slots without coordinates, Recruitment
   falls back to the next one and says so (*Formation 3-2-4-1 insuffisamment renseignée. Analyse
-  des besoins basée sur 4-1-4-1.*). Measured: one team-season per season at most (Crvena Zvezda
-  2026-27, Radnički Niš 2024-25). In both cases the SRB player rows of that team all carry
+  des besoins basée sur 4-1-4-1.*). Measured: one team-season per season at most (one SRB club in
+  2026-27, another in 2024-25). In both cases the SRB player rows of that team all carry
   `Position = GK` (percentiles computed among goalkeepers): the needs of the outfield slots are
   shown as *à évaluer* with a data warning, never computed from goalkeeper percentiles.
 - **Position data check** (`checkPositionData`): on the complete formations, each starter with
   data is compared with his slot; only a goalkeeper on an outfield slot (or the reverse) counts,
   never a wing-back, winger or midfield gap. Two contradictions or more flag the team-season as
   *postes probablement incohérents*. Measured on 1,934 team-seasons: 0 contradiction everywhere
-  except Radnički Niš 2024-25 (17 of 21) and Crvena Zvezda 2026-27 (15 of 17). The check only
+  except two SRB team-seasons (17 of 21 starters in 2024-25, 15 of 17 in 2026-27). The check only
   warns: positions are never corrected and no percentile is recomputed with an invented position;
   the fix belongs to the pipeline.
 - **Position searched**: the starter's registered position, except when he is manifestly out of
