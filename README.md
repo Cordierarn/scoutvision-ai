@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.svg" width="160" alt="ScoutVision logo"/>
+<img src="public/logo.svg" width="160" alt="ScoutVision logo"/>
 
 # SCOUTVISION
 
