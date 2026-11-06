@@ -243,20 +243,28 @@ encre neutre.
 
 ### Cycle quotidien (`.github/workflows/betting-odds.yml`, actif à la demande du propriétaire)
 
-- **Le soir** (10 h, 14 h, 17 h UTC) : rencontres de la fenêtre, cotes courantes des rencontres à venir
+- **Quatre passages identiques** (05 h 37, 09 h 13, 13 h 41, 16 h 47 UTC, hors des heures rondes que GitHub
+  encombre ; `betting/cycle.py:SLOTS`, aligné sur les crons par un test). Audit du 6 novembre 2026 : sur l'ancien
+  planning (06 h 30, 10 h, 14 h, 17 h), GitHub n'avait servi aucun créneau du matin, et le passage complet, décidé
+  par l'heure, n'avait jamais tourné. Désormais ce qui est lourd est décidé par **l'état de l'archive**
+  (`cycle plan`) : fenêtre de rencontres depuis la plus ancienne rencontre jouée sans statut final (toute la saison si
+  une compétition manque à l'archive), historiques dès qu'un match terminé n'a pas le sien. Chaque passage est
+  journalisé (`cycle record`, `cycle_log.json` publié avec l'archive) ; un créneau qu'aucun passage n'a servi dans les
+  2 h est signalé en avertissement et dans le résumé du workflow.
+- **Cotes** (à chaque passage) : rencontres de la fenêtre, cotes courantes des rencontres à venir
   (`/odds-by-tournaments`, un appel par tournoi, décompté : 11 appels par passage), vues, appariement,
   suggestions et journal, export. Les cotes sont datées de l'heure de l'appel (`flatten_live(stamp="observed")`) :
   prix vérifiés identiques au dernier relevé de `/historical-odds` sur 834 issues (3 novembre 2026), alors que
   `changedAt` daterait de plusieurs heures une cote inchangée et la ferait écarter comme périmée. L'ancien
   relevé match par match reste disponible (`upcoming --per-fixture`, environ 6,5 s par rencontre).
-- **Historiques des matchs terminés** (`/historical-odds`, environ 6,5 s par match, limite d'OddsPapi) :
-  au passage du matin seulement, ou tant que l'archive est incomplète. Les relevés sont écrits par lots
+- **Historiques des matchs terminés** (`/historical-odds`, environ 6,5 s par match, limite d'OddsPapi, non
+  décomptés) : à n'importe quel passage, dès qu'un match terminé n'a pas son historique complet. Les relevés sont écrits par lots
   (`SnapshotBuffer`) : chaque écriture réécrit tout le fichier de la saison. Un match est redemandé tant que son
   historique ne va pas jusqu'au coup d'envoi (`fetch.history_todo`) : un relevé « à venir » pris quelques heures avant
   ne suffit pas (correction de l'audit du 6 novembre 2026 : ces matchs n'étaient jamais redemandés, et leur « clôture »
   était le dernier relevé « à venir »). L'historique est complet quand l'archive contient un relevé Winamax postérieur
   au coup d'envoi, ou quand il a été demandé après le coup d'envoi (`history_fetched.json`, publié avec l'archive).
-- **Le matin** (06 h 30 UTC) : résultats de la veille lus sur le tableau de scores public d'ESPN
+- **Résultats et règlement** (à chaque passage) : résultats de la veille lus sur le tableau de scores public d'ESPN
   (`betting/results_web.py`, sans clé ; voir « Règlement depuis ESPN » plus bas), fusionnés aux
   résultats PitchAPI pour régler le journal sans attendre l'export du lundi ou du vendredi ; puis
   `betting.evening rebuild` reconstruit les soirées depuis le journal (dernière publication du profil Équilibré
@@ -375,8 +383,8 @@ Pas de poids w > 0 (l'étape 2 ci-dessous confirme w = 0 partout sur la clôture
 composition probable avant H−1 (seule la dépendance à un joueur clé est signalée) ; pas de Betfair après commission (prix bruts) ; pas de décorrélation ni
 d'agrégation du onze (étape 4). L'archive antérieure au 5 novembre n'a pas de bookmaker de référence :
 le rejeu ne compte un pari qu'à partir du moment où Pinnacle ou Betfair est archivé pour le match. La
-« clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (passages de
-10 h, 14 h et 17 h UTC) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
+« clôture » sharp qui sert au CLV est le dernier relevé The Odds API avant le coup d'envoi (dernier passage
+du cycle avant le match) : une clôture approchée, à affiner avec la clôture Pinnacle de football-data pour
 les ligues principales (étape 2).
 
 ## Étape 2 du moteur quantitatif : porte de validation par segment, catégorie A (5 novembre 2026)
