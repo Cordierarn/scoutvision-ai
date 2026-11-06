@@ -17,6 +17,8 @@ import MethodPanel from './forecast/MethodPanel';
 import { SuggestionsBlock, SuggestionsControls } from './forecast/Suggestions';
 import BetHistory from './forecast/BetHistory';
 import BettingAssistant from './forecast/BettingAssistant';
+import MyTestView from './forecast/MyTest';
+import { loadMyTest, recordAuto, saveMyTest } from './forecast/myTestLogic';
 import { BANKROLL_KEY, DEFAULT_PROFILE, PROFILE_KEY, PROFILE_ORDER, parseBankroll } from './forecast/suggestionsLogic';
 import { MARKET_RESULT, formatGoals, freshness, pctFr, poolLabel, roundToHundred } from './forecast/forecastLogic';
 
@@ -205,7 +207,7 @@ const MarketPanel: React.FC<{ evaluation?: MarketEvaluation }> = ({ evaluation }
 };
 
 // Onglet retrouvé au retour sur la page
-type ForecastTab = 'matches' | 'history' | 'simulator' | 'market' | 'method';
+type ForecastTab = 'matches' | 'history' | 'mytest' | 'simulator' | 'market' | 'method';
 let lastTab: ForecastTab = 'matches';
 
 const Forecast: React.FC = () => {
@@ -230,6 +232,12 @@ const Forecast: React.FC = () => {
     setSuggestionsFailed(false);
     replayData.suggestions().then(setSuggestions).catch(() => { setSuggestions(null); setSuggestionsFailed(true); });
   }, [attempt]);
+  // Mon test : les règlements trouvés dans l'historique publié (14 jours) sont mémorisés dès son chargement
+  useEffect(() => {
+    if (!suggestions?.history) return;
+    const updated = recordAuto(loadMyTest(), suggestions.history);
+    if (updated) saveMyTest(updated);
+  }, [suggestions]);
   const suggestionByMatch = useMemo(() => new Map((suggestions?.matches ?? []).map(m => [m.matchId, m])), [suggestions]);
   const now = useMemo(() => new Date(), [suggestions]);
 
@@ -272,6 +280,7 @@ const Forecast: React.FC = () => {
       <div className="sv-tabs" role="tablist" aria-label="Sections des pronostics">
         <button role="tab" aria-selected={tab === 'matches'} onClick={() => setTab('matches')} className={`sv-tab ${tab === 'matches' ? 'sv-tab-on' : ''}`}>Matchs à venir</button>
         <button role="tab" aria-selected={tab === 'history'} onClick={() => setTab('history')} className={`sv-tab ${tab === 'history' ? 'sv-tab-on' : ''}`}>Suivi des paris</button>
+        <button role="tab" aria-selected={tab === 'mytest'} onClick={() => setTab('mytest')} className={`sv-tab ${tab === 'mytest' ? 'sv-tab-on' : ''}`}>Mon test</button>
         <button role="tab" aria-selected={tab === 'simulator'} onClick={() => setTab('simulator')} className={`sv-tab ${tab === 'simulator' ? 'sv-tab-on' : ''}`}>Simulateur de saison</button>
         <button role="tab" aria-selected={tab === 'market'} onClick={() => setTab('market')} className={`sv-tab ${tab === 'market' ? 'sv-tab-on' : ''}`}>Modèle vs marché</button>
         <button role="tab" aria-selected={tab === 'method'} onClick={() => setTab('method')} className={`sv-tab ${tab === 'method' ? 'sv-tab-on' : ''}`}>Méthode &amp; fiabilité</button>
@@ -347,6 +356,8 @@ const Forecast: React.FC = () => {
         <BetHistory index={suggestions} failed={suggestionsFailed} onRetry={() => setAttempt(a => a + 1)}
           profile={profile} onProfile={setProfile} bankrollInput={bankrollInput} bankroll={bankroll} onBankroll={setBankroll} />
       )}
+
+      {tab === 'mytest' && <MyTestView index={suggestions} failed={suggestionsFailed} onRetry={() => setAttempt(a => a + 1)} />}
 
       {tab === 'simulator' && <SeasonSimulator />}
 

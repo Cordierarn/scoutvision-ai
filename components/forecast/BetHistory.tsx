@@ -220,6 +220,15 @@ export const BetHistory: React.FC<{
               sub={bankroll !== null && summary.staked > 0 ? `rendement ${formatEv(summary.net / summary.staked)}` : undefined} />
           </StatStrip>
         )}
+        {(() => {
+          const j = index.journal?.byProfile?.[profile];
+          return j && j.closeBets ? (
+            <p className="text-xs text-ink-2 mt-3">
+              <span className="text-ink">Cote du matin face à la clôture Winamax : {formatEv(j.earlyEdge ?? 0)}</span> en moyenne sur {j.closeBets} pari{j.closeBets > 1 ? 's' : ''} ; la cote a baissé ensuite dans {formatPct(j.oddsDroppedRate ?? 0)} des cas.
+              {' '}Positif : parier au moment de la publication rapportait plus que d'attendre le coup d'envoi.
+            </p>
+          ) : null;
+        })()}
         {summary.clvBets > 0 && (
           <p className="text-xs text-ink-2 mt-3">
             <span className="text-ink">CLV moyen {formatClv(summary.meanClv)}</span> sur {summary.clvBets} pari{summary.clvBets > 1 ? 's' : ''} avec clôture sharp connue, {formatPct(summary.clvBeatRate ?? 0)} la battent.

@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SuggestionsIndex } from '../../services/replayData';
 import type { BettingPlan } from '../../services/bettingAiService';
-import { BettingAssistant, PlanView } from './BettingAssistant';
+import { BettingAssistant, FollowButton, PlanView } from './BettingAssistant';
 
 const NOW = new Date('2026-11-07T12:00:00Z');
 const index = {
@@ -25,7 +25,7 @@ const plan: BettingPlan = {
   matches: [{ matchId: 'm1', match: 'Club A – Club B', kickoff: '2026-11-07T19:00:00Z', engineVerdict: 'bet',
     news: { matchId: 'm1', text: '- Club B : attaquant suspendu.', sources: [{ title: 'source.test', uri: 'https://example.test/a' }], queries: ['Club A Club B absents'], fetchedAt: '2026-11-07T12:01:00Z', model: 'modele-test' },
     verdicts: [{ ref: 'm1#1', label: 'Club A gagne', verdict: 'garder', reason: 'Attaquant adverse suspendu.' }, { ref: 'm1#2', label: 'Plus de 2,5 buts', verdict: 'eviter', reason: 'Moins de puissance offensive.' }] }],
-  picks: [{ ref: 'm1#1', matchId: 'm1', match: 'Club A – Club B', label: 'Club A gagne', family: 'résultat', odds: 1.85, probability: 0.56, engineProbability: 0.6, sharpProbability: 0.56, sharpBookmaker: 'pinnacle', expectedValue: 0.036, stakeFraction: 0.01, stakeMode: 'shrink_kelly', warnings: [], verdict: 'garder', why: 'Absence adverse.' }],
+  picks: [{ ref: 'm1#1', matchId: 'm1', match: 'Club A – Club B', marketId: 101, outcomeId: 101, kickoff: '2026-11-07T19:00:00Z', label: 'Club A gagne', family: 'résultat', odds: 1.85, probability: 0.56, engineProbability: 0.6, sharpProbability: 0.56, sharpBookmaker: 'pinnacle', expectedValue: 0.036, stakeFraction: 0.01, stakeMode: 'shrink_kelly', warnings: [], verdict: 'garder', why: 'Absence adverse.' }],
   combo: null, avoid: [{ matchId: 'm9', match: 'Club E – Club F', why: 'Pas de pari selon le moteur : espérance insuffisante.', source: 'moteur' }], discipline: 'Mises du moteur, sans rattrapage.', warnings: ['1 match(s) sans actualité recherchée.'],
 };
 
@@ -54,6 +54,14 @@ describe('BettingAssistant (rendu statique)', () => {
     expect(html).toContain('https://www.google.com/search?q=Club%20A%20Club%20B%20absents');
     expect(html).toContain('Actualité indisponible pour Club G – Club H : Recherche trop longue.');
     expect(html).toContain('modele-test');
+    expect(html).toContain('Suivre · 0,20');            // Mon test : 1 % de 20 € de bankroll de test
+    expect(html).toContain('Mon test');
     expect(renderToStaticMarkup(<PlanView plan={{ ...plan, picks: [] }} bankroll={null} />)).toContain('pas de pari sur ces matchs');
+  });
+
+  it('le bouton Suivre disparaît une fois le match commencé', () => {
+    const html = renderToStaticMarkup(<FollowButton pick={plan.picks[0]} profile="equilibre" now={new Date('2026-11-07T19:30:00Z')} />);
+    expect(html).toContain('Match commencé');
+    expect(html).not.toContain('<button');
   });
 });

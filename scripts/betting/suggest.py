@@ -38,7 +38,10 @@ from .circuit import Assessment
 from .simulate import Simulated
 
 PROFILES = ("sur", "equilibre", "grosse_cote")
-PROFILE_LABELS = {"sur": "Sûr", "equilibre": "Équilibré", "grosse_cote": "Grosse cote", "exploratoire": "Exploratoire"}
+PROFILE_LABELS = {"sur": "Sûr", "equilibre": "Équilibré", "grosse_cote": "Grosse cote", "exploratoire": "Exploratoire", "ancien": "Ancien moteur"}
+# Profil « Ancien moteur » : le classement Équilibré d'avant l'étape 1 (probabilité et espérance du seul modèle, sans
+# coupe-circuit), publié et journalisé pour mesurer son CLV et l'effet de la cote du matin, jamais recommandé.
+LEGACY_PROFILE = "ancien"
 # Profil exploratoire : hors coupe-circuit, publié à la demande du propriétaire pour avoir chaque soir une sélection
 # à suivre. Ce ne sont PAS des paris validés : l'espérance face au marché sans marge est le plus souvent négative.
 # Règles : cote 1,60 à 6,00 ; marché coté sans marge chez une référence (sharp, sinon Winamax complet, Shin) ; le

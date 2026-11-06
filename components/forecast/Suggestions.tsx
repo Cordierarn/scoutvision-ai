@@ -9,7 +9,7 @@
 import React, { useId } from 'react';
 import type { BilanProfile, ExploreDayCombo, Suggestion, SuggestionMatch, SuggestionProfile, SuggestionsIndex } from '../../services/replayData';
 import { InfoTip, Panel, Stat, StatStrip } from '../ui';
-import { CIRCUIT_NOTE, EXPLORE_NOTE, isExploratory, PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, oddsAge, sharpLabel, stakeEuros, stakeLabel } from './suggestionsLogic';
+import { CIRCUIT_NOTE, EXPLORE_NOTE, LEGACY_NOTE, isExploratory, isUnvalidated, PROFILE_HINTS, PROFILE_LABELS, PROFILE_ORDER, bilanLine, formatClv, formatEuros, formatEv, formatOdds, formatPct, formatSignedEuros, oddsAge, sharpLabel, stakeEuros, stakeLabel } from './suggestionsLogic';
 
 const evClass = (ev: number) => (ev > 0 ? 'text-pos' : 'text-ink-2');
 
@@ -60,7 +60,8 @@ export const SuggestionsControls: React.FC<{
       )}
       {isExploratory(profile) && <p role="note" className="text-xs text-warn mt-3">{EXPLORE_NOTE}{journal && journal.bets ? ` Journal réel : ${journal.bets} réglés, rendement ${formatEv(journal.returnFlat ?? 0)}.` : ''}</p>}
       {isExploratory(profile) && <DayCombos days={index.exploreCombos ?? []} bankroll={bankroll} />}
-      {isExploratory(profile) ? null : o && o.bets > 0 ? (
+      {profile === 'ancien' && <p role="note" className="text-xs text-warn mt-3">{LEGACY_NOTE}{journal && journal.bets ? ` Journal réel : ${journal.bets} réglés, rendement ${formatEv(journal.returnFlat ?? 0)}.` : ''}</p>}
+      {isUnvalidated(profile) ? null : o && o.bets > 0 ? (
         <StatStrip className="mt-4 grid-cols-2 lg:grid-cols-4">
           <Stat label={`Bilan ${index.season} · ${PROFILE_LABELS[profile]}`} value={`${o.bets} paris`} sub="rejeu sur les matchs joués, cotes du dernier relevé avant coup d'envoi" />
           <Stat label="Réussite" value={o.hitRate === null ? 'N/D' : formatPct(o.hitRate)} sub="paris gagnés (demi-gains comptés)" />
@@ -188,11 +189,11 @@ export const SuggestionsBlock: React.FC<{ match: SuggestionMatch | undefined; pr
     return (
       <details className="px-4 pb-2 group" open={open}>
         <summary className="cursor-pointer text-xs text-ink-2 py-1 select-none rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
-          {isExploratory(profile) ? 'Sélections exploratoires' : 'Suggestions de paris'} <span className="text-ink-4">· {list.length ? `${list.length} ${PROFILE_LABELS[profile].toLowerCase()}${isExploratory(profile) ? ', non validées' : ''}` : isExploratory(profile) ? 'aucune' : 'pas de pari'}{match.oddsStale ? ' · cotes anciennes, non suggérées' : ''}{match.sharpCoverage !== undefined && match.sharpCoverage !== null && match.sharpCoverage < 1 ? ` · référence sharp sur ${formatPct(match.sharpCoverage)} des marchés` : ''}</span>
+          {isExploratory(profile) ? 'Sélections exploratoires' : profile === 'ancien' ? 'Sélections de l\'ancien moteur' : 'Suggestions de paris'} <span className="text-ink-4">· {list.length ? `${list.length} ${PROFILE_LABELS[profile].toLowerCase()}${isUnvalidated(profile) ? ', non validées' : ''}` : isUnvalidated(profile) ? 'aucune' : 'pas de pari'}{match.oddsStale ? ' · cotes anciennes, non suggérées' : ''}{match.sharpCoverage !== undefined && match.sharpCoverage !== null && match.sharpCoverage < 1 ? ` · référence sharp sur ${formatPct(match.sharpCoverage)} des marchés` : ''}</span>
         </summary>
         {list.length === 0 ? (
-          isExploratory(profile)
-            ? <p className="text-2xs text-ink-4 py-1">Aucune cote de 1,60 à 6,00 que le moteur juge au moins aussi probable que le marché sans marge sur ce match.</p>
+          isUnvalidated(profile)
+            ? <p className="text-2xs text-ink-4 py-1">{isExploratory(profile) ? 'Aucune cote de 1,60 à 6,00 que le moteur juge au moins aussi probable que le marché sans marge sur ce match.' : 'Aucune sélection de l\'ancien moteur sur ce match.'}</p>
             : <NoBetNote match={match} />
         ) : (
           <>

@@ -603,6 +603,32 @@ validation, et les sélections du moteur seul sont surestimées d'une quinzaine 
 sont pas plus mal pricés par Winamax que ceux du match entier. Par compétition, aucun segment n'atteint 150 matchs
 par partie. Relecture quotidienne automatique dans `betting-odds.yml` à mesure que l'archive grandit.
 
+## Suivi de l'ancien moteur et onglet « Mon test » (6 novembre 2026)
+
+Les soirées des 3 au 5 novembre ont été gagnantes avec des suggestions publiées par le moteur d'avant le coupe-circuit,
+alors que le rejeu de la saison reste négatif. Deux hypothèses à départager sur des données réelles : la chance, ou une
+cote du matin meilleure que celle de la clôture. D'où un cinquième profil publié et journalisé, sans validation :
+
+- **Ancien moteur** (`suggest.LEGACY_PROFILE = "ancien"`) : classement Équilibré sur la seule probabilité du moteur,
+  calculé avant le coupe-circuit (`product._legacy_block`). La probabilité sharp de Shin, quand elle existe, est
+  exportée (`pSharp`, `evRef`) pour mesurer le CLV ; le verdict vaut `ancien` et le bilan du rejeu n'est pas affiché ;
+- **cote de clôture Winamax** (colonne `closing_odds` du journal) : la dernière cote Winamax relevée avant le coup
+  d'envoi, remplie par `journal_append` pour les paris dont le match a commencé, exportée en `closingOdds` dans
+  l'historique avec `marketId` et `outcomeId` ;
+- **effet « cote du matin »** (`product.early_block`, champs `closeBets`, `earlyEdge`, `oddsDroppedRate` de
+  `journal.byProfile`) : cote prise ÷ clôture Winamax − 1 en moyenne, et part des paris dont la cote a baissé ensuite.
+  Affiché dans le Suivi des paris pour chaque profil.
+
+L'assistant IA accepte le profil Ancien moteur : son prompt précise que ce sont les sélections d'avant le coupe-circuit,
+non validées.
+
+**Mon test** (onglet de Pronostics, `components/forecast/MyTest.tsx`, `myTestLogic.ts`, `useMyTest.ts`) : la bankroll
+personnelle du propriétaire, partie de 20 € (réglable). Le bouton « Suivre » de chaque pari du plan de l'IA l'ajoute avec la
+fraction de mise du moteur appliquée à la bankroll disponible (0,10 € au moins, arrondi à 0,10 €). Cote et mise restent
+modifiables tant que le pari n'est pas réglé. Règlement automatique par l'identifiant match:marché:issue retrouvé dans
+l'historique publié, mémorisé dans le pari (l'historique ne garde que 14 jours) ; réglage manuel en secours. Données
+dans le stockage du navigateur uniquement (`scoutvision.betting.mytest`), export et import JSON.
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans

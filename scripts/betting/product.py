@@ -46,7 +46,7 @@ START_BANKROLL = 300.0
 UPCOMING_DAYS = 7
 QUANT_COLUMNS = ["p_sharp", "p_ref", "ev_ref", "pool_w", "sharp_bookmaker", "closing_p_sharp", "clv"]
 JOURNAL_COLUMNS = ["suggestion_id", "published_at", "match_id", "fixture_id", "competition", "kickoff_utc", "profile", "rank", "kind", "market_id", "outcome_id",
-                   "family", "label", "odds", "odds_at", "p", "ev", "stake_fraction", "stake_mode", "settled", "realised", "settled_at"] + QUANT_COLUMNS
+                   "family", "label", "odds", "odds_at", "p", "ev", "stake_fraction", "stake_mode", "settled", "realised", "settled_at"] + QUANT_COLUMNS + ["closing_odds"]
 
 
 # ----- données communes -----
@@ -204,6 +204,22 @@ def _assessment_fields(c: sg.Candidate) -> dict:
 
 # ----- suggestion d'un match -----
 
+def _legacy_block(ranked: list, refs: dict, ctx: dict, home: str, away: str) -> list[dict]:
+    """Profil « Ancien moteur » : classement Équilibré sur la seule probabilité du modèle, sans coupe-circuit (comme avant
+    l'étape 1), avec la probabilité sharp du marché quand elle est connue, pour le CLV. Jamais recommandé."""
+    out = []
+    for s in ranked:
+        c = s.candidate
+        ref = refs.get(c.market_id)
+        p_sharp = ref.shin.get(c.outcome_id) if ref is not None else None
+        out.append({"rank": s.rank, "marketId": c.market_id, "outcomeId": c.outcome_id, "family": c.family, "label": c.label, "odds": round(c.odds, 2),
+                    "oddsAt": c.odds_at.isoformat(), "p": round(c.p, 4), "ev": round(c.ev, 4), "stakeFraction": s.stake_fraction, "stakeMode": s.stake_mode,
+                    "pSharp": None if p_sharp is None else round(p_sharp, 4), "pRef": round(c.p, 4),
+                    "evRef": None if p_sharp is None else round(p_sharp * c.odds - 1.0, 4), "poolW": None, "sharpBookmaker": ref.bookmaker if ref is not None else None,
+                    "sharpAt": None, "warnings": [], "verdict": "ancien", "reasons": reasons(c, ctx, home, away)})
+    return out
+
+
 BOOKMAKER_NAMES = {"pinnacle": "Pinnacle", "betfair-ex": "Betfair Exchange", BOOKMAKER: "Winamax sans marge"}
 
 
@@ -244,6 +260,7 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
     """Sélections d'un match par profil, après le coupe-circuit quand l'archive (`snaps`, tous bookmakers) et le
     catalogue sont fournis ; sinon classement sur le seul modèle (tests, diagnostics)."""
     cands = sg.evaluate_candidates(sims, outcomes, kickoff, now, excluded, competition)
+    legacy = sg.rank(sg.evaluate_candidates(sims, outcomes, kickoff, now, excluded, competition), "equilibre")   # ancien moteur, sans coupe-circuit
     before = pd.Timestamp(min(now, kickoff))
     flags, coverage, refs = None, None, {}
     if snaps is not None and cat is not None:
@@ -285,6 +302,7 @@ def suggest_match(sims: sm.Simulated, outcomes: list[dict], kickoff: dt.datetime
         }
     # pas de combiné d'un même match : ses sélections sont liées et Winamax ne paie pas le produit des cotes (MyMatch) ;
     # les combinés exploratoires se font entre matchs différents (explore_day_combos, à l'export)
+    profiles[sg.LEGACY_PROFILE] = {"suggestions": _legacy_block(legacy, refs, ctx, home, away), "combo": None}
     profiles[sg.EXPLORE_PROFILE] = {"suggestions": _explore_block(cands, snaps, cat, before, refs if snaps is not None and cat is not None else None, ctx, home, away),
                                     "combo": None}
     excluded_counts: dict[str, int] = {}
@@ -496,7 +514,7 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
                              "family": s["family"], "label": s["label"], "odds": s["odds"], "odds_at": s["oddsAt"], "p": s["p"], "ev": s["ev"],
                              "stake_fraction": s["stakeFraction"], "stake_mode": s["stakeMode"], "settled": None, "realised": None, "settled_at": None,
                              "p_sharp": s.get("pSharp"), "p_ref": s.get("pRef"), "ev_ref": s.get("evRef"), "pool_w": s.get("poolW"), "sharp_bookmaker": s.get("sharpBookmaker"),
-                             "closing_p_sharp": None, "clv": None})
+                             "closing_p_sharp": None, "clv": None, "closing_odds": None})
     new = pd.DataFrame(rows, columns=JOURNAL_COLUMNS)
     new = new[~new["suggestion_id"].isin(existing["suggestion_id"])]
     journal = pd.concat([existing, new], ignore_index=True) if len(new) else existing
@@ -514,6 +532,14 @@ def journal_append(entries: list[dict], published_at: dt.datetime, results: pd.D
     if snaps is not None and not snaps.empty:
         kick = pd.to_datetime(journal["kickoff_utc"], utc=True, format="ISO8601")
         todo = journal["clv"].isna() & journal["fixture_id"].notna() & (kick <= pd.Timestamp(published_at))
+        # cote Winamax de clôture (dernier relevé avant le coup d'envoi) : mesure de l'effet « parier tôt »
+        todo_close = journal["closing_odds"].isna() & journal["fixture_id"].notna() & (kick <= pd.Timestamp(published_at))
+        wx = snaps[(snaps["bookmaker"] == BOOKMAKER) & snaps["player_id"].isna()] if "player_id" in snaps else snaps[snaps["bookmaker"] == BOOKMAKER]
+        for i in journal[todo_close].index:
+            g = wx[(wx["fixture_id"] == journal.at[i, "fixture_id"]) & (wx["market_id"] == int(journal.at[i, "market_id"])) & (wx["outcome_id"] == int(journal.at[i, "outcome_id"]))
+                   & (pd.to_datetime(wx["created_at"], utc=True) < kick[i])]
+            if len(g):
+                journal.at[i, "closing_odds"] = float(g.sort_values("created_at")["price"].iloc[-1])
         for i in journal[todo].index:
             s = snaps[snaps["fixture_id"] == journal.at[i, "fixture_id"]]
             closing = sharp.closing_reference(s, cat, int(journal.at[i, "market_id"]), kick[i]) if not s.empty else None
@@ -638,6 +664,7 @@ def history(journal: pd.DataFrame, results: pd.DataFrame, names: dict, now: dt.d
         for prof, gp in g.groupby("profile", sort=False):
             num = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) or pd.isna(v) else round(float(v), 4)
             profiles[prof] = [{"label": r.label, "family": r.family, "odds": round(float(r.odds), 2), "p": round(float(r.p), 4), "ev": round(float(r.ev), 4),
+                               "marketId": int(r.market_id), "outcomeId": int(r.outcome_id), "closingOdds": num(getattr(r, "closing_odds", None)),
                                "stakeFraction": round(float(r.stake_fraction), 5), "stakeMode": r.stake_mode,
                                "pSharp": num(getattr(r, "p_sharp", None)), "evRef": num(getattr(r, "ev_ref", None)), "clv": num(getattr(r, "clv", None)),
                                "status": "pending" if pd.isna(r.settled) else SETTLED_STATUS.get(float(r.settled), "pending"),
@@ -678,6 +705,16 @@ def explore_day_combos(entries: list[dict]) -> list[dict]:
     return [{"date": d, "combos": sg.day_combos(legs)} for d, legs in sorted(by_day.items()) if len(legs) >= 2]
 
 
+def early_block(journal: pd.DataFrame) -> dict:
+    """Effet « parier tôt » : écart moyen entre la cote publiée et la cote Winamax de clôture (> 0 : la cote du moment de
+    la publication était meilleure), et part des paris dont la cote a baissé ensuite."""
+    j = journal[journal["closing_odds"].notna()] if "closing_odds" in journal else journal.iloc[0:0]
+    if j.empty:
+        return {"closeBets": 0, "earlyEdge": None, "oddsDroppedRate": None}
+    ratio = j["odds"].astype(float) / j["closing_odds"].astype(float) - 1.0
+    return {"closeBets": int(len(j)), "earlyEdge": round(float(ratio.mean()), 4), "oddsDroppedRate": round(float((ratio > 0).mean()), 4)}
+
+
 def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     bilan = json.loads(BILAN.read_text(encoding="utf-8")) if BILAN.exists() else None
     journal = pd.read_parquet(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLUMNS)
@@ -687,7 +724,7 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
     settled = journal[journal["settled"].notna()]
     js = {"published": int(len(journal)), "settled": int(len(settled)),
           "byProfile": {p: {"bets": int(len(g)), "hitRate": round(float((g["settled"] > 0).mean()), 4) if len(g) else None, "returnFlat": round(float(g["realised"].mean()), 4) if len(g) else None,
-                            **clv_block(journal[journal["profile"] == p])}
+                            **clv_block(journal[journal["profile"] == p]), **early_block(journal[journal["profile"] == p])}
                         for p, g in settled.groupby("profile")}}
     results = load_results()
     names = match_names(results)
@@ -701,7 +738,7 @@ def export(entries: list[dict], generated_at: dt.datetime) -> Path:
             evenings.append({"date": e["date"], "bets": len(e["bets"]), "won": e.get("won", 0), "stake": round(e.get("stake", sum(b["stake"] for b in e["bets"])), 2),
                              "profit": profit, "cumulative": round(cumul, 2), "settled": bool(e.get("settled")), "details": evening_details(e, names)})
     payload = {"schemaVersion": "1.1.0", "generatedAt": generated_at.isoformat(timespec="seconds"), "season": SEASON, "bookmaker": "Winamax FR (OddsPapi)",
-               "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in (*sg.PROFILES, sg.EXPLORE_PROFILE)], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
+               "profiles": [{"id": p, "label": sg.PROFILE_LABELS[p]} for p in (*sg.PROFILES, sg.EXPLORE_PROFILE, sg.LEGACY_PROFILE)], "defaultProfile": "equilibre", "defaultBankroll": START_BANKROLL,
                "rules": {"minOdds": sg.MIN_ODDS, "bigOdds": sg.BIG_ODDS, "maxAgeHours": 2, "kappa": circuit.KAPPA, "capPerBet": circuit.CAP_PER_BET,
                          "capPerMatch": circuit.CAP_PER_MATCH, "capHighOdds": circuit.CAP_HIGH_ODDS, "highOdds": circuit.HIGH_ODDS, "evMin": circuit.EV_MIN,
                          "evMinLowMargin": circuit.EV_MIN_LOW_MARGIN, "evMax": circuit.EV_MAX, "edgeMax": circuit.EDGE_MAX, "favoriteOdds": circuit.FAVORITE_ODDS,

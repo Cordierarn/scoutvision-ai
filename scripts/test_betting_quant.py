@@ -340,6 +340,24 @@ class SuggestMatchTests(unittest.TestCase):
         self.assertEqual(bare["profiles"]["exploratoire"]["suggestions"], [])     # sans archive : aucune probabilité de marché inventée
         self.assertIsNone(res["profiles"]["exploratoire"]["combo"])                  # jamais de combiné d'un même match
 
+    def test_legacy_profile_ranks_on_the_model_alone_with_sharp_probability_for_clv(self):
+        res = self.run_match(self.archive(winamax_home=1.80, pinnacle_home=1.80))
+        self.assertEqual(res["profiles"]["equilibre"]["suggestions"], [])
+        legacy = res["profiles"]["ancien"]["suggestions"]
+        self.assertTrue(legacy)
+        self.assertTrue(all(s["verdict"] == "ancien" and s["pRef"] == s["p"] for s in legacy))
+        with_sharp = [s for s in legacy if s["pSharp"] is not None]
+        self.assertTrue(with_sharp)
+        for s in with_sharp:
+            self.assertAlmostEqual(s["evRef"], s["pSharp"] * s["odds"] - 1, places=3)
+        self.assertEqual(res["profiles"]["ancien"]["combo"], None)
+
+    def test_early_block_measures_odds_taken_against_winamax_closing(self):
+        j = pd.DataFrame({"odds": [2.0, 1.5, 1.8], "closing_odds": [1.8, 1.5, None]})
+        out = product.early_block(j)
+        self.assertEqual(out["closeBets"], 2); self.assertAlmostEqual(out["earlyEdge"], (2.0 / 1.8 - 1 + 0) / 2, places=4); self.assertEqual(out["oddsDroppedRate"], 0.5)
+        self.assertEqual(product.early_block(pd.DataFrame({"odds": []}))["closeBets"], 0)
+
     def test_combo_settlement_follows_winamax_rules_and_history_keeps_the_last_version(self):
         res = pd.DataFrame([{"match_id": "a", "ft_home": 2, "ft_away": 0, "ht_home": 1, "ht_away": 0, "first_goal": "home", "last_goal": "home"},
                             {"match_id": "b", "ft_home": 1, "ft_away": 1, "ht_home": 0, "ht_away": 1, "first_goal": "away", "last_goal": "home"}])
@@ -391,13 +409,13 @@ class SuggestMatchTests(unittest.TestCase):
 
     def test_fair_winamax_price_means_no_bet(self):
         res = self.run_match(self.archive(winamax_home=1.85, pinnacle_home=1.80))
-        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k != "exploratoire"), 0)
+        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k not in ("exploratoire", "ancien")), 0)
         self.assertIn("ev_insuffisant", res["excluded"])
         self.assertIsNotNone(res["noBet"]); self.assertIn("espérance insuffisante", res["noBet"]["reasons"][0])
 
     def test_without_sharp_reference_nothing_is_bet(self):
         res = self.run_match(self.archive(winamax_home=2.05, with_pinnacle=False))
-        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k != "exploratoire"), 0)
+        self.assertEqual(sum(len(b["suggestions"]) for k, b in res["profiles"].items() if k not in ("exploratoire", "ancien")), 0)
         self.assertEqual(set(res["excluded"]), {"reference_absente"})
         self.assertEqual(res["sharpCoverage"], 0.0)
         self.assertEqual(res["noBet"]["codes"], ["reference_absente"])
