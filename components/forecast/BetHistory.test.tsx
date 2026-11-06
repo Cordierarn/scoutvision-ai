@@ -69,6 +69,21 @@ describe('BetHistory (rendu statique)', () => {
     expect(renderToStaticMarkup(<BetHistory index={withCombos} {...props} profile="equilibre" />)).not.toContain('Combinés du jour · Exploratoire');
   });
 
+  it('affiche le message de jeu responsable dans tous les états de l\'onglet', () => {
+    const states = [
+      <BetHistory index={index} {...props} />,
+      <BetHistory index={{ ...index, evenings: [], history: [] }} {...props} />,
+      <BetHistory index={undefined} {...props} />,
+      <BetHistory index={null} {...props} />,
+      <BetHistory index={undefined} failed onRetry={() => {}} {...props} />,
+    ];
+    for (const el of states) {
+      const html = renderToStaticMarkup(el);
+      expect(html).toContain('Interdit aux moins de 18 ans');
+      expect(html).toContain('09 74 75 13 13');
+    }
+  });
+
   it('explique un historique vide et gère chargement, absence et erreur', () => {
     expect(renderToStaticMarkup(<BetHistory index={{ ...index, evenings: [], history: [] }} {...props} />)).toContain('Le suivi commence avec les suggestions publiées depuis le 3 novembre 2026');
     expect(renderToStaticMarkup(<BetHistory index={undefined} {...props} />)).toContain('Chargement du suivi des paris');
