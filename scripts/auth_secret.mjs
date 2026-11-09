@@ -5,6 +5,9 @@
  *   npm run auth:secret                 nouveau mot de passe fort + son hash + secret de session
  *   npm run auth:secret -- --stdin      hash d'un mot de passe choisi, lu sur l'entrée standard
  *                                       (jamais en argument : il finirait dans l'historique du shell)
+ *   npm run auth:secret -- --pro        compte pro (toute l'application sauf Pronostics) : identifiant et hash
+ *                                       seulement, le secret de session reste celui du propriétaire ;
+ *                                       combinable avec --stdin
  *
  * Copiez les valeurs directement dans les variables d'environnement de l'hébergeur, puis
  * effacez le terminal. Ne les collez jamais dans un fichier du dépôt, un ticket ou une capture.
@@ -47,6 +50,7 @@ async function readStdin() {
 
 async function main() {
   const fromStdin = process.argv.includes('--stdin');
+  const pro = process.argv.includes('--pro');
   const password = fromStdin ? await readStdin() : generatePassword();
   if (password.length < 12) {
     console.error('Mot de passe trop court : 12 caractères au minimum (24 recommandés).');
@@ -54,14 +58,19 @@ async function main() {
   }
   const hash = await hashPassword(password);
   const secret = randomBytes(32).toString('base64url');
+  const account = pro
+    ? ['SCOUTVISION_PRO_USER', '  <identifiant du compte pro, différent du vôtre>', '',
+      'SCOUTVISION_PRO_PASSWORD_HASH', `  ${hash}`, '',
+      'Le compte pro utilise le SCOUTVISION_SESSION_SECRET existant : ne le changez pas (il déconnecterait tout le monde).', '']
+    : ['SCOUTVISION_AUTH_USER', '  arnaud', '',
+      'SCOUTVISION_AUTH_PASSWORD_HASH', `  ${hash}`, '',
+      'SCOUTVISION_SESSION_SECRET', `  ${secret}`, ''];
   const lines = [
     '',
     'ScoutVision : valeurs à copier dans les variables d\'environnement de l\'hébergeur (jamais dans le dépôt).',
     '',
     ...(fromStdin ? [] : ['Mot de passe (à conserver dans votre gestionnaire de mots de passe, il n\'est stocké nulle part) :', `  ${password}`, '']),
-    'SCOUTVISION_AUTH_USER', '  arnaud', '',
-    'SCOUTVISION_AUTH_PASSWORD_HASH', `  ${hash}`, '',
-    'SCOUTVISION_SESSION_SECRET', `  ${secret}`, '',
+    ...account,
     'Effacez ensuite le terminal (clear).', '',
   ];
   process.stdout.write(lines.join('\n'));

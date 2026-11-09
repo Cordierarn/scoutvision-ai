@@ -110,18 +110,41 @@ Browser ──HTTPS──► Heroku router ──► node dist-server/production
 
 | Part | Choice |
 |---|---|
-| Account | one user, `SCOUTVISION_AUTH_USER` (`arnaud`); no sign-up, no reset, no third-party login |
+| Accounts | the owner, `SCOUTVISION_AUTH_USER` (`arnaud`), with full access; optionally one **pro** account (`SCOUTVISION_PRO_USER`, see below); no sign-up, no reset, no third-party login |
 | Password | stored only as a scrypt hash (`node:crypto`, N = 2^16, r = 8, p = 2, 16-byte salt, one of the OWASP parameter sets: 64 MiB per check) in `SCOUTVISION_AUTH_PASSWORD_HASH` |
 | Check | constant-time comparison; the hash is always computed, even for a wrong username: same message (« Identifiants incorrects. ») and similar time |
-| Session | HMAC-SHA256 signed token (user, expiry, id, fingerprint of the password hash) in cookie `__Host-sv_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, 7 days |
+| Session | HMAC-SHA256 signed token (user, role, expiry, id, fingerprint of that account's password hash) in cookie `__Host-sv_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, 7 days for the owner, 1 day for the pro account. A token issued before the pro account existed (no role) is read as the owner's only if its user and password fingerprint are the owner's |
 | Logout | `POST /api/auth/logout`: cookie cleared, token id revoked immediately on the server |
 | Rate limit | 5 failed logins per IP per 15 minutes, then `429` with `Retry-After`; the attempt is counted **before** the hash is computed, so a burst of parallel requests cannot exceed it; at most 2 password checks at once (memory bounded), extra requests get `429`; above 50 failures across all IPs per 15 minutes, checks run one at a time with a 1 s delay |
 | Known device | after a successful login the browser also keeps `__Host-sv_device` (`HttpOnly`, `Secure`, `SameSite=Strict`, 180 days, signed, kept after logout). It grants no access by itself; it only gives that browser its own password-check slot, outside the slowdown, so strangers flooding the login cannot keep the owner out (OWASP "device cookies"). It is tied to the current password: changing the password or the session secret voids it. After 3 failed checks with the same device cookie it loses its slot for the window, and when the slot is busy the request uses the normal queue. The per-IP limit still applies |
 | Browser | no token in `localStorage` or `sessionStorage`, no secret in the bundle; the password only lives in the form state until the POST |
 
-Endpoints: `POST /api/auth/login` (`{ username, password }` → `{ authenticated, user }` + cookie),
-`GET /api/auth/session` (`{ authenticated: true, user }` or `{ authenticated: false }`),
-`POST /api/auth/logout`.
+Endpoints: `POST /api/auth/login` (`{ username, password }` → `{ authenticated, user, role }` + cookie),
+`GET /api/auth/session` (`{ authenticated: true, user, role }` or `{ authenticated: false }`; `role` is `owner`
+or `pro`), `POST /api/auth/logout`.
+
+### Pro account
+
+An optional second account with the whole app **except the Pronostics page** (its six tabs, the
+betting lab included). Hiding the menu entry is not the protection: the role is written in the
+signed session token at login (from the account whose credentials matched, never from the
+browser) and checked again on every request. For the pro role the server answers `403`
+(`{ "error": "Accès réservé." }`, never the content) to:
+
+- `/data/forecast.json` and everything under `/data/forecast/` (replays, market benchmark, betting
+  suggestions), and any path containing `/data/forecast`, case-insensitive (this also covers the
+  project files that `vite dev` would serve under `/public/…` or `/@fs/…`);
+- every `/api/ai/betting-…` route (betting lab assistant).
+
+The rule (`forbiddenForRole` in `server/privateServer.ts`) runs on the decoded, normalised path
+before any file read or API call, so encoded characters, double slashes, `./` and `../`
+segments, a query string or a trailing slash change nothing. `403` rather than `404`: the code is
+public, so hiding that these resources exist protects nothing, and `403` keeps « signed in but not
+allowed » distinct from a missing file. Without a session the answers stay `401` / `302`.
+
+The pro account may use the AI functions (reports, comparison, opposition, prospect hunter) at
+most **20 times per day** (Paris time), all functions together; the 21st call answers `429` with a
+French message. The counter lives in memory and restarts with the dyno. Its session lasts 1 day.
 
 ### CSRF and origin
 
@@ -151,9 +174,11 @@ Never prefix any of these with `VITE_`: the build refuses it. All are read by th
 
 | Variable | Secret | Purpose |
 |---|---|---|
-| `SCOUTVISION_AUTH_USER` | no | the only account (`arnaud`) |
+| `SCOUTVISION_AUTH_USER` | no | the owner account (`arnaud`), full access |
 | `SCOUTVISION_AUTH_PASSWORD_HASH` | yes | scrypt hash from `npm run auth:secret` |
-| `SCOUTVISION_SESSION_SECRET` | yes | 32 random bytes (base64url) signing the sessions |
+| `SCOUTVISION_SESSION_SECRET` | yes | 32 random bytes (base64url) signing the sessions of both accounts |
+| `SCOUTVISION_PRO_USER` | no | optional pro account (everything except Pronostics); must differ from the owner's, case-insensitive |
+| `SCOUTVISION_PRO_PASSWORD_HASH` | yes | its scrypt hash from `npm run auth:secret -- --pro`; set both pro variables or neither, otherwise the server refuses to start |
 | `PITCHAPI_DATA_TOKEN` | yes | fine-grained GitHub token, read-only access to the releases of `Cordierarn/PitchApi-big-5` |
 | `ANTHROPIC_API_KEY` | yes (one AI key) | Claude writes every AI text (reports, grounded summaries, betting assistant); absent with no Gemini key: the AI functions answer "not configured" |
 | `CLAUDE_MODEL` | no | Claude model, default `claude-opus-5-5` |
@@ -207,6 +232,16 @@ it in the shell history, so prefer the dashboard for the secret values.
 
 ## Operations
 
+- **Create the pro account**: run `npm run auth:secret -- --pro` (or `-- --pro --stdin` for a password
+  you chose), add `SCOUTVISION_PRO_USER` and `SCOUTVISION_PRO_PASSWORD_HASH` to the Config Vars, keep
+  the existing session secret, save. The start-up log then says `compte pro configuré`. Check it from
+  your machine (credentials on standard input, never as arguments):
+  ```bash
+  printf '%s\n%s\n' "<pro user>" "<pro password>" | npm run verify:private -- https://<app>.herokuapp.com --pro
+  ```
+- **Revoke the pro account**: delete the two `SCOUTVISION_PRO_*` Config Vars and save; every pro
+  session and device cookie stops working at the restart, the owner stays signed in. To only cut
+  its current sessions, give it a new password hash (`npm run auth:secret -- --pro`).
 - **Change the password**: run `npm run auth:secret` (or `-- --stdin`), replace
   `SCOUTVISION_AUTH_PASSWORD_HASH` in the Config Vars, save (Heroku restarts the dyno).
   Every existing session and every known-device cookie becomes invalid, because both carry a

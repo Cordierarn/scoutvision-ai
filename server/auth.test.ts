@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   AuthConfigError, LoginLimiter, RevocationList, checkCredentials, clearSessionCookie, createDeviceToken, createSessionToken, hashPassword, verifyDeviceToken,
-  loadAuthConfig, parsePasswordHash, readCookie, sessionCookie, verifyPassword, verifySessionToken,
+  loadAuthConfig, parsePasswordHash, readCookie, sessionCookie, verifyPassword, verifySessionToken, authenticate, PRO_SESSION_TTL_MS, SESSION_TTL_MS,
 } from './auth';
+import { createHmac } from 'node:crypto';
 import { hashPassword as cliHash, generatePassword } from '../scripts/auth_secret.mjs';
 
 // Paramètres scrypt réduits pour la vitesse des tests (minimum accepté par le serveur)
@@ -187,5 +188,93 @@ describe('appareil connu et limite', () => {
     const l2 = new LoginLimiter(5, 60_000, 50, 2);
     expect(l2.reserve('1.1.1.1', 0, 'a')).toMatchObject({ ok: true, trusted: true });
     expect(l2.reserve('2.2.2.2', 0, 'b')).toMatchObject({ ok: true, trusted: false });
+  });
+});
+
+// ============================================
+// COMPTE PRO (second compte, sans la page Pronostics)
+// ============================================
+
+const PRO_PASSWORD = 'mot-de-passe-pro-synthétique';
+async function twoAccounts() {
+  return loadAuthConfig({
+    SCOUTVISION_AUTH_USER: 'arnaud', SCOUTVISION_AUTH_PASSWORD_HASH: await hashPassword('mot-de-passe-de-test-synthétique', FAST),
+    SCOUTVISION_PRO_USER: 'compte-pro-test', SCOUTVISION_PRO_PASSWORD_HASH: await hashPassword(PRO_PASSWORD, FAST),
+    SCOUTVISION_SESSION_SECRET: SECRET,
+  })!;
+}
+const forge = (token: string, edit: (p: Record<string, unknown>) => void) => {
+  const [body, sig] = token.split('.');
+  const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+  edit(p);
+  return `${Buffer.from(JSON.stringify(p), 'utf8').toString('base64url')}.${sig}`;
+};
+
+describe('compte pro : configuration', () => {
+  it('facultatif ; incomplet, invalide ou identique au propriétaire : erreur au démarrage', async () => {
+    expect((await config()).pro).toBeNull();                                  // variables absentes : comportement inchangé
+    const c = await twoAccounts();
+    expect(c.pro?.user).toBe('compte-pro-test');
+    expect(c.pro?.role).toBe('pro');
+    expect(c.pro?.passwordFingerprint).not.toBe(c.passwordFingerprint);
+    const base = { SCOUTVISION_AUTH_USER: 'arnaud', SCOUTVISION_AUTH_PASSWORD_HASH: await hashPassword('x'.repeat(16), FAST), SCOUTVISION_SESSION_SECRET: SECRET };
+    const proHash = await hashPassword('y'.repeat(16), FAST);
+    expect(() => loadAuthConfig({ ...base, SCOUTVISION_PRO_USER: 'compte-pro-test' })).toThrow(/SCOUTVISION_PRO_PASSWORD_HASH/);
+    expect(() => loadAuthConfig({ ...base, SCOUTVISION_PRO_PASSWORD_HASH: proHash })).toThrow(/SCOUTVISION_PRO_USER/);
+    expect(() => loadAuthConfig({ ...base, SCOUTVISION_PRO_USER: 'compte-pro-test', SCOUTVISION_PRO_PASSWORD_HASH: 'clair' })).toThrow(/SCOUTVISION_PRO_PASSWORD_HASH invalide/);
+    expect(() => loadAuthConfig({ ...base, SCOUTVISION_PRO_USER: 'pas valide!', SCOUTVISION_PRO_PASSWORD_HASH: proHash })).toThrow(/SCOUTVISION_PRO_USER invalide/);
+    for (const same of ['arnaud', 'Arnaud']) expect(() => loadAuthConfig({ ...base, SCOUTVISION_PRO_USER: same, SCOUTVISION_PRO_PASSWORD_HASH: proHash })).toThrow(/identiques/);
+  });
+});
+
+describe('compte pro : connexion et jeton', () => {
+  it('chaque compte se connecte avec son propre mot de passe et reçoit son rôle', async () => {
+    const c = await twoAccounts();
+    expect((await authenticate(c, 'arnaud', 'mot-de-passe-de-test-synthétique'))?.role).toBe('owner');
+    expect((await authenticate(c, 'compte-pro-test', PRO_PASSWORD))?.role).toBe('pro');
+    expect(await authenticate(c, 'compte-pro-test', 'mot-de-passe-de-test-synthétique')).toBeNull();   // pas de mot de passe croisé
+    expect(await authenticate(c, 'arnaud', PRO_PASSWORD)).toBeNull();
+    expect(await authenticate(c, 'inconnu', PRO_PASSWORD)).toBeNull();
+  });
+
+  it('rôle signé et revérifié : falsification, rôle échangé ou ancien jeton pro refusés ; ancien jeton propriétaire accepté', async () => {
+    const c = await twoAccounts();
+    const now = Date.now();
+    const pro = createSessionToken(c, now, undefined, c.pro!).token;
+    const owner = createSessionToken(c, now).token;
+    expect(verifySessionToken(c, pro)?.r).toBe('pro');
+    expect(verifySessionToken(c, owner)?.r).toBe('owner');
+    expect(verifySessionToken(c, forge(pro, p => { p.r = 'owner'; }))).toBeNull();                 // signature cassée
+    expect(verifySessionToken(c, forge(pro, p => { p.u = 'arnaud'; }))).toBeNull();
+    // jeton correctement signé mais incohérent : rôle propriétaire pour le compte pro, ou l'inverse
+    const sign = (p: Record<string, unknown>) => { const body = Buffer.from(JSON.stringify(p), 'utf8').toString('base64url'); return `${body}.${createHmac('sha256', c.sessionSecret).update(body).digest('base64url')}`; };
+    const payload = (u: string, k: string, r?: string) => ({ u, iat: now, exp: now + 3600_000, jti: 'j', k, ...(r ? { r } : {}) });
+    expect(verifySessionToken(c, sign(payload('compte-pro-test', c.pro!.passwordFingerprint, 'owner')))).toBeNull();
+    expect(verifySessionToken(c, sign(payload('arnaud', c.passwordFingerprint, 'pro')))).toBeNull();
+    expect(verifySessionToken(c, sign(payload('compte-pro-test', c.passwordFingerprint, 'pro')))).toBeNull();   // empreinte d'un autre compte
+    // ancien jeton sans rôle : propriétaire seulement (identifiant et empreinte du propriétaire)
+    expect(verifySessionToken(c, sign(payload('arnaud', c.passwordFingerprint)))?.r).toBe('owner');
+    expect(verifySessionToken(c, sign(payload('compte-pro-test', c.pro!.passwordFingerprint)))).toBeNull();
+    expect(verifySessionToken(c, sign(payload('arnaud', c.passwordFingerprint, 'admin')))).toBeNull();
+  });
+
+  it('session pro d\'un jour, propriétaire de sept jours ; compte pro retiré ou mot de passe changé : ses sessions tombent', async () => {
+    const c = await twoAccounts();
+    const now = Date.now();
+    expect(createSessionToken(c, now, undefined, c.pro!).payload.exp - now).toBe(PRO_SESSION_TTL_MS);
+    expect(PRO_SESSION_TTL_MS).toBe(24 * 3600 * 1000);
+    expect(createSessionToken(c, now).payload.exp - now).toBe(SESSION_TTL_MS);
+    const pro = createSessionToken(c, now, undefined, c.pro!).token;
+    expect(verifySessionToken(c, pro, undefined, now + PRO_SESSION_TTL_MS + 1)).toBeNull();
+    const withoutPro = loadAuthConfig({ SCOUTVISION_AUTH_USER: 'arnaud', SCOUTVISION_AUTH_PASSWORD_HASH: hashOf(c), SCOUTVISION_SESSION_SECRET: SECRET })!;
+    expect(verifySessionToken(withoutPro, pro)).toBeNull();
+    const owner = createSessionToken(c, now).token;
+    expect(verifySessionToken(withoutPro, owner)?.r).toBe('owner');           // le propriétaire reste connecté
+    expect(sessionCookie(pro, true, PRO_SESSION_TTL_MS)).toContain('Max-Age=86400');
+  });
+
+  it('cookie d\'appareil du compte pro, lié à son mot de passe', async () => {
+    const c = await twoAccounts();
+    expect(verifyDeviceToken(c, createDeviceToken(c, Date.now(), c.pro!))).toBeTypeOf('string');
   });
 });

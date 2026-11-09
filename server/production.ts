@@ -73,7 +73,7 @@ const server = createServer((req, res) => { void handler(req, res); });
 server.headersTimeout = 30_000;
 server.requestTimeout = 120_000;
 server.listen(port, '0.0.0.0', () => {
-  console.log(`ScoutVision en écoute sur le port ${port} (cookies ${secureCookies ? 'sécurisés' : 'non sécurisés'}, proxy ${trustProxy ? 'de confiance' : 'ignoré'}).`);
+  console.log(`ScoutVision en écoute sur le port ${port} (cookies ${secureCookies ? 'sécurisés' : 'non sécurisés'}, proxy ${trustProxy ? 'de confiance' : 'ignoré'}, compte pro ${auth.pro ? 'configuré' : 'absent'}).`);
   if (!env.ANTHROPIC_API_KEY && !env.GEMINI_API_KEY) console.warn('ANTHROPIC_API_KEY et GEMINI_API_KEY absentes : les fonctions IA répondront « non configuré ».');
   else console.log(`Fonctions IA : ${env.ANTHROPIC_API_KEY ? `Claude (${env.CLAUDE_MODEL || 'claude-opus-5-5'})${env.GEMINI_API_KEY ? ', Gemini en secours' : ''}` : 'Gemini'}.`);
 });

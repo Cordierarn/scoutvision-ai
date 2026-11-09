@@ -201,6 +201,7 @@ bundled. No secret is ever prefixed with `VITE_`.
 
 ```bash
 npm run auth:secret                                   # local: password, hash, session secret
+npm run auth:secret -- --pro                          # optional pro account (no Pronostics page)
 npm run verify:private -- https://<app>.herokuapp.com   # nothing private answers without a session
 ```
 
