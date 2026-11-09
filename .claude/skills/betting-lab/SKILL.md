@@ -35,6 +35,8 @@ règle, de chiffre ou de comportement.
   bankroll saisie, jamais une probabilité.
 - **L'IA rédige, elle ne calcule pas** : jamais de probabilité, de cote ou de mise produite par l'IA ; elle ne contredit jamais un
   « pas de pari » du moteur. Tout changement de prompt incrémente `BETTING_PROMPT_VERSIONS` et ajoute un cas de test.
+  Le serveur remplace en entier tout texte libre de l'IA qui cite une probabilité, une cote, une mise ou un lien, et ne
+  garde que les sources des domaines de `NEWS_ALLOWED_DOMAINS` (`server/bettingFilter.ts`, `docs/betting-lab.md`).
 - **Règlement** : mi-temps et ordre des buts inconnus restent inconnus (`markets.Result` à `None`), jamais 0-0 ; la sélection
   qui en dépend reste en attente. Le règlement est dérivé du résultat courant à chaque passage (`product.resettle`).
 - **Mesure** : un pari = la dernière publication d'un match et d'un profil validé avant le coup d'envoi, publiée depuis le

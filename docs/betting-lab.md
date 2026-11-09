@@ -750,6 +750,70 @@ mais ne sont plus comptées ni montrées : résumé du journal (`playable`), his
 (`evening.journal_bets`, les soirées de ce moteur ne sont plus reconstruites) et critère d'arrêt. L'export porte
 `circuitStart` pour le dire.
 
+## Assistant IA : filtre du texte libre et des sources (9 novembre 2026)
+
+Constat d'audit (P1) : avec un modèle simulé, un article lu faisait sortir « probabilité 80 %, cote 2,10, misez 50 % de la
+bankroll » et un lien dans les champs libres du plan (`summary`, `reason`, `why`, `discipline`). Le seul contrôle était
+numérique, et un nombre présent dans l'actualité était accepté parce qu'il figurait dans la source : l'article
+« blanchissait » ses propres chiffres. La structure tenait (sélections hors moteur et verdicts hors liste rejetés, « pas de
+pari » jamais remplacé). Constat P2 : toute page ouverte par l'outil de lecture d'URL devenait une source cliquable.
+
+Règle retenue (`server/bettingFilter.ts`) :
+
+- **Les chiffres du pari ne sortent que des champs structurés du moteur** (`odds`, `probability`, `stakeFraction`…). Un
+  texte libre de l'IA (synthèse, avis par sélection, raison d'une sélection, raison d'un match à éviter, puce
+  d'actualité, titre de source, requête affichée) est refusé s'il contient : un lien (adresse avec schéma, `www.`, lien
+  markdown ou HTML, domaine sans schéma) ; un pourcentage (« 80 % », « 80% », « pour cent », « percent ») ; un nombre
+  décimal (« 0,8 », « 2,10 », « 2.10 », « @2.10 », « virgule ») ; une fraction ou une proportion (« 5/2 », « 8 chances sur
+  10 », « 3 contre 1 ») ; une cote (« @3 », « cote », « odds » avec un nombre dans la phrase) ; une probabilité
+  (« probabilité », « chances » avec un nombre) ; une mise (« misez », « pariez », « bankroll », « Kelly », « € », « euros »
+  toujours ; « mise », « stake », « unités », « 2u » avec un nombre ; « doublez la mise » et toute mise modifiée même sans
+  nombre). Texte normalisé avant contrôle (chiffres pleine chasse, caractères invisibles).
+- **Champ rejeté en entier, jamais réécrit en partie** : il est remplacé par la mention visible « Texte retiré par le
+  serveur : il citait une probabilité, une cote, une mise ou un lien. », et le plan porte l'avertissement « n texte(s) de
+  l'IA remplacé(s) ». L'actualité est une liste : chaque puce est un champ, une puce fautive est remplacée par la même
+  mention et les autres restent (compteur `filtered` de l'entrée). Un titre de source fautif est remplacé par le domaine,
+  une requête fautive est retirée.
+- **Ce qui passe** : les nombres entiers du football, sans vocabulaire de pari dans la phrase (matchs de suspension, jours
+  d'absence, minutes, score « 2-1 », système « 4-3-3 », place au classement). Le contrôle numérique existant (nombre absent
+  des faits et de l'actualité filtrée : phrase retirée) s'applique ensuite.
+- **Discipline écrite par le serveur** (`PLAN_DISCIPLINE`) : la phrase de discipline n'est plus demandée au modèle (champ
+  retiré du schéma) ; une phrase renvoyée malgré tout est ignorée.
+- Prompts : l'actualité (recherche web, lecture d'articles, titres seuls) et le plan interdisent pourcentages, décimales,
+  fractions, cotes, mises, montants et liens dans le texte, et disent que le serveur les retire. Versions :
+  `BETTING_PROMPT_VERSIONS.news` `ai-betting-news-v2` → `ai-betting-news-v3`, `.plan` `ai-betting-plan-v4` →
+  `ai-betting-plan-v5`.
+
+Sources limitées aux domaines autorisés (`NEWS_ALLOWED_DOMAINS`, 59 domaines, 64 au plus) : sites officiels des
+compétitions et fédérations du Labo (UEFA, FIFA, Premier League, EFL, FA, Ligue 1, LFP, FFF, Bundesliga, DFB, Serie A, FIGC,
+LaLiga, RFEF, Liga Portugal, FPF, Eredivisie, KNVB), agences et médias internationaux (Reuters, AP, AFP, BBC, Guardian, Sky
+Sports, ESPN, The Athletic via nytimes.com, Eurosport, Independent, Telegraph) et presse sportive des pays du Labo (France,
+Allemagne, Italie, Espagne, Portugal, Pays-Bas). Aucun bookmaker, site de pronostics ou de rumeurs de transfert ; aucun site
+de club (les noms de clubs ne figurent pas dans le dépôt). Un domaine couvre ses sous-domaines ; la correspondance est
+exacte (`www.lequipe.fr` oui, `evil-lequipe.fr` et `lequipe.fr.evil.test` non), en https, sans identifiants ni port.
+
+- Claude : la liste est passée en `allowed_domains` aux outils serveur `web_search_20260209` et `web_fetch_20260209`
+  (recherche d'actualité et lecture d'articles), puis les résultats, citations et pages lues sont filtrés de nouveau.
+- Gemini (secours) : l'outil Google Search n'accepte pas de liste de domaines ; ses sources sont des redirections
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/…` dont le titre, fourni par Google, est le domaine de
+  l'éditeur : elles ne sont gardées que si ce domaine est autorisé.
+- Titres Google News et Bing News (secours sans recherche) : seuls les titres d'un éditeur autorisé (domaine du lien
+  direct, ou `<source url>` du flux Google News dont le lien est une redirection) vont au modèle et dans les sources ;
+  seuls les liens directs de ces domaines sont donnés à lire, et une page lue hors liste ne compte pas.
+- Le handler (`guardNews`, `validatePlan`) refiltre tout, quel que soit le fournisseur : c'est le point de contrôle
+  unique.
+
+Tests : `server/bettingFilter.test.ts` (liste, correspondance des domaines, redirections, formes françaises et anglaises
+refusées, textes légitimes gardés) ; dans `server/bettingAi.test.ts`, l'injection de l'audit reprise sur l'actualité et le
+plan (le test échouait avant la correction) ; `server/claudeAi.test.ts` (`allowed_domains`, sources hors liste
+écartées) ; `server/newsFeed.test.ts` (domaine de l'éditeur, secours limité aux domaines autorisés).
+
+Limites : le filtre est lexical (une probabilité écrite tout en lettres sans « pour cent », par exemple « quatre sur cinq »,
+n'est refusée qu'avec le mot « chances » ou un chiffre) ; il peut retirer une puce d'actualité légitime qui cite un
+pourcentage ou une date au format « 07/11 » ; le domaine d'une source Gemini repose sur le titre fourni par Google ; la
+liste réduit la couverture de l'actualité des médias locaux. Le comportement des outils avec `allowed_domains` n'a pas
+été vérifié sur l'API réelle (aucune clé dans l'environnement de développement).
+
 ## Phases suivantes
 
 2. Simulation de chaque match (20 000 tirages, graine fixe) et probabilités de tous les marchés lues dans

@@ -10,6 +10,7 @@ import {
   strictSchema, withFallback,
 } from './claudeAi';
 import { DeadlineError, aiProviders } from './scoutReportPlugin';
+import { NEWS_ALLOWED_DOMAINS } from './bettingFilter';
 
 type Create = Anthropic.MessageCreateParamsNonStreaming;
 
@@ -59,20 +60,20 @@ describe('claudeGroundedGenerator', () => {
   const results: Anthropic.ContentBlock = {
     type: 'web_search_tool_result', tool_use_id: 'srv_1', caller: { type: 'direct' },
     content: [
-      { type: 'web_search_result', url: 'https://news.example/alpha', title: 'Alpha sans son capitaine', encrypted_content: 'x', page_age: null },
+      { type: 'web_search_result', url: 'https://www.bbc.co.uk/sport/alpha', title: 'Alpha sans son capitaine', encrypted_content: 'x', page_age: null },
       { type: 'web_search_result', url: 'http://insecure.example/x', title: 'Ignoré (http)', encrypted_content: 'x', page_age: null },
-      { type: 'web_search_result', url: 'https://news.example/alpha', title: 'Alpha sans son capitaine', encrypted_content: 'y', page_age: null },
+      { type: 'web_search_result', url: 'https://www.bbc.co.uk/sport/alpha', title: 'Alpha sans son capitaine', encrypted_content: 'y', page_age: null },
     ],
   } as Anthropic.WebSearchToolResultBlock;
-  const cited = text('- Capitaine forfait.', [{ type: 'web_search_result_location', url: 'https://cited.example/a', title: 'Source citée', cited_text: 'forfait', encrypted_index: 'e' }]);
+  const cited = text('- Capitaine forfait.', [{ type: 'web_search_result_location', url: 'https://www.lequipe.fr/a', title: 'Source citée', cited_text: 'forfait', encrypted_index: 'e' }]);
 
   it('collects text, cited sources first, search results and queries', async () => {
     const client = fakeClient([message([search, results, cited])]);
     const out = await claudeGroundedGenerator({ apiKey: 'k', client })('Actualité ?');
     expect(out.text).toBe('- Capitaine forfait.');
     expect(out.queries).toEqual(['Alpha Beta team news']);
-    expect(out.sources).toEqual([{ title: 'Source citée', uri: 'https://cited.example/a' }, { title: 'Alpha sans son capitaine', uri: 'https://news.example/alpha' }]);
-    expect(client.calls[0].tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 }]);
+    expect(out.sources).toEqual([{ title: 'Source citée', uri: 'https://www.lequipe.fr/a' }, { title: 'Alpha sans son capitaine', uri: 'https://www.bbc.co.uk/sport/alpha' }]);
+    expect(client.calls[0].tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 5, allowed_domains: [...NEWS_ALLOWED_DOMAINS] }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3, allowed_domains: [...NEWS_ALLOWED_DOMAINS] }]);
     expect(String(client.calls[0].messages[0].content)).toContain('fetch tool');
     expect(out.articlesRead).toBe(0);
   });
@@ -80,11 +81,11 @@ describe('claudeGroundedGenerator', () => {
   it('puts pages opened in full first among the sources and counts them', async () => {
     const fetched: Anthropic.ContentBlock = {
       type: 'web_fetch_tool_result', tool_use_id: 'f1', caller: { type: 'direct' },
-      content: { type: 'web_fetch_result', url: 'https://club.example/news/press-conference-friday', retrieved_at: null, content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '…' }, title: null, citations: null } },
+      content: { type: 'web_fetch_result', url: 'https://www.uefa.com/news/press-conference-friday', retrieved_at: null, content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '…' }, title: null, citations: null } },
     } as unknown as Anthropic.WebFetchToolResultBlock;
     const out = await claudeGroundedGenerator({ apiKey: 'k', client: fakeClient([message([search, results, fetched, cited])]) })('Actualité ?');
     expect(out.articlesRead).toBe(1);
-    expect(out.sources[0]).toEqual({ title: 'club.example · press conference friday', uri: 'https://club.example/news/press-conference-friday' });
+    expect(out.sources[0]).toEqual({ title: 'uefa.com · press conference friday', uri: 'https://www.uefa.com/news/press-conference-friday' });
     expect(out.sources).toHaveLength(3);
   });
 
@@ -100,19 +101,38 @@ describe('claudeGroundedGenerator', () => {
     const err: Anthropic.ContentBlock = { type: 'web_search_tool_result', tool_use_id: 's', caller: { type: 'direct' }, content: { type: 'web_search_tool_result_error', error_code: 'max_uses_exceeded' } } as Anthropic.WebSearchToolResultBlock;
     expect(parseWebSources([err, text('rien')])).toEqual({ sources: [], queries: [] });
   });
+
+  it('keeps only sources and fetched pages of allowed domains, even if a tool returned others', async () => {
+    const mixed: Anthropic.ContentBlock = {
+      type: 'web_search_tool_result', tool_use_id: 'srv_1', caller: { type: 'direct' },
+      content: [
+        { type: 'web_search_result', url: 'https://evil-lequipe.fr/pronostic', title: 'Pronostic', encrypted_content: 'x', page_age: null },
+        { type: 'web_search_result', url: 'https://lequipe.fr.evil.test/x', title: 'Faux', encrypted_content: 'x', page_age: null },
+        { type: 'web_search_result', url: 'https://www.lequipe.fr/Football/b', title: 'Club B : le point', encrypted_content: 'x', page_age: null },
+      ],
+    } as Anthropic.WebSearchToolResultBlock;
+    const fetchedEvil: Anthropic.ContentBlock = {
+      type: 'web_fetch_tool_result', tool_use_id: 'f1', caller: { type: 'direct' },
+      content: { type: 'web_fetch_result', url: 'https://pronos-gagnants.test/club-a', retrieved_at: null, content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '…' }, title: null, citations: null } },
+    } as unknown as Anthropic.WebFetchToolResultBlock;
+    const out = await claudeGroundedGenerator({ apiKey: 'k', client: fakeClient([message([search, mixed, fetchedEvil, text('- Rien.')])]) })('Actualité ?');
+    expect(out.sources).toEqual([{ title: 'Club B : le point', uri: 'https://www.lequipe.fr/Football/b' }]);
+    expect(out.articlesRead).toBe(0);
+    expect(parseFetchedUrls([fetchedEvil])).toEqual([]);
+  });
 });
 
 describe('claudeArticlesReader', () => {
   it('lists the urls really fetched and uses the fetch tool only', async () => {
     const fetched: Anthropic.ContentBlock = {
       type: 'web_fetch_tool_result', tool_use_id: 'f1', caller: { type: 'direct' },
-      content: { type: 'web_fetch_result', url: 'https://news.example/article', retrieved_at: null, content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '…' }, title: null, citations: null } },
+      content: { type: 'web_fetch_result', url: 'https://www.bbc.co.uk/sport/article', retrieved_at: null, content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '…' }, title: null, citations: null } },
     } as unknown as Anthropic.WebFetchToolResultBlock;
     const failed: Anthropic.ContentBlock = { type: 'web_fetch_tool_result', tool_use_id: 'f2', caller: { type: 'direct' }, content: { type: 'web_fetch_tool_result_error', error_code: 'url_not_accessible' } } as Anthropic.WebFetchToolResultBlock;
     const client = fakeClient([message([fetched, failed, text('- Blessé.')])]);
-    const out = await claudeArticlesReader({ apiKey: 'k', client })('Lis https://news.example/article');
-    expect(out).toEqual({ text: '- Blessé.', modelVersion: 'claude-opus-5-5', read: ['https://news.example/article'] });
-    expect(client.calls[0].tools).toEqual([{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 4 }]);
+    const out = await claudeArticlesReader({ apiKey: 'k', client })('Lis https://www.bbc.co.uk/sport/article');
+    expect(out).toEqual({ text: '- Blessé.', modelVersion: 'claude-opus-5-5', read: ['https://www.bbc.co.uk/sport/article'] });
+    expect(client.calls[0].tools).toEqual([{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 4, allowed_domains: [...NEWS_ALLOWED_DOMAINS] }]);
     expect(parseFetchedUrls([failed])).toEqual([]);
   });
 });

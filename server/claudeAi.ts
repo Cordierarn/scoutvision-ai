@@ -7,6 +7,10 @@
  * (ANTHROPIC_API_KEY), le serveur construit les prompts, les réponses sont auditées par les handlers. Le SDK
  * est chargé à la demande, côté serveur seulement, et le client est injectable pour les tests (sans réseau).
  *
+ * Sources du Labo paris : la recherche et la lecture d'URL sont limitées aux domaines autorisés (`allowed_domains` des
+ * deux outils serveur, liste NEWS_ALLOWED_DOMAINS de server/bettingFilter.ts), puis les sources renvoyées sont
+ * filtrées de nouveau (défense en profondeur ; le handler les filtre une troisième fois).
+ *
  * Réglages : un seul modèle (CLAUDE_MODEL, défaut claude-opus-5-5), effort « low » (CLAUDE_EFFORT) : les
  * tâches relisent des faits déjà calculés et doivent tenir les délais du serveur (25 s par requête sur
  * Heroku pour les rapports, 100 s pour l'assistant paris). Les relances sur 429 / 502 / 503 / 529 sont
@@ -16,6 +20,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { GenerateText, Generation } from './scoutReport';
 import type { ArticlesGeneration, GenerateGrounded, GenerateJson, GroundedGeneration, ReadArticles, Source } from './bettingAi';
+import { NEWS_ALLOWED_DOMAINS, urlAllowed } from './bettingFilter';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
 export type Effort = NonNullable<Anthropic.OutputConfig['effort']>;
@@ -27,6 +32,13 @@ const MAX_FETCHES = 4;           // articles lus par demande (newsFeed.MAX_ARTIC
 const MAX_NEWS_FETCHES = 3;      // articles ouverts en entier pendant la recherche d'actualité
 /** Consigne ajoutée à la recherche d'actualité (Claude seulement : l'outil de lecture d'URL n'existe pas chez Gemini) */
 export const NEWS_FETCH_HINT = 'Tool use: search first. When a result looks relevant but its excerpt is not enough to confirm an absence, a doubt or a line-up (press conference, injury report, club announcement), open that page with the fetch tool before writing; open at most three pages.';
+/** Outils serveur du Labo paris, limités aux domaines autorisés */
+export function newsSearchTool(maxUses: number): Anthropic.WebSearchTool20260209 {
+  return { type: 'web_search_20260209', name: 'web_search', max_uses: maxUses, allowed_domains: [...NEWS_ALLOWED_DOMAINS] };
+}
+export function newsFetchTool(maxUses: number): Anthropic.WebFetchTool20260209 {
+  return { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: maxUses, allowed_domains: [...NEWS_ALLOWED_DOMAINS] };
+}
 const MAX_TURNS = 4;             // reprises d'un tour mis en pause par un outil serveur
 const CALL_TIMEOUT_MS = 90 * 1000;
 
@@ -77,12 +89,12 @@ export function responseText(response: Anthropic.Message): string {
   return response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').trim();
 }
 
-/** Sources d'une réponse avec recherche web : résultats de recherche et citations, dédoublonnés, https seulement */
+/** Sources d'une réponse avec recherche web : résultats de recherche et citations, dédoublonnés, https des domaines autorisés seulement */
 export function parseWebSources(content: Anthropic.ContentBlock[]): Pick<GroundedGeneration, 'sources' | 'queries'> {
   const seen = new Set<string>();
   const sources: Source[] = [];
   const add = (uri: unknown, title: unknown) => {
-    if (typeof uri !== 'string' || !/^https:\/\//.test(uri) || typeof title !== 'string' || !title.trim()) return;
+    if (typeof uri !== 'string' || !urlAllowed(uri) || typeof title !== 'string' || !title.trim()) return;
     const key = title.slice(0, 120) + uri;
     if (seen.has(key)) return;
     seen.add(key);
@@ -115,11 +127,11 @@ function titleOf(url: string): string {
   }
 }
 
-/** Adresses effectivement lues par l'outil de lecture d'URL */
+/** Adresses effectivement lues par l'outil de lecture d'URL, des domaines autorisés seulement */
 export function parseFetchedUrls(content: Anthropic.ContentBlock[]): string[] {
   const read: string[] = [];
   for (const block of content) {
-    if (block.type === 'web_fetch_tool_result' && block.content.type === 'web_fetch_result' && typeof block.content.url === 'string') read.push(block.content.url);
+    if (block.type === 'web_fetch_tool_result' && block.content.type === 'web_fetch_result' && typeof block.content.url === 'string' && urlAllowed(block.content.url)) read.push(block.content.url);
   }
   return [...new Set(read)];
 }
@@ -186,13 +198,13 @@ export function claudeGroundedGenerator(options: ClaudeOptions): GenerateGrounde
     const client = await clientOf(options);
     const { response, content } = await converse(client, {
       ...base(options, `${prompt}\n\n${NEWS_FETCH_HINT}`),
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: MAX_SEARCHES }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_NEWS_FETCHES }],
+      tools: [newsSearchTool(MAX_SEARCHES), newsFetchTool(MAX_NEWS_FETCHES)],
     }, options.log);
     checkStop(response);
     const found = parseWebSources(content);
     const read = parseFetchedUrls(content);
     // articles ouverts en entier d'abord : ce sont les sources les plus sûres de la réponse
-    const fetched = read.filter(u => /^https:\/\//.test(u) && !found.sources.some(s => s.uri === u)).map(u => ({ title: titleOf(u), uri: u }));
+    const fetched = read.filter(u => !found.sources.some(s => s.uri === u)).map(u => ({ title: titleOf(u), uri: u }));
     return { text: responseText({ ...response, content }), modelVersion: response.model, sources: [...fetched, ...found.sources].slice(0, 12), queries: found.queries, articlesRead: read.length };
   };
 }
@@ -201,7 +213,7 @@ export function claudeGroundedGenerator(options: ClaudeOptions): GenerateGrounde
 export function claudeArticlesReader(options: ClaudeOptions): ReadArticles {
   return async prompt => {
     const client = await clientOf(options);
-    const { response, content } = await converse(client, { ...base(options, prompt), tools: [{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES }] }, options.log);
+    const { response, content } = await converse(client, { ...base(options, prompt), tools: [newsFetchTool(MAX_FETCHES)] }, options.log);
     checkStop(response);
     return { text: responseText({ ...response, content }), modelVersion: response.model, read: parseFetchedUrls(content) } satisfies ArticlesGeneration;
   };

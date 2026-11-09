@@ -19,18 +19,25 @@
  *
  * Les faits viennent de l'artefact servi par le serveur (forecast/suggestions/index.json), jamais du
  * navigateur, qui n'envoie que des identifiants. La clé Gemini ne quitte jamais le serveur.
+ *
+ * Filtre (server/bettingFilter.ts) : un texte libre de l'IA qui cite une probabilité, une cote, une mise ou un lien
+ * est remplacé en entier par une mention visible, quel que soit l'article lu ; les sources sont limitées aux
+ * domaines autorisés (`NEWS_ALLOWED_DOMAINS`).
  */
 
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { NUMBER, factNumbers, supported } from './reportAudit';
+import { NEWS_TEXT_RULE, filterSources, freeTextOk, guardFreeText, guardNewsText, hostAllowed, urlAllowed } from './bettingFilter';
 import { ContextLoader, MatchContext, regulars } from './bettingContext';
 import { NoModelAvailable } from './geminiModels';
 import { FetchHeadlines, Headline, articlesToRead, buildArticlesPrompt, buildHeadlinesPrompt } from './newsFeed';
 import { GenerateText, Generation, errorStatus, redact, resolveGeminiModel } from './scoutReport';
 
-// plan v4 : règles des profils « exploratoire » et « ancien » retirées avec ces profils (6 novembre 2026) ; actualité inchangée
-export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v2', plan: 'ai-betting-plan-v4' } as const;
+// news v3 et plan v5 (9 novembre 2026) : aucun pourcentage, nombre décimal, cote, mise ni lien dans le texte libre (filtre du
+// serveur, server/bettingFilter.ts) ; la phrase de discipline du plan est écrite par le serveur.
+// plan v4 : règles des profils « exploratoire » et « ancien » retirées avec ces profils (6 novembre 2026)
+export const BETTING_PROMPT_VERSIONS = { news: 'ai-betting-news-v3', plan: 'ai-betting-plan-v5' } as const;
 export const BETTING_NEWS_PATH = '/api/ai/betting-news';
 export const BETTING_PLAN_PATH = '/api/ai/betting-plan';
 export const MAX_PLAN_MATCHES = 8;
@@ -91,8 +98,8 @@ export function indexLoader(dataDir: string): LoadIndex {
 
 /** Suggestion telle que le modèle la reçoit : une référence stable `matchId#rang` et les chiffres calculés par le
  * moteur Python (probabilité du moteur, probabilité sharp sans marge, probabilité de référence, espérance face à
- * elle sur la cote Winamax, mise en pour cent de la bankroll). Pourcentages à une décimale : le modèle les
- * recopie lisiblement (« 78,7 % »). */
+ * elle sur la cote Winamax, mise en pour cent de la bankroll). Le modèle les lit pour juger l'actualité mais ne les
+ * recopie jamais : l'interface les affiche depuis les champs structurés du plan. */
 export interface FactSuggestion {
   ref: string; label: string; family: string; odds: number; engineProbabilityPct: number; sharpProbabilityPct: number | null; referenceProbabilityPct: number;
   expectedValuePct: number; stakePct: number; stakeMode: StakeMode; sharpBookmaker: string | null; warnings: string[]; verdict: 'bet'; reasons: string[];
@@ -155,7 +162,8 @@ export function buildPlanFacts(index: SuggestionsIndexFile, matchIds: string[], 
 // APPELS GEMINI (injectés : testables sans réseau)
 // ============================================
 
-export interface Source { title: string; uri: string }
+/** `domain` : domaine de l'éditeur quand `uri` est une redirection Google (ancrage Gemini, article de Google News) */
+export interface Source { title: string; uri: string; domain?: string }
 export interface GroundedGeneration extends Generation { sources: Source[]; queries: string[]; searchHtml?: string; articlesRead?: number }
 export type GenerateGrounded = (prompt: string) => Promise<GroundedGeneration>;
 export type GenerateJson = (prompt: string, schema: Record<string, unknown>) => Promise<Generation>;
@@ -187,7 +195,9 @@ export function parseGrounding(metadata: unknown): Omit<GroundedGeneration, 'tex
     const title = typeof c.web?.title === 'string' ? c.web.title.slice(0, 120) : '';
     if (!/^https:\/\//.test(uri) || !title || seen.has(title + uri)) continue;
     seen.add(title + uri);
-    sources.push({ title, uri });
+    // le titre d'une source de l'ancrage Google est le domaine de l'éditeur (l'adresse est une redirection)
+    const domain = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(title.trim()) ? title.trim().toLowerCase() : undefined;
+    sources.push({ title, uri, ...(domain ? { domain } : {}) });
   }
   const queries = Array.isArray(md.webSearchQueries) ? md.webSearchQueries.filter((q): q is string => typeof q === 'string' && !!q.trim()).slice(0, 8) : [];
   const html = typeof md.searchEntryPoint?.renderedContent === 'string' ? md.searchEntryPoint.renderedContent : undefined;
@@ -212,6 +222,7 @@ Search the web (several searches if needed, in English and in the clubs' languag
 - probable line-ups or rotation hints (for example a more important match a few days later);
 - coach statements about availability, and notable context (weather, pitch, travel, stakes).
 Rules: report only facts found in your search results, attributed to the team they concern; never guess a line-up; no prediction, no odds, no betting advice.
+${NEWS_TEXT_RULE}
 If the news found is older than 4 days or concerns another match, ignore it. If nothing reliable is found, write exactly "Aucune information fiable trouvée."
 Answer in French with at most 8 short bullet points ("- "), most important first.`;
 }
@@ -221,6 +232,19 @@ export interface NewsEntry {
   matchId: string; text: string; sources: Source[]; queries: string[]; searchHtml?: string; fetchedAt: string; model: string;
   method?: 'google-search' | 'news-feed'; fallbackReason?: string;
   articlesRead?: number;   // secours : articles effectivement lus par Gemini (outil URL context)
+  /** Retraits du filtre : puces remplacées (chiffre de pari ou lien), sources hors domaines autorisés, requêtes écartées */
+  filtered?: { bullets: number; sources: number; queries: number };
+}
+
+/** Actualité telle qu'elle peut être montrée et transmise au plan : texte, sources et requêtes passés au filtre */
+export function guardNews(entry: NewsEntry): NewsEntry {
+  const text = guardNewsText(entry.text);
+  const sources = filterSources(entry.sources);
+  const queries = entry.queries.filter(q => freeTextOk(q));
+  const filtered = { bullets: text.removed, sources: sources.removed, queries: entry.queries.length - queries.length };
+  const rest: NewsEntry = { ...entry };
+  delete rest.filtered;
+  return { ...rest, text: text.text, sources: sources.sources, queries, ...(filtered.bullets || filtered.sources || filtered.queries ? { filtered } : {}) };
 }
 
 /** Lecture d'articles par Gemini (outil URL context) : texte et adresses effectivement lues */
@@ -293,12 +317,12 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
   try {
     const g = await withRetry(() => deps.generateGrounded(buildNewsPrompt(facts, today(now), context)), deps.sleep);
     if (!g.text.trim()) return { status: 502, body: { error: 'Le modèle n\'a renvoyé aucun texte pour ce match (réponse vide). Réessayez.' } };
-    const entry: NewsEntry = {
+    const entry = guardNews({
       matchId: m.matchId, text: cleanNews(g.text), sources: g.sources, queries: g.queries, ...(g.searchHtml ? { searchHtml: g.searchHtml } : {}),
       fetchedAt: now.toISOString(), model: g.modelVersion?.trim() || resolveGeminiModel(deps.model), method: 'google-search', ...(g.articlesRead ? { articlesRead: g.articlesRead } : {}),
-    };
+    });
     deps.news.set(entry);
-    deps.log?.(`[betting-news] ${m.matchId} : ${entry.sources.length} source(s), ${entry.queries.length} requête(s)`);
+    deps.log?.(`[betting-news] ${m.matchId} : ${entry.sources.length} source(s), ${entry.queries.length} requête(s)${filterLog(entry)}`);
     return { status: 200, body: { ...entry, cached: false, promptVersion: BETTING_PROMPT_VERSIONS.news } };
   } catch (error) {
     const detail = redact(error instanceof Error ? error.message : String(error), deps.apiKey);
@@ -307,9 +331,9 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
     if (!deps.fetchHeadlines || !deps.generateText) return { status: 502, body: { error: reason } };
     // Secours : titres Google News des 4 derniers jours, lus par un modèle texte
     try {
-      const entry = await newsFromHeadlines(m, now, context, reason, deps);
+      const entry = guardNews(await newsFromHeadlines(m, now, context, reason, deps));
       deps.news.set(entry);
-      deps.log?.(`[betting-news] ${m.matchId} : secours Google News, ${entry.sources.length} titre(s)`);
+      deps.log?.(`[betting-news] ${m.matchId} : secours Google News, ${entry.sources.length} titre(s)${filterLog(entry)}`);
       return { status: 200, body: { ...entry, cached: false, promptVersion: BETTING_PROMPT_VERSIONS.news } };
     } catch (fallback) {
       const why = redact(fallback instanceof Error ? fallback.message : String(fallback), deps.apiKey).replace(/\s+/g, ' ').slice(0, 200);
@@ -319,21 +343,29 @@ export async function handleBettingNews(body: unknown, deps: BettingDeps): Promi
   }
 }
 
+const filterLog = (e: NewsEntry) => (e.filtered ? ` ; filtre : ${e.filtered.bullets} puce(s), ${e.filtered.sources} source(s), ${e.filtered.queries} requête(s) retirée(s)` : '');
+
 const MAX_HEADLINE_SOURCES = 8;
 
+/** Éditeur d'un titre autorisé : domaine du lien direct, ou domaine déclaré par le flux (`<source url>` de Google News) */
+const headlineAllowed = (h: Headline) => urlAllowed(h.link) || hostAllowed(h.domain);
+
 async function newsFromHeadlines(m: IndexMatch, now: Date, context: MatchContext | null, reason: string, deps: BettingDeps): Promise<NewsEntry> {
-  const { items, queries } = await deps.fetchHeadlines!(m.home, m.away, now);
+  // seuls les titres des domaines autorisés vont au modèle ; seuls les liens directs de ces domaines sont lus
+  const { items: all, queries } = await deps.fetchHeadlines!(m.home, m.away, now);
+  const items = all.filter(headlineAllowed);
   const kickoff = m.kickoff ?? m.date;
   const check = playersToCheck(m, context);
   let text = 'Aucune information fiable trouvée.';
   let model = '';
   let read: string[] = [];
-  const articles = articlesToRead(items);
+  const articles = articlesToRead(items.filter(h => urlAllowed(h.link)));
   // 1. lecture des articles les plus pertinents (outil URL context) ; un lien illisible n'empêche pas les autres
   if (articles.length && deps.readArticles) {
     try {
       const g = await withRetry(() => deps.readArticles!(buildArticlesPrompt(m.home, m.away, m.competition, kickoff, today(now), articles, items, check)), deps.sleep);
-      if (g.text.trim() && g.read.length) { text = cleanNews(g.text); model = g.modelVersion?.trim() ?? ''; read = g.read; }
+      const readAllowed = g.read.filter(urlAllowed);
+      if (g.text.trim() && readAllowed.length) { text = cleanNews(g.text); model = g.modelVersion?.trim() ?? ''; read = readAllowed; }
       else deps.log?.(`[betting-news] ${m.matchId} : aucun article lisible (${articles.length} lien(s)), titres seuls`);
     } catch (error) {
       deps.log?.(`[betting-news] ${m.matchId} : lecture des articles en échec, titres seuls : ${redact(error instanceof Error ? error.message : String(error), deps.apiKey).slice(0, 160)}`);
@@ -352,7 +384,7 @@ async function newsFromHeadlines(m: IndexMatch, now: Date, context: MatchContext
   return {
     matchId: m.matchId, text, queries, fetchedAt: now.toISOString(), model: model || resolveGeminiModel(deps.model), method: 'news-feed', fallbackReason: reason,
     articlesRead: read.length,
-    sources: ordered.slice(0, MAX_HEADLINE_SOURCES).map(h => ({ title: `${isRead(h) ? '[lu] ' : ''}${h.source ? `${h.source} : ` : ''}${h.title}`.slice(0, 160), uri: h.link })),
+    sources: ordered.slice(0, MAX_HEADLINE_SOURCES).map(h => ({ title: `${isRead(h) ? '[lu] ' : ''}${h.source ? `${h.source} : ` : ''}${h.title}`.slice(0, 160), uri: h.link, ...(h.domain ? { domain: h.domain } : {}) })),
   };
 }
 
@@ -397,9 +429,8 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
     picks: { type: 'array', items: { type: 'object', properties: { ref: { type: 'string' }, why: { type: 'string' } }, required: ['ref', 'why'] } },
     combo: { type: 'object', properties: { refs: { type: 'array', items: { type: 'string' } }, why: { type: 'string' } }, required: ['refs', 'why'] },
     avoid: { type: 'array', items: { type: 'object', properties: { matchId: { type: 'string' }, why: { type: 'string' } }, required: ['matchId', 'why'] } },
-    discipline: { type: 'string', description: 'Une phrase de discipline de mise, en français.' },
   },
-  required: ['summary', 'matches', 'picks', 'combo', 'avoid', 'discipline'],
+  required: ['summary', 'matches', 'picks', 'combo', 'avoid'],
 };
 
 export function buildPlanPrompt(facts: PlanFacts, news: Record<string, string>): string {
@@ -408,14 +439,13 @@ A deterministic Python engine has already decided everything numerical. For each
 Your only job: confront each validated bet with the pre-match news below (absences, doubts, rotation, line-ups), which the engine cannot see, and write a short factual plan.
 Hard rules:
 - The engine's verdict is final. Never present a "no bet" match as worth betting, never suggest a selection, market or line that is not listed, never say a validated bet is "value" because of your own reasoning: the value was computed, you only check the news.
-- Never compute, estimate or adjust a probability, odds, expected value or stake. Write only numbers that appear in the facts or in the news, as written there (percentages like "78,7 %").
-- Verdict per validated bet: "garder" when nothing in the news contradicts it; "prudence" when the news adds an uncertainty the engine cannot see (a key absence that concerns this market, probable rotation, unclear line-up, no news found, or a "keyPlayerDependency" player whose presence is unknown); "eviter" only when the news directly undermines the selection (the player the market depends on is out, a line-up that changes the match). Each reason is one sentence that cites the news item or the fact used.
+- Never compute, estimate or adjust a probability, odds, expected value or stake, and never write one: the panel shows the engine's numbers next to your text. No text field may contain a probability, odds, expected value, stake, bankroll, percentage, decimal number, fraction, amount of money, link or web address, even when the news gives one; the server replaces any text field that contains one. Whole numbers taken from the facts or the news are allowed (matches of suspension, days out, minutes, a score such as 2-1, a league position).
+- Verdict per validated bet: "garder" when nothing in the news contradicts it; "prudence" when the news adds an uncertainty the engine cannot see (a key absence that concerns this market, probable rotation, unclear line-up, no news found, or a "keyPlayerDependency" player whose presence is unknown); "eviter" only when the news directly undermines the selection (the player the market depends on is out, a line-up that changes the match). Each reason is one sentence that cites the news item or names the fact used.
 - For a "no bet" match, do not give verdicts; in "avoid", restate the engine's reasons in one plain sentence and add any news that confirms the caution. Never argue against the refusal.
 - "picks": at most ${MAX_PICKS} refs among validated bets you kept ("garder" or "prudence"), best first, one sentence each. "combo": always an empty refs list (combined bets are disabled). "avoid": the "no bet" matches and any validated bet you marked "eviter", with the reason.
-- "discipline": one sentence: stakes stay those of the engine, never chase losses, place nothing before checking the official line-ups when a warning says the line-up is unknown.
 
 Each match also carries "context", the ScoutVision statistics of both teams (season to date): model and no-vig market 1X2 probabilities, expected goals, league standings with title / top 4 / relegation probabilities, "seasonStakes" (how much this result moves the team's season objective), team profiles per competition, usual system and XI, and "keyPlayers" (most used players over the whole season: share of minutes, goals, assists, xG, xA, rating, VAEP per 90, RAPM net impact). A player with a single match is not a regular, whatever his share of minutes in that match.
-Use this context to judge how much a reported absence matters and whether a team may rotate (low "seasonStakes", bigger match soon). Cite the statistic you rely on, with its value as written in the facts.
+Use this context to judge how much a reported absence matters and whether a team may rotate (low "seasonStakes", bigger match soon). Name the statistic you rely on; quote its value only when it is a whole number (goals, matches, league position), never a percentage or a decimal.
 
 **FACTS (JSON) — engine output and team context:**
 ${JSON.stringify(facts)}
@@ -457,12 +487,21 @@ export function auditText(text: unknown, allowed: number[]): { text: string; rem
   return { text: kept.join(' ').trim(), removed: sentences.length - kept.length };
 }
 
-/** Valide la réponse du modèle contre les faits : références, verdicts, contraintes du plan, nombres */
+/** Phrase de discipline du plan, écrite par le serveur (jamais par le modèle) */
+export const PLAN_DISCIPLINE = 'Mises du moteur, jamais de rattrapage des pertes ; rien avant les compositions officielles quand un avertissement signale une composition inconnue.';
+
+/** Valide la réponse du modèle contre les faits : références, verdicts, contraintes du plan, texte libre (chiffres de pari,
+ * liens), nombres. Un champ libre qui cite une probabilité, une cote, une mise ou un lien est remplacé en entier. */
 export function validatePlan(raw: unknown, facts: PlanFacts, news: Record<string, NewsEntry | undefined>, index: SuggestionsIndexFile): PlanResponse {
   const warnings: string[] = [];
-  const allowed = [...factNumbers(facts), ...factNumbers(Object.values(news).map(n => n?.text ?? '')), ...factNumbers(facts.date)];
+  const allowed = [...factNumbers(facts), ...factNumbers(Object.values(news).map(n => (n ? guardNewsText(n.text).text : ''))), ...factNumbers(facts.date)];
   let removed = 0;
-  const say = (t: unknown) => { const r = auditText(t, allowed); removed += r.removed; return r.text; };
+  let rejected = 0;
+  const say = (t: unknown) => {
+    const guarded = guardFreeText(t);
+    if (guarded.rejected) { rejected++; return guarded.text; }
+    const r = auditText(guarded.text, allowed); removed += r.removed; return r.text;
+  };
   const plan = isObject(raw) ? raw : {};
   const byRef = new Map<string, { s: FactSuggestion; m: MatchFacts }>();
   facts.matches.forEach(m => m.suggestions.forEach(s => byRef.set(s.ref, { s, m })));
@@ -520,9 +559,10 @@ export function validatePlan(raw: unknown, facts: PlanFacts, news: Record<string
       verdicts: m.suggestions.map(s => ({ ref: s.ref, label: s.label, verdict: verdictOf.get(s.ref)?.verdict ?? 'non_evalue', reason: verdictOf.get(s.ref)?.reason ?? '' })),
     })),
     picks, combo, avoid,
-    discipline: say(plan.discipline),
+    discipline: PLAN_DISCIPLINE,
     warnings,
   };
+  if (rejected) warnings.push(`${rejected} texte(s) de l'IA remplacé(s) : probabilité, cote, mise ou lien, qui ne viennent que des champs du moteur.`);
   if (removed) warnings.push(`${removed} phrase(s) retirée(s) : nombre absent des données du moteur et de l'actualité.`);
   return response;
 }
@@ -548,7 +588,7 @@ export async function handleBettingPlan(body: unknown, deps: BettingDeps): Promi
   const meta = (model: string) => ({ model, requestedModel: resolveGeminiModel(deps.model), generatedAt: now.toISOString(), suggestionsAt: index.generatedAt });
   if (!facts.matches.some(m => m.suggestions.length)) {
     // « pas de pari » partout : le plan est entièrement calculé, le modèle n'est pas appelé
-    const plan = validatePlan({ summary: '', matches: [], picks: [], combo: { refs: [], why: '' }, avoid: [], discipline: '' }, facts, news, index);
+    const plan = validatePlan({ summary: '', matches: [], picks: [], combo: { refs: [], why: '' }, avoid: [] }, facts, news, index);
     plan.summary = `Pas de pari aujourd'hui sur ${facts.matches.length === 1 ? 'ce match' : `ces ${facts.matches.length} matchs`} : aucune sélection ne passe le coupe-circuit du moteur (profil ${profile}).`;
     plan.discipline = 'Ne rien miser : une journée sans pari est le résultat normal d\'un marché efficient.';
     deps.log?.(`[betting-plan] ${facts.matches.length} match(s), aucune sélection validée : plan sans appel au modèle`);

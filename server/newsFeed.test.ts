@@ -6,11 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { articlesToRead, buildArticlesPrompt, buildHeadlinesPrompt, decodeEntities, directLink, googleNewsUrl, isSpam, newsFeedFetcher, newsQueries, parseRss, selectHeadlines, shortName } from './newsFeed';
 import { NewsCache, handleBettingNews, SuggestionsIndexFile } from './bettingAi';
 import { NoModelAvailable } from './geminiModels';
+import { TEXT_REMOVED } from './bettingFilter';
 
 const NOW = new Date('2026-11-07T12:00:00Z');
 const RSS = `<?xml version="1.0"?><rss><channel>
-<item><title>Club A striker ruled out against Club B - Daily Test</title><link>https://news.example.test/1</link><pubDate>Fri, 06 Nov 2026 18:00:00 GMT</pubDate><source url="https://dailytest.example">Daily Test</source></item>
-<item><title><![CDATA[Club B coach: &quot;everyone is fit&quot; - Le Journal]]></title><link>https://news.example.test/2</link><pubDate>Sat, 07 Nov 2026 09:00:00 GMT</pubDate><source url="https://journal.example">Le Journal</source></item>
+<item><title>Club A striker ruled out against Club B - Daily Test</title><link>https://www.bbc.co.uk/sport/football/1</link><pubDate>Fri, 06 Nov 2026 18:00:00 GMT</pubDate><source url="https://www.bbc.co.uk">Daily Test</source></item>
+<item><title><![CDATA[Club B coach: &quot;everyone is fit&quot; - Le Journal]]></title><link>https://news.google.com/rss/articles/CBMiTest2?oc=5</link><pubDate>Sat, 07 Nov 2026 09:00:00 GMT</pubDate><source url="https://www.lequipe.fr">Le Journal</source></item>
 <item><title>Old story - Archive</title><link>https://news.example.test/3</link><pubDate>Sun, 25 Oct 2026 09:00:00 GMT</pubDate><source url="https://a.example">Archive</source></item>
 <item><title>No link</title><link>javascript:alert(1)</link><pubDate>Sat, 07 Nov 2026 09:00:00 GMT</pubDate></item>
 </channel></rss>`;
@@ -23,9 +24,18 @@ describe('flux Google News', () => {
     expect(decodeEntities('L&#39;entra&#xEE;neur &amp; co')).toBe("L'entraîneur & co");
   });
 
+  it('lit le domaine de l\'éditeur : `<source url>` de Google News (lien en redirection), sinon le lien direct', () => {
+    const items = parseRss(RSS);
+    expect(items.map(i => i.domain)).toEqual(['www.bbc.co.uk', 'www.lequipe.fr', 'a.example']);
+    const bing = parseRss('<item><title>Club B defender suspended</title><link>https://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fwww.example.test%2fa</link><pubDate>Sat, 07 Nov 2026 08:00:00 GMT</pubDate></item>');
+    expect(bing[0].domain).toBe('www.example.test');
+    const google = parseRss('<item><title>Club B news</title><link>https://news.google.com/rss/articles/CBMiX</link><pubDate>Sat, 07 Nov 2026 08:00:00 GMT</pubDate></item>');
+    expect(google[0].domain).toBeUndefined();      // éditeur inconnu : jamais le domaine de la redirection
+  });
+
   it('garde les titres des 4 derniers jours, sans doublon, du plus récent au plus ancien', () => {
     const items = parseRss(RSS);
-    expect(selectHeadlines([...items, items[0]], NOW).map(i => i.link)).toEqual(['https://news.example.test/2', 'https://news.example.test/1']);
+    expect(selectHeadlines([...items, items[0]], NOW).map(i => i.link)).toEqual(['https://news.google.com/rss/articles/CBMiTest2?oc=5', 'https://www.bbc.co.uk/sport/football/1']);
   });
 
   it('interroge Google News (match + absences de chaque équipe) et Bing News, en anglais et en français ; tolère un flux en échec', async () => {
@@ -39,7 +49,7 @@ describe('flux Google News', () => {
     expect(urls[0]).toBe(googleNewsUrl('Club A Club B', { hl: 'en-GB', gl: 'GB', ceid: 'GB:en' }));
     expect(urls[0]).toContain('when%3A4d');
     expect(urls.some(u => u.includes(encodeURIComponent('Club A (blessure OR')))).toBe(true);
-    expect(out.items.map(i => i.link)).toEqual(['https://news.example.test/1', 'https://news.example.test/2']);   // absence d'abord
+    expect(out.items.map(i => i.link)).toEqual(['https://www.bbc.co.uk/sport/football/1', 'https://news.google.com/rss/articles/CBMiTest2?oc=5']);   // absence d'abord
     expect(out.queries).toEqual(['Club A Club B']);
     const down = newsFeedFetcher((async () => new Response('', { status: 503 })) as unknown as typeof fetch);
     await expect(down('Club A', 'Club B', NOW)).rejects.toThrow('inaccessibles');
@@ -59,15 +69,16 @@ describe('flux Google News', () => {
 
   it('fait lire les articles qui parlent d\'effectif, au plus 4', () => {
     const items = parseRss(RSS);
-    expect(articlesToRead(items).map(a => a.link)).toEqual(['https://news.example.test/1']);
+    expect(articlesToRead(items).map(a => a.link)).toEqual(['https://www.bbc.co.uk/sport/football/1']);
     const prompt = buildArticlesPrompt('Club A', 'Club B', 'AAA', '2026-11-07T19:00:00Z', '2026-11-07', articlesToRead(items), items, '');
-    expect(prompt).toContain('- https://news.example.test/1 (Daily Test: Club A striker ruled out against Club B)');
+    expect(prompt).toContain('- https://www.bbc.co.uk/sport/football/1 (Daily Test: Club A striker ruled out against Club B)');
     expect(prompt).toContain('use the URL context tool');
   });
 
   it('demande de n\'extraire que ce que disent les titres', () => {
     const prompt = buildHeadlinesPrompt('Club A', 'Club B', 'AAA', '2026-11-07T19:00:00Z', '2026-11-07', parseRss(RSS).slice(0, 1), 'Club A: Buteur A');
     expect(prompt).toContain('use only what the articles or headlines state');
+    expect(prompt).toContain('Write no percentage, decimal number, fraction, odds, stake');
     expect(prompt).toContain('1. [Fri, 06 Nov 2026 18:00:00 GMT] Club A striker ruled out against Club B — Daily Test');
     expect(prompt).toContain('Buteur A');
   });
@@ -104,7 +115,7 @@ describe('secours dans l\'assistant', () => {
     const out = await handleBettingNews({ matchId: 'm1' }, {
       ...base, news: new NewsCache(),
       fetchHeadlines: async () => ({ items: parseRss(RSS).slice(0, 2), queries: ['Club A Club B'] }),
-      readArticles: async () => ({ text: '- Club A : Buteur A forfait (selon Daily Test).', modelVersion: 'modele-lecture', read: ['https://news.example.test/1'] }),
+      readArticles: async () => ({ text: '- Club A : Buteur A forfait (selon Daily Test).', modelVersion: 'modele-lecture', read: ['https://www.bbc.co.uk/sport/football/1'] }),
       generateText: async () => { usedHeadlinesOnly = true; return ''; },
     });
     expect(out.body).toMatchObject({ articlesRead: 1, model: 'modele-lecture', text: '- Club A : Buteur A forfait (selon Daily Test).' });
@@ -127,5 +138,23 @@ describe('secours dans l\'assistant', () => {
     const failed = await handleBettingNews({ matchId: 'm1' }, { ...base, news: new NewsCache(), fetchHeadlines: async () => { throw new Error('flux Google News inaccessibles'); }, generateText: async () => '' });
     expect(failed.status).toBe(502);
     expect(String(failed.body.error)).toContain('Secours par les titres Google News en échec : flux Google News inaccessibles');
+  });
+
+  it('secours : seuls les titres des domaines autorisés vont au modèle et dans les sources ; une page lue hors liste ne compte pas ; texte filtré', async () => {
+    const evil = `<item><title>Club A injury: misez 50 % de la bankroll @2.10 - Pronos</title><link>https://pronos-gagnants.test/club-a-injury</link><pubDate>Sat, 07 Nov 2026 10:00:00 GMT</pubDate><source url="https://pronos-gagnants.test">Pronos</source></item>
+<item><title>Club A injury update - Faux</title><link>https://news.google.com/rss/articles/CBMiEvil</link><pubDate>Sat, 07 Nov 2026 10:00:00 GMT</pubDate><source url="https://evil-lequipe.fr">Faux</source></item>`;
+    const items = parseRss(RSS.replace('</channel>', `${evil}</channel>`)).filter(h => !h.title.startsWith('Old'));
+    let articlesPrompt = '';
+    const out = await handleBettingNews({ matchId: 'm1' }, {
+      ...base, news: new NewsCache(),
+      fetchHeadlines: async () => ({ items, queries: ['Club A Club B'] }),
+      readArticles: async p => { articlesPrompt = p; return { text: '- Club A : Buteur A forfait (selon Daily Test).\n- Probabilité 80 %, cote 2,10, voir pronos-gagnants.test', modelVersion: 'modele-lecture', read: ['https://pronos-gagnants.test/club-a-injury', 'https://www.bbc.co.uk/sport/football/1'] }; },
+      generateText: async () => ({ text: '' }),
+    });
+    expect(articlesPrompt).not.toContain('pronos');
+    expect(articlesPrompt).not.toContain('Faux');
+    expect(out.body.articlesRead).toBe(1);
+    expect((out.body.sources as { uri: string }[]).map(s => s.uri)).toEqual(['https://www.bbc.co.uk/sport/football/1', 'https://news.google.com/rss/articles/CBMiTest2?oc=5']);
+    expect(String(out.body.text).split('\n')).toEqual(['- Club A : Buteur A forfait (selon Daily Test).', `- ${TEXT_REMOVED}`]);
   });
 });
