@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SuggestionsIndex } from '../../services/replayData';
 import type { BettingPlan } from '../../services/bettingAiService';
 import { BettingAssistant, FollowButton, PlanView } from './BettingAssistant';
@@ -30,6 +30,10 @@ const plan: BettingPlan = {
 };
 
 describe('BettingAssistant (rendu statique)', () => {
+  // Horloge figée au jour de la donnée de test (avant les coups d'envoi de 19 h) : le test ne dépend jamais de la date du jour
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-07T14:00:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it('propose les matchs avec cotes à venir, cochés par défaut, et le message de jeu responsable', () => {
     const html = renderToStaticMarkup(<BettingAssistant index={index} profile="equilibre" bankroll={300} now={NOW} />);
     expect(html).toContain('Assistant IA du jour');
