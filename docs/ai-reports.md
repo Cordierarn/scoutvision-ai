@@ -59,7 +59,8 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 Claude adapter (`server/claudeAi.ts`): plain writing for reports and grounded summaries, the server-side
 web search tool (at most 5 searches per news request) plus the URL fetch tool (at most 3 articles opened in full when an excerpt is not enough; pages read come first among the sources, then citations, then search results)
-for the betting assistant's news, the server-side URL fetch tool for the article fallback, and structured
+for the betting assistant's news, the server-side URL fetch tool for the article fallback (both tools restricted with
+`allowed_domains` to the betting lab's allowed news domains, see below), and structured
 outputs (`json_schema`, schema made strict: `additionalProperties: false`, numeric and length constraints
 dropped, validated afterwards by the handler) for the plan. One model, effort `low`; retries on 429, 502,
 503 and 529 are the handlers' (`generateWithRetry`, `withRetry`); a refusal or a truncated answer is an
@@ -350,6 +351,10 @@ model, time-out), the server builds the news itself, for free and without a key:
    lite models first. If no article can be read, for example an unreadable redirect, the facts come from the
    headlines alone. Only stated facts are kept, attributed to a team and a source.
 
+Since 9 November 2026 only headlines from an allowed publisher go to the model and to the sources (domain of the direct
+link, or the `<source url>` of a Google News item, whose link is a redirect), and only direct links of allowed domains
+are given to read.
+
 The entry carries `method: "news-feed"`, `articlesRead` and the reason of the failed search
 (`fallbackReason`). In the panel, the articles read come first, marked « [lu] ».
 
@@ -359,11 +364,57 @@ about 28 s. The feeds themselves could not be fetched from the development sandb
 Heroku the Google News feed was read successfully.
 
 Server checks: references must exist in the published suggestions; picks exclude `eviter` and are capped
-at 5; a combo needs 2 or 3 `garder` selections from different matches; sentences that quote a number absent
-from the engine facts and the news are removed and counted in `warnings`; stakes are the engine's fractions,
-converted to euros in the browser. News is cached 90 minutes per match (refresh at most every 15 minutes);
+at 5; combos are disabled and a proposed one is dropped; free text that quotes a probability, odds, a stake or a link is
+replaced (below); sentences that quote a number absent from the engine facts and the filtered news are removed and
+counted in `warnings`; the discipline sentence is written by the server (`PLAN_DISCIPLINE`); stakes are the engine's
+fractions, converted to euros in the browser. News is cached 90 minutes per match (refresh at most every 15 minutes);
 own rate limit of 40 requests per 10 minutes. One Gemini call per request; the browser runs up to 3 news
 requests in parallel, then asks for the plan.
+
+### Free-text and source filter (`server/bettingFilter.ts`, 9 November 2026)
+
+Audit finding: a news article read by the model could make it write « probabilité 80 %, cote 2,10, misez 50 % de la
+bankroll » and a link in the plan's free-text fields (`summary`, `reason`, `why`, `discipline`). The only check was
+numeric, and numbers present in the news were accepted because they appeared in the source, so an article could
+"launder" its own figures. Any page opened by the URL fetch tool also became a clickable source.
+
+Rule: the betting figures only come from the engine's structured fields (`odds`, `probability`, `stakeFraction`…),
+never from free text. A free-text field written by the model (plan summary, verdict reason, pick reason, avoid reason,
+news bullet, source title, displayed query) is rejected when it contains a link (scheme, `www.`, markdown or HTML link,
+bare domain), a percentage, a decimal number (« 0,8 », « 2,10 », « @2.10 »), a fraction or ratio (« 5/2 », « 8 chances sur
+10 »), odds (« @3 », or « cote » / « odds » with a number in the sentence), a probability (« probabilité », « chances »
+with a number) or a stake (« misez », « pariez », « bankroll », « Kelly », « € », « euros » always; « mise », « stake »,
+« unités », « 2u » with a number; any stake change such as « doublez la mise »). Text is NFKC-normalised and invisible
+characters are removed first. Whole football numbers without betting words pass (matches of suspension, days out,
+minutes, a score « 2-1 », a league position).
+
+A rejected field is replaced as a whole, never partly rewritten: it shows « Texte retiré par le serveur : il citait une
+probabilité, une cote, une mise ou un lien. » and the plan carries a warning. News is a list, so each bullet is a field:
+a faulty bullet is replaced by the same notice and the others stay (`filtered` counts bullets, sources and queries
+removed). A faulty source title is replaced by its domain; a faulty query is dropped. The plan no longer asks the model
+for the discipline sentence (field removed from the schema). Prompt versions: `BETTING_PROMPT_VERSIONS.news`
+`ai-betting-news-v2` → `ai-betting-news-v3` (web search, article reading and headline prompts), `.plan`
+`ai-betting-plan-v4` → `ai-betting-plan-v5`.
+
+Allowed source domains (`NEWS_ALLOWED_DOMAINS`, 59 hostnames, at most 64): official sites of the lab's competitions and
+federations (UEFA, FIFA, Premier League, EFL, FA, Ligue 1, LFP, FFF, Bundesliga, DFB, Serie A, FIGC, LaLiga, RFEF, Liga
+Portugal, FPF, Eredivisie, KNVB), news agencies and international media (Reuters, AP, AFP, BBC, Guardian, Sky Sports,
+ESPN, The Athletic through nytimes.com, Eurosport, Independent, Telegraph) and the sports press of the lab's countries
+(France, Germany, Italy, Spain, Portugal, Netherlands). No bookmaker, betting-tips or transfer-rumour site, and no club
+site. A domain covers its subdomains; matching is exact (`www.lequipe.fr` yes, `evil-lequipe.fr` and
+`lequipe.fr.evil.test` no), https only, without credentials or port.
+
+- Claude: the list is passed as `allowed_domains` to `web_search_20260209` and `web_fetch_20260209`, then search results,
+  citations and fetched pages are filtered again.
+- Gemini fallback: Google Search grounding takes no domain list; its sources are
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/…` redirects whose title, set by Google, is the publisher's
+  domain, and they are kept only when that domain is allowed.
+- The handlers (`guardNews`, `validatePlan`) filter everything again whatever the provider.
+
+Limits: the filter is lexical (a probability spelled out in words without « pour cent » or « chances » passes); it can
+drop a legitimate news bullet quoting a percentage or a date such as « 07/11 »; a Gemini source's domain relies on
+Google's title; the list narrows local-media coverage. Not checked against the real APIs (no key in the development
+environment).
 
 Search suggestions: the queries run by the model are shown as links to the Google results page next to the
 sources. The `searchEntryPoint.renderedContent` HTML is not injected: the app's Content-Security-Policy

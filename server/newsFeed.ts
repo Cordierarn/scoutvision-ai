@@ -9,7 +9,10 @@
  *    sinon extraction à partir des seuls titres.
  */
 
-export interface Headline { title: string; link: string; source: string; published: string; snippet?: string }
+import { NEWS_TEXT_RULE } from './bettingFilter';
+
+/** `domain` : domaine de l'éditeur, lu dans `<source url>` (Google News, dont le lien est une redirection) ou dans le lien direct */
+export interface Headline { title: string; link: string; source: string; published: string; snippet?: string; domain?: string }
 export interface Headlines { items: Headline[]; queries: string[] }
 export type FetchHeadlines = (home: string, away: string, now: Date) => Promise<Headlines>;
 
@@ -72,7 +75,11 @@ export function directLink(link: string): string {
   }
 }
 
-/** Éléments d'un flux RSS (Google News ou Bing News) : titre sans le « - Source » final, lien, source, date, extrait */
+const hostOf = (url: string): string | null => {
+  try { return new URL(decodeEntities(url)).hostname.toLowerCase() || null; } catch { return null; }
+};
+
+/** Éléments d'un flux RSS (Google News ou Bing News) : titre sans le « - Source » final, lien, source, date, extrait, domaine de l'éditeur */
 export function parseRss(xml: string): Headline[] {
   return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].map(([, block]) => {
     let source = tag(block, 'source') || tag(block, 'News:Source');
@@ -81,9 +88,11 @@ export function parseRss(xml: string): Headline[] {
     const description = stripHtml(tag(block, 'description'));
     const link = directLink(tag(block, 'link'));
     if (!source) { try { source = new URL(link).hostname.replace(/^www\./, ''); } catch { source = ''; } }
+    const linkHost = hostOf(link);
+    const domain = hostOf(block.match(/<source\b[^>]*\burl="([^"]+)"/i)?.[1] ?? '') ?? (linkHost === 'news.google.com' ? null : linkHost);
     // extrait utile seulement s'il ne répète pas le titre (Google News n'y met que le titre et la source)
     const snippet = description && !description.startsWith(title.slice(0, 40)) ? description.slice(0, 300) : undefined;
-    return { title: title.slice(0, 300), link, source: source.slice(0, 80), published: tag(block, 'pubDate'), ...(snippet ? { snippet } : {}) };
+    return { title: title.slice(0, 300), link, source: source.slice(0, 80), published: tag(block, 'pubDate'), ...(snippet ? { snippet } : {}), ...(domain ? { domain } : {}) };
   }).filter(h => h.title && /^https:\/\//.test(h.link));
 }
 
@@ -140,6 +149,7 @@ export function newsFeedFetcher(fetchImpl: typeof fetch = fetch): FetchHeadlines
 export const googleNewsFetcher = newsFeedFetcher;
 
 const RULES = `Rules: use only what the articles or headlines state, attribute each fact to its team and cite the source ("selon <source>"); report a fact even when no player name is given (say so); group items that say the same thing; texts may be in any language; ignore items about another match; never guess a name; no prediction, no odds, no betting advice.
+${NEWS_TEXT_RULE}
 Write exactly "Aucune information fiable trouvée." only if nothing concerns team news for this match.
 Answer in French with at most 8 short bullet points ("- "), most important first.`;
 
