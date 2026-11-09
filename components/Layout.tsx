@@ -1,6 +1,6 @@
 import React, { ReactNode, useState, useEffect } from 'react';
 import { Users, Settings, GitCompare, ArrowLeftRight, ClipboardList, TrendingUp, Gem, Star, CalendarDays, FlaskConical, UserSearch, ChevronRight, LogOut } from 'lucide-react';
-import { displayName, logout, useAuth } from '../services/authService';
+import { displayName, logout, useAuth, viewAllowed } from '../services/authService';
 import { getWatchlist } from '../services/storageService';
 import { getSeasonLabel } from '../types';
 import { BrandMark } from './Media';
@@ -106,7 +106,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onNavigate, currentView, glob
             <div key={section.group}>
               <div className="hidden lg:block px-2 mb-1 sv-label text-ink-4">{section.group}</div>
               <div className="space-y-px">
-                {section.items.map(item => {
+                {section.items.filter(item => viewAllowed(auth.role, item.view)).map(item => {
                   const active = currentView === item.view || item.also?.includes(currentView);
                   const Icon = item.icon;
                   return (

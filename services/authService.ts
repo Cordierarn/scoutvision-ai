@@ -9,7 +9,22 @@
 
 import { createContext, useContext } from 'react';
 
-export interface SessionState { user: string | null; open: boolean }
+/**
+ * Rôle du compte, lu dans la réponse de /api/auth/session. Le serveur le tire du jeton signé et
+ * refuse lui-même au compte pro les ressources de Pronostics (403) : côté navigateur, le rôle ne
+ * sert qu'à ne pas proposer une page qui serait refusée.
+ */
+export type Role = 'owner' | 'pro';
+export interface SessionState { user: string | null; open: boolean; role: Role }
+
+/** Vues que le compte pro ne voit pas (le serveur refuse leurs ressources) */
+const HIDDEN_FOR_PRO: ReadonlySet<string> = new Set(['FORECAST']);
+
+/** Une vue est-elle proposée à ce rôle ? */
+export const viewAllowed = (role: Role, view: string): boolean => role !== 'pro' || !HIDDEN_FOR_PRO.has(view);
+
+/** Vue à ouvrir : celle demandée si elle est proposée à ce rôle, sinon la vue d'accueil */
+export const resolveView = (role: Role, requested: string, home: string): string => (viewAllowed(role, requested) ? requested : home);
 export type SessionCheck = { status: 'authenticated'; session: SessionState } | { status: 'anonymous' } | { status: 'error' };
 
 export const LOGIN_PATH = '/login';
@@ -51,8 +66,9 @@ export async function checkSession(): Promise<SessionCheck> {
   try {
     const res = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
     if (!res.ok) return { status: 'error' };
-    const body = await res.json() as { authenticated?: boolean; user?: string | null; open?: boolean };
-    return body.authenticated ? { status: 'authenticated', session: { user: body.user ?? null, open: body.open === true } } : { status: 'anonymous' };
+    const body = await res.json() as { authenticated?: boolean; user?: string | null; open?: boolean; role?: unknown };
+    if (!body.authenticated) return { status: 'anonymous' };
+    return { status: 'authenticated', session: { user: body.user ?? null, open: body.open === true, role: body.role === 'pro' ? 'pro' : 'owner' } };
   } catch {
     return { status: 'error' };
   }
@@ -113,7 +129,7 @@ export function installSessionGuard(): void {
   });
 }
 
-export const AuthContext = createContext<SessionState>({ user: null, open: true });
+export const AuthContext = createContext<SessionState>({ user: null, open: true, role: 'owner' });
 export const useAuth = () => useContext(AuthContext);
 
 /** Nom affiché : identifiant avec une majuscule (« arnaud » → « Arnaud ») */
