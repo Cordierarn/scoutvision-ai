@@ -155,6 +155,13 @@ describe('lectures complémentaires', () => {
     pairs.forEach(p => { expect(p.ref).toBeGreaterThanOrEqual(p.candidate); });
     expect(rolePairs(a, withPct(full(40), { Position: 'W' }))).toEqual([]);
   });
+
+  it('rôles : un indice incalculable (aucun percentile du rôle) vaut null, jamais 0', () => {
+    const a = withPct(full(80)), empty = withPct(Object.fromEntries(ST.map(k => [k, null])), { 'Player ID': 'p3' });
+    const pairs = rolePairs(a, empty);
+    expect(pairs.length).toBeGreaterThan(0);
+    pairs.forEach(p => { expect(p.candidate).toBeNull(); expect(p.ref).not.toBeNull(); });
+  });
 });
 
 describe('composantes de la paire', () => {

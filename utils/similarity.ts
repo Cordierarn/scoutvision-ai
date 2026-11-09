@@ -14,7 +14,7 @@ import { getPositionCategory, PositionCategory, SIMILARITY_METRICS } from './pos
 import { metricLabel } from './labels';
 import { metricValue, percentileOf } from './metricFormat';
 import { SQUAD_DIMENSIONS } from './recruitment';
-import { DEFAULT_ROLE_PRESETS, presetsForPosition, roleIndex, weightedRoleScore } from './rolePresets';
+import { DEFAULT_ROLE_PRESETS, presetsForPosition, roleIndexOrNull, weightedRoleScore } from './rolePresets';
 
 // ============================================
 // COMPOSANTES (déclaratives : une nouvelle métrique s'ajoute ici, sans toucher au calcul)
@@ -187,13 +187,14 @@ export function dimensionPairs(reference: PlayerData, candidate: PlayerData): Di
   });
 }
 
-export interface RolePair { name: string; ref: number; candidate: number }
+/** Indices des deux joueurs ; null si aucun percentile du rôle n'est connu (affiché « – », jamais 0) */
+export interface RolePair { name: string; ref: number | null; candidate: number | null }
 
 /** Rôles compatibles du poste de la référence, indices (roleIndex) des deux joueurs ; vide si les postes diffèrent */
 export function rolePairs(reference: PlayerData, candidate: PlayerData, limit = 5): RolePair[] {
   if (!reference.Position || candidate.Position !== reference.Position) return [];
   return presetsForPosition(reference.Position, DEFAULT_ROLE_PRESETS)
-    .map(([name, preset]) => ({ name, ref: roleIndex(reference, preset), candidate: roleIndex(candidate, preset) }))
-    .sort((a, b) => b.ref - a.ref)
+    .map(([name, preset]) => ({ name, ref: roleIndexOrNull(reference, preset), candidate: roleIndexOrNull(candidate, preset) }))
+    .sort((a, b) => (b.ref ?? -1) - (a.ref ?? -1))
     .slice(0, limit);
 }

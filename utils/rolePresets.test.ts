@@ -88,6 +88,13 @@ describe('rôles par défaut (rolePresets.json)', () => {
     expect(best?.name).toBe('deux');
     expect(best?.index).toBe(75);
   });
+
+  it('aucun rôle calculable : pas de meilleur rôle (jamais un indice 0 inventé)', () => {
+    const presets = { un: { positions: ['CB'], metrics: { A: 50 } }, deux: { positions: ['CB'], metrics: { B: 50 } } };
+    expect(bestPreset(player({ 'C pct': 99 }), presets)).toBeNull();
+    // Un rôle calculable parmi d'autres : seul lui compte
+    expect(bestPreset(player({ 'B pct': 10 }), presets)).toEqual(expect.objectContaining({ name: 'deux', index: 10 }));
+  });
 });
 
 describe('roleIndexBreakdown', () => {

@@ -116,8 +116,16 @@ export function midfieldBonus(player: PlayerData, preset: RolePreset): number {
  * percentile (analytics absente) sont ignorées et les poids renormalisés.
  */
 export function roleIndex(player: PlayerData, preset: RolePreset): number {
+  return roleIndexOrNull(player, preset) ?? 0;
+}
+
+/**
+ * Indice du rôle, ou null si aucun percentile du rôle n'est connu (jamais 0 inventé) : à utiliser
+ * partout où l'indice est affiché ou comparé sans filtre préalable des données suffisantes
+ */
+export function roleIndexOrNull(player: PlayerData, preset: RolePreset): number | null {
   const score = weightedRoleScore(preset, key => pct(player, key));
-  if (score === undefined) return 0;
+  if (score === undefined) return null;
   return Math.min(100, Math.round(score + midfieldBonus(player, preset)));
 }
 
@@ -212,8 +220,9 @@ export function bestPreset(
 ): { name: string; preset: RolePreset; index: number } | null {
   let best: { name: string; preset: RolePreset; index: number } | null = null;
   presetsForPosition(player.Position, presets).forEach(([name, preset]) => {
-    const index = roleIndex(player, preset);
-    if (!best || index > best.index) best = { name, preset, index };
+    // Rôle sans aucun percentile connu : ignoré (pas d'indice 0 inventé)
+    const index = roleIndexOrNull(player, preset);
+    if (index !== null && (!best || index > best.index)) best = { name, preset, index };
   });
   return best;
 }
