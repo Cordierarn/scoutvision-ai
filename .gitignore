@@ -52,3 +52,6 @@ dist-server/
 
 # Dataset de recherche prévision (scripts/backtest, étape 1) : parquet et manifeste locaux, jamais commités
 .research/
+
+# Copies de travail des agents Claude Code (git worktree), locales et temporaires, jamais commitées
+.claude/worktrees/
