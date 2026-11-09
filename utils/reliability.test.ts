@@ -3,6 +3,7 @@ import {
   ReliabilityModel, SmallSamplesFile, expandSmallSamples, filterSmallSamples, fullMatches, matchesLabel, metricReliability, playerMetricReliability,
   reliabilityLevel, reliabilityText, valueInterval,
 } from './reliability';
+import { EMPTY_PROFILE, ProfileFilters } from './profileFilters';
 
 const model: ReliabilityModel = {
   method: 'test', reliableAt: 0.7, summary: { metrics: 1, meanAbsCalibrationError: 0.02, percentileGapVsPitchapi: 2.5 },
@@ -51,14 +52,14 @@ describe('joueurs à faible temps de jeu', () => {
     expect(players[1].metrics['Shots per 90']).toBeUndefined();
   });
 
-  it('filtre par rôle, compétition, âge et matchs ; trie par percentile, borne basse ou fiabilité', () => {
-    const base = { role: 'ST', competition: '', maxAge: null, minMatches: 4, metric: 'xG per 90', sort: 'pct' as const };
-    expect(filterSmallSamples(players, base).map(p => p.Player)).toEqual(['Joueur A', 'Joueur B']);
-    expect(filterSmallSamples(players, { ...base, sort: 'low' }).map(p => p.Player)).toEqual(['Joueur B', 'Joueur A']);
-    expect(filterSmallSamples(players, { ...base, sort: 'reliability' }).map(p => p.Player)).toEqual(['Joueur B', 'Joueur A']);
-    expect(filterSmallSamples(players, { ...base, maxAge: 21 }).map(p => p.Player)).toEqual(['Joueur A']);
-    expect(filterSmallSamples(players, { ...base, minMatches: 10 }).map(p => p.Player)).toEqual(['Joueur B']);
-    expect(filterSmallSamples(players, { ...base, competition: 'BBB' })).toEqual([]);
+  it('filtre par rôle, compétitions, âge et matchs ; trie par percentile, borne basse ou fiabilité', () => {
+    const base = { role: 'ST', profile: EMPTY_PROFILE, maxAge: null, minMatches: 4, metric: 'xG per 90', sort: 'pct' as const };
+    expect(filterSmallSamples(players, base).rows.map(p => p.Player)).toEqual(['Joueur A', 'Joueur B']);
+    expect(filterSmallSamples(players, { ...base, sort: 'low' }).rows.map(p => p.Player)).toEqual(['Joueur B', 'Joueur A']);
+    expect(filterSmallSamples(players, { ...base, sort: 'reliability' }).rows.map(p => p.Player)).toEqual(['Joueur B', 'Joueur A']);
+    expect(filterSmallSamples(players, { ...base, maxAge: 21 }).rows.map(p => p.Player)).toEqual(['Joueur A']);
+    expect(filterSmallSamples(players, { ...base, minMatches: 10 }).rows.map(p => p.Player)).toEqual(['Joueur B']);
+    expect(filterSmallSamples(players, { ...base, profile: { ...EMPTY_PROFILE, competitions: ['BBB'] } }).rows).toEqual([]);
   });
 });
 
@@ -67,5 +68,50 @@ describe('matchesLabel', () => {
     expect(matchesLabel(34)).toBe('34 matchs');
     expect(matchesLabel(100)).toBe('100 matchs');
     expect(matchesLabel(323)).toBe('plus de 100 matchs');
+  });
+});
+
+describe('joueurs à faible temps de jeu : filtres qualitatifs (joueurs et clubs fictifs)', () => {
+  const m = [[0, 0.4, 0.5, 40, 70, 30, 90]];
+  const file: SmallSamplesFile = {
+    season: '2026-27', labels: ['xG per 90'], fields: ['value', 'raw', 'reliability', 'pct', 'pctLow', 'pctHigh'], minMatches: 4, minMinutes: 180,
+    players: [
+      { 'Player ID': 'a', Player: 'Gaucher', Competition: 'AAA', 'League tier': 1, 'Team ID': 't1', Position: 'ST', Age: 19, 'Matches played': 8, 'Minutes played': 400, metrics: m, Foot: 'Left', Height: 185, 'Passport country': 'FRA' },
+      { 'Player ID': 'b', Player: 'Pied inconnu', Competition: 'AAA', 'League tier': 1, 'Team ID': 't1', Position: 'ST', Age: 20, 'Matches played': 8, 'Minutes played': 300, metrics: m },
+      { 'Player ID': 'c', Player: 'Droitier', Competition: 'BBB', 'League tier': 2, 'Team ID': 't2', Position: 'ST', Age: 21, 'Matches played': 8, 'Minutes played': 200, metrics: m, Foot: 'Right' },
+      { 'Player ID': 'd', Player: 'Pied inconnu, autre poste', Competition: 'AAA', 'League tier': 1, Position: 'W', Age: 20, 'Matches played': 8, 'Minutes played': 300, metrics: m },
+      { 'Player ID': 'e', Player: 'Pied inconnu, trop âgé', Competition: 'AAA', 'League tier': 1, Position: 'ST', Age: 30, 'Matches played': 8, 'Minutes played': 300, metrics: m },
+      { 'Player ID': 'f', Player: 'Pied inconnu, autre compétition', Competition: 'CCC', 'League tier': 1, Position: 'ST', Age: 20, 'Matches played': 8, 'Minutes played': 300, metrics: m },
+    ],
+  };
+  const players = expandSmallSamples(file);
+  const base = { role: 'ST', profile: EMPTY_PROFILE, maxAge: 23, minMatches: 4, metric: 'xG per 90', sort: 'pct' as const };
+  const withProfile = (o: Omit<Partial<ProfileFilters>, 'includeMissing'> & { includeMissing?: Partial<ProfileFilters['includeMissing']> }) =>
+    ({ ...base, profile: { ...EMPTY_PROFILE, ...o, includeMissing: { ...EMPTY_PROFILE.includeMissing, ...(o.includeMissing ?? {}) } } });
+  const names = (r: { rows: { Player: string }[] }) => r.rows.map(p => p.Player);
+
+  it('sélection multiple : compétitions, niveaux et clubs', () => {
+    expect(names(filterSmallSamples(players, withProfile({ competitions: ['AAA', 'BBB'] })))).toEqual(['Gaucher', 'Pied inconnu', 'Droitier']);
+    expect(names(filterSmallSamples(players, withProfile({ tiers: [2] })))).toEqual(['Droitier']);
+    expect(names(filterSmallSamples(players, withProfile({ teams: ['t1'] })))).toEqual(['Gaucher', 'Pied inconnu']);
+  });
+
+  it('valeur absente jamais retenue ; compteur parmi le poste, l\'âge, les matchs et les autres critères du profil', () => {
+    const r = filterSmallSamples(players, withProfile({ competitions: ['AAA', 'BBB'], feet: ['Left'] }));
+    expect(names(r)).toEqual(['Gaucher']);
+    // « Pied inconnu » seulement : ni l'autre poste, ni le joueur trop âgé, ni l'autre compétition
+    expect(r.missing).toEqual({ nation: 0, foot: 1, height: 0 });
+    const inc = filterSmallSamples(players, withProfile({ competitions: ['AAA', 'BBB'], feet: ['Left'], includeMissing: { foot: true } }));
+    expect(names(inc)).toEqual(['Gaucher', 'Pied inconnu']);
+    expect(inc.missing.foot).toBe(1);
+  });
+
+  it('nationalité et taille : même règle, chaque compteur ne retient que les joueurs écartés pour cette seule raison', () => {
+    const r = filterSmallSamples(players, withProfile({ nations: ['FRA'], heightMin: 180 }));
+    expect(names(r)).toEqual(['Gaucher']);
+    expect(r.missing).toEqual({ nation: 0, foot: 0, height: 0 });           // sans nationalité ni taille : aucun des deux
+    const incHeight = filterSmallSamples(players, withProfile({ nations: ['FRA'], heightMin: 180, includeMissing: { height: true } }));
+    expect(incHeight.missing).toEqual({ nation: 3, foot: 0, height: 0 });
+    expect(names(incHeight)).toEqual(['Gaucher']);
   });
 });

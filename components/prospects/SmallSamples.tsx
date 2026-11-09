@@ -9,7 +9,10 @@ import React, { useMemo, useState } from 'react';
 import { dataLoader } from '../../services/dataLoader';
 import { useAsyncData } from '../../hooks/useAsyncData';
 import { metricLabel, positionName } from '../../utils/labels';
-import { SmallSampleSort, expandSmallSamples, filterSmallSamples } from '../../utils/reliability';
+import { SmallSamplePlayer, SmallSampleSort, expandSmallSamples, filterSmallSamples } from '../../utils/reliability';
+import { EMPTY_PROFILE, ProfileFilters, profileChips } from '../../utils/profileFilters';
+import { ProfileFiltersPanel, useProfileOptions } from '../filters/ProfileFiltersPanel';
+import { ChevronDown } from 'lucide-react';
 import { CompetitionBadge } from '../Media';
 import { EmptyState, InfoTip, LoadError, PercentileValue, Skeleton } from '../ui';
 
@@ -20,6 +23,7 @@ const SORTS: { id: SmallSampleSort; label: string; tip: string }[] = [
   { id: 'reliability', label: 'Fiabilité', tip: 'Part de signal de la valeur, selon les minutes jouées.' },
 ];
 const PAGE = 50;
+const NO_MISSING = { nation: 0, foot: 0, height: 0 };
 const num = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Percentile et son intervalle à 90 % sur une barre 0-100 */
@@ -52,7 +56,17 @@ export const SmallSamples: React.FC = () => {
   }, [players, role]);
   const [metricChoice, setMetric] = useState('xG per 90');
   const metric = metrics.includes(metricChoice) ? metricChoice : metrics[0] ?? '';
-  const [competition, setCompetition] = useState('');
+  const [profile, setProfileState] = useState<ProfileFilters>(EMPTY_PROFILE);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const setProfile = (v: ProfileFilters) => { setProfileState(v); setShown(PAGE); };
+  const profileOptions = useProfileOptions(players);
+  const profileCount = profileChips(profile, { competition: profileOptions.competitionName, team: profileOptions.teamName }).length;
+  // Champs que le fichier de la saison ne renseigne pour aucun joueur : signalés sous le panneau
+  const absentFields = useMemo(() => players.length === 0 ? [] : ([
+    ['nationalité', (p: SmallSamplePlayer) => typeof p['Passport country'] === 'string' && p['Passport country'] !== ''],
+    ['pied', (p: SmallSamplePlayer) => typeof p.Foot === 'string' && p.Foot !== ''],
+    ['taille', (p: SmallSamplePlayer) => typeof p.Height === 'number'],
+  ] as const).filter(([, has]) => !players.some(has)).map(([label]) => label), [players]);
   const [maxAgeInput, setMaxAge] = useState('23');
   const [minMatchesInput, setMinMatches] = useState('4');
   const [sort, setSort] = useState<SmallSampleSort>('low');
@@ -60,10 +74,8 @@ export const SmallSamples: React.FC = () => {
 
   const maxAge = /^\d+$/.test(maxAgeInput.trim()) ? Number(maxAgeInput) : null;
   const minMatches = /^\d+$/.test(minMatchesInput.trim()) ? Number(minMatchesInput) : 4;
-  const competitions = useMemo(() => [...new Set(players.map(p => p.Competition))]
-    .map(key => ({ key, name: dataLoader.getCompetition(key)?.name ?? key })).sort((a, b) => a.name.localeCompare(b.name, 'fr')), [players]);
-  const rows = useMemo(() => (metric ? filterSmallSamples(players, { role, competition, maxAge, minMatches, metric, sort }) : []),
-    [players, role, competition, maxAge, minMatches, metric, sort]);
+  const { rows, missing } = useMemo(() => (metric ? filterSmallSamples(players, { role, profile, maxAge, minMatches, metric, sort }) : { rows: [], missing: NO_MISSING }),
+    [players, role, profile, maxAge, minMatches, metric, sort]);
 
   const field = 'h-8 rounded border border-line bg-raised px-2 text-sm text-ink';
   const label = 'sv-label mb-1 block';
@@ -91,11 +103,12 @@ export const SmallSamples: React.FC = () => {
           <select id="ss-metric" className={`${field} max-w-[16rem]`} value={metric} onChange={e => { setMetric(e.target.value); setShown(PAGE); }}>
             {metrics.map(m => <option key={m} value={m}>{metricLabel(m)}</option>)}
           </select></div>
-        <div className="min-w-0"><label htmlFor="ss-comp" className={label}>Compétition</label>
-          <select id="ss-comp" className={`${field} max-w-[14rem]`} value={competition} onChange={e => { setCompetition(e.target.value); setShown(PAGE); }}>
-            <option value="">Toutes</option>
-            {competitions.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
-          </select></div>
+        <div className="min-w-0"><span className={label} id="ss-profile-label">Profil</span>
+          <button type="button" onClick={() => setProfileOpen(o => !o)} aria-expanded={profileOpen} aria-controls="ss-profile" aria-describedby="ss-profile-label"
+            className={`sv-btn sv-btn-secondary h-8 ${profileCount > 0 ? '!border-accent/60 !text-accent' : ''}`}>
+            Compétition, club, pied, taille{profileCount > 0 && <span className="num"> ({profileCount})</span>}
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${profileOpen ? 'rotate-180' : ''}`} aria-hidden />
+          </button></div>
         <div><label htmlFor="ss-age" className={label}>Âge max.</label>
           <input id="ss-age" className={`${field} w-20 num`} inputMode="numeric" value={maxAgeInput} placeholder="tous" onChange={e => { setMaxAge(e.target.value); setShown(PAGE); }} /></div>
         <div><label htmlFor="ss-matches" className={label}>Matchs min.</label>
@@ -110,13 +123,26 @@ export const SmallSamples: React.FC = () => {
         </div>
       </div>
 
+      {profileOpen && (
+        <div id="ss-profile" className="pt-3 border-t border-line">
+          <div className="flex items-center justify-between mb-2">
+            <span className="sv-label">Profil</span>
+            {profileCount > 0 && <button type="button" onClick={() => setProfile(EMPTY_PROFILE)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6">Effacer le profil</button>}
+          </div>
+          <ProfileFiltersPanel value={profile} onChange={setProfile} options={profileOptions} missing={missing} />
+          {absentFields.length > 0 && (
+            <p className="mt-2 text-2xs text-ink-4">Le fichier de cette saison ne renseigne pas : {absentFields.join(', ')}. Un filtre sur ce champ écarte tous les joueurs (comptés sous le filtre), sauf si vous les incluez.</p>
+          )}
+        </div>
+      )}
+
       {request.status === 'loading' && <div role="status" aria-label="Chargement des joueurs à faible temps de jeu"><Skeleton className="h-64" /></div>}
       {request.status === 'error' && <LoadError message={`Joueurs à faible temps de jeu indisponibles : ${request.error}`} onRetry={request.retry} />}
       {request.status === 'success' && request.data === null && (
         <EmptyState title="Pas encore de données pour cette saison.">Le fichier des petits temps de jeu est produit par la mise à jour des données.</EmptyState>
       )}
       {request.status === 'success' && request.data && rows.length === 0 && (
-        <EmptyState title="Aucun joueur ne correspond.">Élargissez l'âge, baissez le nombre de matchs minimum ou choisissez toutes les compétitions.</EmptyState>
+        <EmptyState title="Aucun joueur ne correspond.">Élargissez l'âge, baissez le nombre de matchs minimum ou élargissez le profil.</EmptyState>
       )}
 
       {rows.length > 0 && (

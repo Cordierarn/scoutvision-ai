@@ -47,43 +47,64 @@ const heightOf = (v: unknown): number | null => { const n = knownNumber(v); retu
 
 export interface ProfileResult<T> { rows: T[]; missing: Record<MissingField, number> }
 
-/** Joueurs retenus et, par champ, nombre de joueurs écartés faute de donnée */
-export function applyProfileFilters<T>(rows: T[], f: ProfileFilters): ProfileResult<T> {
-  const missing: Record<MissingField, number> = { nation: 0, foot: 0, height: 0 };
-  if (!isProfileActive(f)) return { rows, missing };
+/**
+ * Évaluateur ligne à ligne : null si un critère échoue, sinon la liste des champs incomplets absents
+ * (vide : le joueur correspond). Vaut null quand aucun filtre n'est actif. Partagé par
+ * applyProfileFilters et le Chasseur de pépites (utils/prospects.ts), qui le combine à ses contraintes.
+ */
+export function profileCheck(f: ProfileFilters): ((item: unknown) => MissingField[] | null) | null {
+  if (!isProfileActive(f)) return null;
   const comps = f.competitions.length ? new Set(f.competitions) : null;
   const tiers = f.tiers.length ? new Set(f.tiers) : null;
   const teams = f.teams.length ? new Set(f.teams) : null;
   const nations = f.nations.length ? new Set(f.nations) : null;
   const feet = f.feet.length ? new Set<Foot>(f.feet) : null;
   const height = f.heightMin !== null || f.heightMax !== null;
-  const out: T[] = [];
-  for (const item of rows) {
-    const p = item as unknown as Row;
+  return (item: unknown) => {
+    const p = item as Row;
     // Champs toujours renseignés : un échec écarte, une absence aussi (jamais comptée comme correspondance)
-    if (comps && !comps.has(text(p.Competition) ?? '')) continue;
-    if (tiers && !tiers.has(knownNumber(p['League tier']) ?? -1)) continue;
-    if (teams && !teams.has(text(p['Team ID']) ?? '')) continue;
-    // Champs incomplets : état « ok », « échec » ou « absent » ; un absent passe seulement si l'option l'inclut
-    let fail = false;
+    if (comps && !comps.has(text(p.Competition) ?? '')) return null;
+    if (tiers && !tiers.has(knownNumber(p['League tier']) ?? -1)) return null;
+    if (teams && !teams.has(text(p['Team ID']) ?? '')) return null;
+    // Champs incomplets : état « ok », « échec » ou « absent »
     const absent: MissingField[] = [];
     if (nations) {
       const v = text(p['Passport country']);
-      if (v === null) absent.push('nation'); else if (!nations.has(v.toUpperCase())) fail = true;
+      if (v === null) absent.push('nation'); else if (!nations.has(v.toUpperCase())) return null;
     }
-    if (!fail && feet) {
+    if (feet) {
       const v = footOf(p.Foot);
-      if (v === null) absent.push('foot'); else if (!feet.has(v)) fail = true;
+      if (v === null) absent.push('foot'); else if (!feet.has(v)) return null;
     }
-    if (!fail && height) {
+    if (height) {
       const v = heightOf(p.Height);
       if (v === null) absent.push('height');
-      else if ((f.heightMin !== null && v < f.heightMin) || (f.heightMax !== null && v > f.heightMax)) fail = true;
+      else if ((f.heightMin !== null && v < f.heightMin) || (f.heightMax !== null && v > f.heightMax)) return null;
     }
-    if (fail) continue;
-    // Compteur par champ : joueurs sans cette donnée qui passent tous les autres critères
-    for (const k of absent) if (absent.every(o => o === k || f.includeMissing[o])) missing[k]++;
-    if (absent.every(k => f.includeMissing[k])) out.push(item);
+    return absent;
+  };
+}
+
+/** Un joueur sans certaines données passe seulement si l'option inclut chacun de ces champs */
+export const retainedDespiteMissing = (absent: MissingField[], include: Record<MissingField, boolean>): boolean =>
+  absent.every(k => include[k]);
+
+/** Compteur par champ : joueurs sans cette donnée qui passent tous les autres critères */
+export function tallyMissing(missing: Record<MissingField, number>, absent: MissingField[], include: Record<MissingField, boolean>): void {
+  for (const k of absent) if (absent.every(o => o === k || include[o])) missing[k]++;
+}
+
+/** Joueurs retenus et, par champ, nombre de joueurs écartés faute de donnée */
+export function applyProfileFilters<T>(rows: T[], f: ProfileFilters): ProfileResult<T> {
+  const missing: Record<MissingField, number> = { nation: 0, foot: 0, height: 0 };
+  const check = profileCheck(f);
+  if (!check) return { rows, missing };
+  const out: T[] = [];
+  for (const item of rows) {
+    const absent = check(item);
+    if (absent === null) continue;
+    tallyMissing(missing, absent, f.includeMissing);
+    if (retainedDespiteMissing(absent, f.includeMissing)) out.push(item);
   }
   return { rows: out, missing };
 }

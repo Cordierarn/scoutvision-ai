@@ -25,8 +25,11 @@ export interface ProfileOptions {
   teamName: (id: string) => string;
 }
 
+/** Champs lus pour les options : joueurs de la base ou petits temps de jeu */
+export type ProfileOptionRow = Pick<PlayerData, 'Competition' | 'League tier' | 'Team ID'> & { Team?: string; 'Passport country'?: string | null };
+
 /** Options des filtres, tirées des joueurs chargés */
-export function useProfileOptions(data: PlayerData[]): ProfileOptions {
+export function useProfileOptions(data: ProfileOptionRow[]): ProfileOptions {
   return useMemo(() => {
     const comps = new Map<string, number>();
     const teams = new Map<string, { name: string; comp: string; league: boolean }>();
