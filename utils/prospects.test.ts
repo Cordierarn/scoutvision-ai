@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { PlayerData } from '../types';
 import { RolePreset, roleIndex, DEFAULT_ROLE_PRESETS } from './rolePresets';
 import {
-  DEFAULT_CONSTRAINTS, ESTIMATE_RATIO_MIN, ProspectConstraints, effectiveThresholds, filterProspects, seasonCapabilities,
+  DEFAULT_CONSTRAINTS, ESTIMATE_RATIO_MIN, ProspectConstraints, constraintsFromAi, effectiveThresholds, filterProspects, seasonCapabilities,
 } from './prospects';
+import { EMPTY_PROFILE, ProfileFilters } from './profileFilters';
 
 const NOW = new Date('2026-10-26T12:00:00Z');
 const ALL_CAPS = { marketValue: true, contract: true, estimate: true };
@@ -69,13 +70,13 @@ describe('filterProspects : équivalence avec le filtre historique sur données 
     const cases = [
       { s: 1, c: { ...DEFAULT_CONSTRAINTS } },
       { s: 0.8, c: { ...DEFAULT_CONSTRAINTS, ageMax: 30, valueMax: 50_000_000, minutesMin: 0 } },
-      { s: 0.9, c: { ...DEFAULT_CONSTRAINTS, ageMax: 32, minutesMin: 0, contractMonths: 12, estimateAboveMarket: true, competition: 'ESP' } },
+      { s: 0.9, c: { ...DEFAULT_CONSTRAINTS, ageMax: 32, minutesMin: 0, contractMonths: 12, estimateAboveMarket: true, profile: { ...EMPTY_PROFILE, competitions: ['ESP'] } } },
       { s: 1.2, c: { ...DEFAULT_CONSTRAINTS, ageMax: 32, valueMax: 60_000_000 } },
     ];
     cases.forEach(({ s, c }) => {
       const legacy = legacyFilter(data, preset, s, {
         ageLimit: c.ageMax, marketValueLimit: c.valueMax!, contractMonths: c.contractMonths, undervaluedOnly: c.estimateAboveMarket,
-        minMinutesPlayed: c.minutesMin, selectedLeague: c.competition === 'ESP' ? 'LaLiga 2026-27' : c.competition,
+        minMinutesPlayed: c.minutesMin, selectedLeague: c.profile.competitions[0] === 'ESP' ? 'LaLiga 2026-27' : '',
       }, NOW);
       const now = filterProspects(data, preset, s, c, ALL_CAPS, NOW);
       expect(now.players.map(p => p.Player)).toEqual(legacy.map(p => p.Player));
@@ -94,7 +95,7 @@ describe('filterProspects : entonnoir', () => {
       player({ Player: 'percentile absent', 'A pct': 90 }),
     ];
     const r = filterProspects(data, preset, 1, DEFAULT_CONSTRAINTS, ALL_CAPS, NOW);
-    expect(r.funnel).toEqual({ total: 5, position: 4, constraints: 3, eligible: 1, noMarketValue: 0, insufficientData: 1, belowThreshold: 1 });
+    expect(r.funnel).toEqual({ total: 5, position: 4, constraints: 3, profile: 3, eligible: 1, noMarketValue: 0, insufficientData: 1, belowThreshold: 1 });
     expect(r.players.map(p => p.Player)).toEqual(['ok']);
   });
 });
@@ -170,7 +171,7 @@ describe('filterProspects : estimation, contrat, compétition', () => {
       player({ Player: '2025', Competition: 'ESP', League: 'LaLiga 2025-26', 'A pct': 90, 'B pct': 90 }),
       player({ Player: 'FRA', Competition: 'FRA', League: 'Ligue 1 2026-27', 'A pct': 90, 'B pct': 90 }),
     ];
-    const r = filterProspects(data, preset, 1, { ...DEFAULT_CONSTRAINTS, competition: 'ESP' }, ALL_CAPS, NOW);
+    const r = filterProspects(data, preset, 1, { ...DEFAULT_CONSTRAINTS, profile: { ...EMPTY_PROFILE, competitions: ['ESP'] } }, ALL_CAPS, NOW);
     expect(r.players.map(p => p.Player).sort()).toEqual(['2025', '2026']);
   });
 
@@ -193,5 +194,116 @@ describe('filterProspects : rôles officiels', () => {
     const idx = r.players.map(p => roleIndex(p, pr));
     expect(idx).toEqual([...idx].sort((a, b) => b - a));
     expect(r.players[0].Player).toBe('S1');
+  });
+});
+
+describe('filterProspects : filtres qualitatifs (joueurs fictifs)', () => {
+  const ok = { 'A pct': 90, 'B pct': 90 };
+  const withProfile = (o: Omit<Partial<ProfileFilters>, 'includeMissing'> & { includeMissing?: Partial<ProfileFilters['includeMissing']> }): ProspectConstraints =>
+    ({ ...DEFAULT_CONSTRAINTS, profile: { ...EMPTY_PROFILE, ...o, includeMissing: { ...EMPTY_PROFILE.includeMissing, ...(o.includeMissing ?? {}) } } });
+  const names = (r: { players: PlayerData[] }) => r.players.map(p => p.Player).sort();
+
+  it('sélection multiple de compétitions : union des compétitions choisies, aucune = toutes', () => {
+    const data = [
+      player({ Player: 'a', Competition: 'AAA', ...ok }),
+      player({ Player: 'b', Competition: 'BBB', ...ok }),
+      player({ Player: 'c', Competition: 'CCC', ...ok }),
+      player({ Player: 'sans compétition', Competition: undefined, ...ok }),
+    ];
+    expect(names(filterProspects(data, preset, 1, withProfile({ competitions: ['AAA', 'BBB'] }), ALL_CAPS, NOW))).toEqual(['a', 'b']);
+    expect(names(filterProspects(data, preset, 1, withProfile({ competitions: [] }), ALL_CAPS, NOW))).toHaveLength(4);
+    expect(filterProspects(data, preset, 1, withProfile({ competitions: ['CCC'] }), ALL_CAPS, NOW).funnel).toMatchObject({ position: 4, constraints: 4, profile: 1, eligible: 1 });
+  });
+
+  it('niveau, club, nationalité, pied et taille se cumulent', () => {
+    const data = [
+      player({ Player: 'gaucher grand', 'League tier': 2, 'Team ID': 't1', 'Passport country': 'FRA', Foot: 'Left', Height: 188, ...ok }),
+      player({ Player: 'droitier', 'League tier': 2, 'Team ID': 't1', 'Passport country': 'FRA', Foot: 'Right', Height: 188, ...ok }),
+      player({ Player: 'petit', 'League tier': 2, 'Team ID': 't1', 'Passport country': 'FRA', Foot: 'Left', Height: 170, ...ok }),
+      player({ Player: 'autre club', 'League tier': 2, 'Team ID': 't2', 'Passport country': 'FRA', Foot: 'Left', Height: 188, ...ok }),
+      player({ Player: 'autre pays', 'League tier': 2, 'Team ID': 't1', 'Passport country': 'BRA', Foot: 'Left', Height: 188, ...ok }),
+      player({ Player: 'niveau 1', 'League tier': 1, 'Team ID': 't1', 'Passport country': 'FRA', Foot: 'Left', Height: 188, ...ok }),
+    ];
+    const r = filterProspects(data, preset, 1, withProfile({ tiers: [2], teams: ['t1'], nations: ['FRA'], feet: ['Left'], heightMin: 180 }), ALL_CAPS, NOW);
+    expect(names(r)).toEqual(['gaucher grand']);
+    expect(r.funnel).toMatchObject({ position: 6, constraints: 6, profile: 1, eligible: 1 });
+  });
+
+  it('un joueur sans donnée n\'est jamais retenu ; il est compté, et retenu seulement si l\'option l\'inclut', () => {
+    const data = [
+      player({ Player: 'gaucher', Foot: 'Left', ...ok }),
+      player({ Player: 'pied inconnu', ...ok }),
+      player({ Player: 'pied vide', Foot: '', ...ok }),
+    ];
+    const r = filterProspects(data, preset, 1, withProfile({ feet: ['Left'] }), ALL_CAPS, NOW);
+    expect(names(r)).toEqual(['gaucher']);
+    expect(r.missing).toEqual({ nation: 0, foot: 2, height: 0 });
+    expect(r.funnel).toMatchObject({ constraints: 3, profile: 1, eligible: 1 });
+    const inc = filterProspects(data, preset, 1, withProfile({ feet: ['Left'], includeMissing: { foot: true } }), ALL_CAPS, NOW);
+    expect(names(inc)).toEqual(['gaucher', 'pied inconnu', 'pied vide']);
+    expect(inc.missing.foot).toBe(2);                                  // toujours comptés, affichés « inclus »
+    expect(inc.funnel).toMatchObject({ constraints: 3, profile: 3, eligible: 3 });
+  });
+
+  it('population du compteur : postes du rôle, toutes les autres contraintes et les autres critères de profil passés', () => {
+    const noFoot = { Foot: undefined, Height: 180, ...ok };
+    const data = [
+      player({ Player: 'compté', ...noFoot }),
+      player({ Player: 'compté sous le seuil', ...noFoot, 'A pct': 5 }),   // avant les seuils du rôle : compté
+      player({ Player: 'autre poste', ...noFoot, Position: 'ST' }),
+      player({ Player: 'trop vieux', ...noFoot, Age: 30 }),
+      player({ Player: 'peu de minutes', ...noFoot, 'Minutes played': 100 }),
+      player({ Player: 'trop cher', ...noFoot, 'Market value': 90_000_000 }),
+      player({ Player: 'valeur inconnue', ...noFoot, 'Market value': undefined }),
+      player({ Player: 'autre compétition', ...noFoot, Competition: 'BBB' }),
+      player({ Player: 'trop petit', ...noFoot, Height: 160 }),
+      player({ Player: 'taille inconnue aussi', ...noFoot, Height: undefined }),
+    ];
+    const r = filterProspects(data, preset, 1, withProfile({ competitions: ['ESP'], feet: ['Left'], heightMin: 170 }), ALL_CAPS, NOW);
+    expect(r.players).toEqual([]);
+    expect(r.missing).toEqual({ nation: 0, foot: 2, height: 0 });
+    // Valeur inconnue et pied inconnu : ni l'un ni l'autre compteur (chacun ne compte que les joueurs écartés pour cette seule raison)
+    expect(r.funnel.noMarketValue).toBe(0);
+    // Entonnoir : après contraintes (valeur connue), puis après profil
+    expect(r.funnel).toMatchObject({ position: 9, constraints: 5, profile: 0, eligible: 0 });
+    // Taille incluse : le joueur sans pied ni taille compte pour le pied ; il est compté pour la taille, sans pied inclus
+    const incHeight = filterProspects(data, preset, 1, withProfile({ competitions: ['ESP'], feet: ['Left'], heightMin: 170, includeMissing: { height: true } }), ALL_CAPS, NOW);
+    expect(incHeight.missing).toEqual({ nation: 0, foot: 3, height: 0 });
+    const incFoot = filterProspects(data, preset, 1, withProfile({ competitions: ['ESP'], feet: ['Left'], heightMin: 170, includeMissing: { foot: true } }), ALL_CAPS, NOW);
+    expect(incFoot.missing).toEqual({ nation: 0, foot: 2, height: 1 });
+  });
+
+  it('valeur de marché inconnue : comptée à part seulement si le profil est satisfait', () => {
+    const data = [
+      player({ Player: 'valeur inconnue, gaucher', 'Market value': undefined, Foot: 'Left', ...ok }),
+      player({ Player: 'valeur inconnue, droitier', 'Market value': undefined, Foot: 'Right', ...ok }),
+    ];
+    const r = filterProspects(data, preset, 1, withProfile({ feet: ['Left'] }), ALL_CAPS, NOW);
+    expect(r.funnel.noMarketValue).toBe(1);
+    expect(r.missing.foot).toBe(0);
+  });
+
+  it('sans filtre qualitatif : aucun compteur, résultat inchangé', () => {
+    const data = [player({ Player: 'x', ...ok }), player({ Player: 'y', Foot: undefined, ...ok })];
+    const r = filterProspects(data, preset, 1, DEFAULT_CONSTRAINTS, ALL_CAPS, NOW);
+    expect(names(r)).toEqual(['x', 'y']);
+    expect(r.missing).toEqual({ nation: 0, foot: 0, height: 0 });
+  });
+});
+
+describe('constraintsFromAi : configuration de l\'assistant IA', () => {
+  it('une compétition renvoyée devient la sélection [clé], le reste du profil est conservé', () => {
+    const prev: ProspectConstraints = { ...DEFAULT_CONSTRAINTS, profile: { ...EMPTY_PROFILE, competitions: ['AAA', 'BBB'], feet: ['Left'] } };
+    const next = constraintsFromAi(prev, { competition: 'CCC', ageMax: 21, extraCriteria: [], explanation: '' }, ALL_CAPS);
+    expect(next.profile).toEqual({ ...EMPTY_PROFILE, competitions: ['CCC'], feet: ['Left'] });
+    expect(next.ageMax).toBe(21);
+    expect(next).not.toHaveProperty('competition');
+  });
+
+  it('sans compétition : sélection inchangée ; valeur, contrat et estimation seulement si la saison les fournit', () => {
+    const prev: ProspectConstraints = { ...DEFAULT_CONSTRAINTS, profile: { ...EMPTY_PROFILE, competitions: ['AAA'] } };
+    const next = constraintsFromAi(prev, { valueMax: 5_000_000, contractMonths: 12, estimateAboveMarket: true, extraCriteria: [], explanation: '' }, NO_CAPS);
+    expect(next).toEqual(prev);
+    expect(constraintsFromAi(prev, { valueMax: 5_000_000, extraCriteria: [], explanation: '' }, ALL_CAPS).valueMax).toBe(5_000_000);
   });
 });

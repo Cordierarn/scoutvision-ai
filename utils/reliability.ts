@@ -7,6 +7,8 @@
  * et l'intervalle qui en découle ; il ne recalcule aucun percentile.
  */
 
+import { ProfileFilters, ProfileResult, applyProfileFilters } from './profileFilters';
+
 export interface ReliabilityBin { minutes: number; n: number; observed: number; predicted: number }
 export interface MetricReliabilityParams {
   k: number;                          // minutes de « prior » : fiabilité = m / (m + k)
@@ -99,6 +101,8 @@ export interface SmallSampleMetric { value: number; raw: number | null; reliabil
 export interface SmallSamplePlayer {
   'Player ID': string; Player: string; 'Team ID'?: string; Team?: string; Competition: string; 'League tier'?: number; Position: string;
   Age?: number | null; 'Matches played': number; Starts?: number; 'Minutes played': number; 'Minutes share'?: number | null;
+  // Absents du fichier actuel du pipeline : un filtre sur ces champs les compte « sans donnée »
+  'Passport country'?: string | null; Foot?: string | null; Height?: number | null;
   metrics: Record<string, SmallSampleMetric>;
 }
 export interface SmallSamplesFile {
@@ -117,16 +121,21 @@ export function expandSmallSamples(file: SmallSamplesFile): SmallSamplePlayer[] 
 }
 
 export type SmallSampleSort = 'pct' | 'low' | 'reliability';
-export interface SmallSampleFilters { role: string; competition: string; maxAge: number | null; minMatches: number; metric: string; sort: SmallSampleSort }
+/** Filtres des petits temps de jeu ; `profile` : filtres qualitatifs du Chasseur (compétitions : aucune = toutes) */
+export interface SmallSampleFilters { role: string; profile: ProfileFilters; maxAge: number | null; minMatches: number; metric: string; sort: SmallSampleSort }
 
-/** Joueurs du rôle ayant la métrique, filtrés, triés : percentile estimé, borne basse (prudent) ou fiabilité */
-export function filterSmallSamples(players: SmallSamplePlayer[], f: SmallSampleFilters): SmallSamplePlayer[] {
+/**
+ * Joueurs du poste ayant la métrique, filtrés, triés : percentile estimé, borne basse (prudent) ou fiabilité.
+ * Filtres qualitatifs : applyProfileFilters, comme la Base joueurs et le Chasseur. Compteur « sans donnée »
+ * par champ parmi les joueurs du poste ayant la métrique, retenus par l'âge, les matchs et les autres critères.
+ */
+export function filterSmallSamples(players: SmallSamplePlayer[], f: SmallSampleFilters): ProfileResult<SmallSamplePlayer> {
   const key = (p: SmallSamplePlayer) => {
     const m = p.metrics[f.metric];
     return f.sort === 'low' ? m.pctLow ?? -1 : f.sort === 'reliability' ? m.reliability ?? -1 : m.pct ?? -1;
   };
-  return players
-    .filter(p => p.Position === f.role && p.metrics[f.metric] && (!f.competition || p.Competition === f.competition)
-      && p['Matches played'] >= f.minMatches && (f.maxAge === null || (typeof p.Age === 'number' && p.Age <= f.maxAge)))
-    .sort((a, b) => key(b) - key(a) || b['Minutes played'] - a['Minutes played']);
+  const base = players.filter(p => p.Position === f.role && p.metrics[f.metric]
+    && p['Matches played'] >= f.minMatches && (f.maxAge === null || (typeof p.Age === 'number' && p.Age <= f.maxAge)));
+  const { rows, missing } = applyProfileFilters(base, f.profile);
+  return { rows: (rows === base ? [...rows] : rows).sort((a, b) => key(b) - key(a) || b['Minutes played'] - a['Minutes played']), missing };
 }

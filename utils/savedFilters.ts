@@ -28,6 +28,7 @@ export interface PlayersFilters {
   profile: ProfileFilters;
 }
 
+/** Chasseur : rôle, exigence et contraintes ; un ancien lien (champ « competition ») est converti en profil */
 export interface HunterFilters {
   role: string;
   strictness: number;
@@ -81,12 +82,15 @@ export function validateHunterFilters(raw: unknown): HunterFilters | null {
   const valueMax = c.valueMax === null ? null : num(c.valueMax);
   if (valueMax === undefined) return null;
   const strictness = num(raw.strictness);
+  // Ancien schéma (une seule compétition, '' : toutes) : devient la sélection [clé], validée comme les autres
+  const profile = 'profile' in c ? validateProfileFilters(c.profile)
+    : validateProfileFilters({ competitions: typeof c.competition === 'string' && c.competition ? [c.competition] : [] });
   return {
     role: str(raw.role, 80) ?? '',
     strictness: strictness !== undefined && strictness > 0 && strictness <= 3 ? strictness : 1,
     constraints: {
       ageMax: Math.round(ageMax), minutesMin: Math.max(0, Math.round(minutesMin)), valueMax, contractMonths: Math.max(0, Math.round(contractMonths)),
-      estimateAboveMarket: c.estimateAboveMarket === true, competition: str(c.competition, 20) ?? '',
+      estimateAboveMarket: c.estimateAboveMarket === true, profile,
     },
   };
 }

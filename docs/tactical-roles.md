@@ -61,13 +61,16 @@ shown in the player profile.
 
 ## Gem Hunter
 
-`filterProspects` (`utils/prospects.ts`) applies three conjunctive steps, counted in the
+`filterProspects` (`utils/prospects.ts`) applies four conjunctive steps, counted in the
 selection funnel:
 
 1. position compatible with the role;
 2. constraints: age, Transfermarkt value, contract, estimated value vs market
-   (estimate ≥ 1.5 × market value), minutes, competition;
-3. eliminatory criteria of the role: percentile ≥ effective threshold
+   (estimate ≥ 1.5 × market value), minutes;
+3. profile: the filters shared with the player database (`utils/profileFilters.ts`):
+   competitions (multiple choice, none = all), competition level, clubs, nationalities, strong
+   foot, height; with no profile filter this step keeps every player;
+4. eliminatory criteria of the role: percentile ≥ effective threshold
    (base threshold × strictness, capped at 99).
 
 Eligible players are then ranked by decreasing role index.
@@ -76,6 +79,20 @@ Missing data is never read as zero: a missing percentile on an eliminatory crite
 player ineligible and is counted apart ("insufficient data"), never as P0; a missing market value
 is never read as €0. Constraints that the season cannot evaluate (no value, contract or estimate
 in the data) do not apply and are disabled in the interface.
+
+A player with no nationality, foot or height never matches an active filter on that field. The
+number left out is shown next to the filter, with an option to include them. It is counted among
+the players of the role's positions who pass every other constraint (known market value included)
+and every other profile filter, before the percentile thresholds. Like "market value
+unavailable", each count only holds players left out for that single reason; once included, they
+stay counted. Older saved filters and share links with a single competition are read as a
+one-competition selection.
+
+The small-samples tab applies the same profile filters and the same rule (`filterSmallSamples`,
+`utils/reliability.ts`); its counts are taken among the players of the chosen position who have
+the metric and pass the age and matches filters. The current `small_samples/{season}.json` files
+carry no nationality, foot or height: a filter on those fields leaves every player out (and
+counts them) unless they are included, and the tab says so.
 
 Custom roles can be created in the Gem Hunter. They are stored in the browser (versioned local
 storage, validated on load) and can never replace an official role.

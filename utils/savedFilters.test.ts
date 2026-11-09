@@ -8,7 +8,7 @@ import { EMPTY_PROFILE } from './profileFilters';
 class MemoryStorage implements StorageLike { map = new Map<string, string>(); getItem(k: string) { return this.map.get(k) ?? null; } setItem(k: string, v: string) { this.map.set(k, v); } }
 const legacyPlayers = { searchTerm: 'dupo', positionFilter: 'ST', sortField: 'xG per 90', sortOrder: 'desc' as const, conditions: [{ key: 'Age', min: 18, max: 23 }, { key: 'Minutes played', min: 500, max: '' as const }] };
 const players = { ...legacyPlayers, profile: EMPTY_PROFILE };
-const hunter = { role: 'Renard des surfaces', strictness: 0.9, constraints: { ageMax: 23, minutesMin: 300, valueMax: 20_000_000, contractMonths: 12, estimateAboveMarket: true, competition: 'FRA' } };
+const hunter = { role: 'Renard des surfaces', strictness: 0.9, constraints: { ageMax: 23, minutesMin: 300, valueMax: 20_000_000, contractMonths: 12, estimateAboveMarket: true, profile: { ...EMPTY_PROFILE, competitions: ['AAA'] } } };
 const similar = { samePosition: true, ageMax: 26, minMinutes: 450, competition: '', tier: 1 };
 
 afterEach(() => { setPendingSharedFilters(null); vi.unstubAllGlobals(); });
@@ -98,5 +98,48 @@ describe('filtres qualitatifs de la Base joueurs (champ profile)', () => {
     const [saved] = loadSavedFilters('players', storage);
     expect(saved.name).toBe('Ancien');
     expect((saved.data as { profile: unknown }).profile).toEqual(EMPTY_PROFILE);
+  });
+});
+
+describe('filtres qualitatifs du Chasseur (champ profile)', () => {
+  // Liens produits par le Chasseur avant les filtres qualitatifs (une seule compétition, '' : toutes)
+  const OLD_HUNTER_LINK = 'eyJ2IjoxLCJwYWdlIjoiaHVudGVyIiwiZGF0YSI6eyJyb2xlIjoiU3RvcHBldXIiLCJzdHJpY3RuZXNzIjowLjksImNvbnN0cmFpbnRzIjp7ImFnZU1heCI6MjEsIm1pbnV0ZXNNaW4iOjQwMCwidmFsdWVNYXgiOjEwMDAwMDAwLCJjb250cmFjdE1vbnRocyI6MTIsImVzdGltYXRlQWJvdmVNYXJrZXQiOmZhbHNlLCJjb21wZXRpdGlvbiI6IkFBQSJ9fX0';
+  const OLD_HUNTER_LINK_ALL = 'eyJ2IjoxLCJwYWdlIjoiaHVudGVyIiwiZGF0YSI6eyJyb2xlIjoiU3RvcHBldXIiLCJzdHJpY3RuZXNzIjoxLCJjb25zdHJhaW50cyI6eyJhZ2VNYXgiOjIzLCJtaW51dGVzTWluIjo1MDAsInZhbHVlTWF4IjpudWxsLCJjb250cmFjdE1vbnRocyI6MCwiZXN0aW1hdGVBYm92ZU1hcmtldCI6ZmFsc2UsImNvbXBldGl0aW9uIjoiIn19fQ';
+  type H = ReturnType<typeof validateHunterFilters>;
+
+  it('un ancien lien avec une compétition reste valide : competitions = [clé]', () => {
+    const fd = decodeShare(OLD_HUNTER_LINK);
+    expect(fd?.page).toBe('hunter');
+    const d = fd?.data as H;
+    expect(d).toEqual({
+      role: 'Stoppeur', strictness: 0.9,
+      constraints: { ageMax: 21, minutesMin: 400, valueMax: 10_000_000, contractMonths: 12, estimateAboveMarket: false, profile: { ...EMPTY_PROFILE, competitions: ['AAA'] } },
+    });
+    expect(d?.constraints).not.toHaveProperty('competition');
+  });
+
+  it('un ancien lien « toutes compétitions » donne une sélection vide', () => {
+    expect((decodeShare(OLD_HUNTER_LINK_ALL)?.data as H)?.constraints.profile).toEqual(EMPTY_PROFILE);
+  });
+
+  it('un nouveau lien transporte les filtres qualitatifs, validés', () => {
+    const profile = { ...EMPTY_PROFILE, competitions: ['AAA', 'BBB'], tiers: [2], teams: ['t_club1'], nations: ['FRA'], feet: ['Left' as const], heightMin: 175, heightMax: 190, includeMissing: { nation: false, foot: true, height: false } };
+    const data = { ...hunter, constraints: { ...hunter.constraints, profile } };
+    expect(decodeShare(encodeShare({ page: 'hunter', data }))).toEqual({ page: 'hunter', data });
+    const bad = decodeShare(encodeShare({ page: 'hunter', data: { ...hunter, constraints: { ...hunter.constraints, profile: { feet: ['Gauche'], heightMin: 9999, competitions: 'AAA' } as never } } }));
+    expect((bad?.data as H)?.constraints.profile).toEqual(EMPTY_PROFILE);
+  });
+
+  it('un ancien filtre enregistré reste lisible', () => {
+    const storage = new MemoryStorage();
+    const legacy = { role: 'Stoppeur', strictness: 1, constraints: { ageMax: 23, minutesMin: 500, valueMax: null, contractMonths: 0, estimateAboveMarket: false, competition: 'BBB' } };
+    storage.setItem(SAVED_FILTERS_KEY, JSON.stringify([
+      { id: 'a', name: 'Ancien', page: 'hunter', createdAt: '2026-10-01T00:00:00Z', data: legacy },
+      { id: 'b', name: 'Ancien illisible', page: 'hunter', createdAt: '2026-10-01T00:00:00Z', data: { ...legacy, constraints: { ...legacy.constraints, competition: 'pas une clé !' } } },
+    ]));
+    const [a, b] = loadSavedFilters('hunter', storage);
+    expect(a.name).toBe('Ancien');
+    expect((a.data as H)?.constraints.profile).toEqual({ ...EMPTY_PROFILE, competitions: ['BBB'] });
+    expect((b.data as H)?.constraints.profile).toEqual(EMPTY_PROFILE);
   });
 });

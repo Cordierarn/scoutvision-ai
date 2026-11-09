@@ -1,11 +1,12 @@
 /**
  * ScoutVision - filtrage du Chasseur de pépites (fonction pure, testée)
  *
- * Trois étapes conjonctives, comptées pour l'entonnoir :
+ * Quatre étapes conjonctives, comptées pour l'entonnoir :
  *   1. poste compatible avec le rôle ;
- *   2. contraintes, dans l'ordre historique : âge, valeur, contrat, estimation / marché,
- *      minutes, compétition ;
- *   3. critères éliminatoires du rôle : percentile ≥ seuil effectif (base × exigence, plafonné à 99).
+ *   2. contraintes, dans l'ordre historique : âge, valeur, contrat, estimation / marché, minutes ;
+ *   3. profil : filtres qualitatifs (compétitions, niveaux, clubs, nationalités, pied, taille ;
+ *      logique de utils/profileFilters.ts) ;
+ *   4. critères éliminatoires du rôle : percentile ≥ seuil effectif (base × exigence, plafonné à 99).
  * Puis classement par indice du rôle décroissant (roleIndex, tri stable).
  *
  * Données manquantes :
@@ -13,13 +14,20 @@
  *     (« données insuffisantes »), jamais lu comme P0 ;
  *   - valeur de marché absente : jamais lue comme 0 € ; exclue seulement si une valeur
  *     maximum est fixée, et comptée à part ;
- *   - âge absent : exclu (comportement inchangé) ; contrat absent : exclu si une échéance est fixée.
+ *   - âge absent : exclu (comportement inchangé) ; contrat absent : exclu si une échéance est fixée ;
+ *   - nationalité, pied ou taille absents sous un filtre actif : jamais retenus, sauf option « inclure »
+ *     cochée pour ce champ. Compteur `missing` par champ, calculé parmi les joueurs des postes du rôle
+ *     qui passent toutes les autres contraintes (valeur de marché connue comprise) et les autres critères
+ *     qualitatifs, avant les seuils de percentile. Comme `noMarketValue`, chaque compteur ne retient que
+ *     les joueurs écartés pour cette seule raison ; inclus, ils restent comptés.
  * Les contraintes que la saison ne peut pas évaluer (pas de valeur, de contrat ou d'estimation
  * dans les données) ne s'appliquent pas : l'interface les désactive.
  */
 
 import { PlayerData } from '../types';
 import { RolePreset, roleIndex } from './rolePresets';
+import { EMPTY_PROFILE, MissingField, ProfileFilters, profileCheck, retainedDespiteMissing, tallyMissing } from './profileFilters';
+import type { HunterConfig } from '../services/groundedAiService';
 
 // Estimation statistique au moins égale à ce multiple de la valeur de marché
 export const ESTIMATE_RATIO_MIN = 1.5;
@@ -30,7 +38,8 @@ export interface ProspectConstraints {
   valueMax: number | null;          // null : sans limite
   contractMonths: number;           // 0 : indifférent
   estimateAboveMarket: boolean;     // estimation ≥ ESTIMATE_RATIO_MIN × valeur de marché
-  competition: string;              // clé Competition ('' : toutes)
+  /** Filtres qualitatifs, comme la Base joueurs (compétitions : aucune = toutes) */
+  profile: ProfileFilters;
 }
 
 export const DEFAULT_CONSTRAINTS: ProspectConstraints = {
@@ -39,8 +48,25 @@ export const DEFAULT_CONSTRAINTS: ProspectConstraints = {
   valueMax: 30_000_000,
   contractMonths: 0,
   estimateAboveMarket: false,
-  competition: '',
+  profile: EMPTY_PROFILE,
 };
+
+/**
+ * Configuration de l'assistant IA appliquée aux contraintes. Le serveur renvoie au plus une compétition :
+ * elle devient la sélection [clé] ; les autres filtres qualitatifs sont conservés. Valeur, contrat et
+ * estimation seulement si la saison les fournit.
+ */
+export function constraintsFromAi(prev: ProspectConstraints, config: HunterConfig, caps: SeasonCapabilities): ProspectConstraints {
+  return {
+    ...prev,
+    ...(config.ageMax !== undefined ? { ageMax: config.ageMax } : {}),
+    ...(config.minutesMin !== undefined ? { minutesMin: config.minutesMin } : {}),
+    ...(config.valueMax !== undefined && caps.marketValue ? { valueMax: config.valueMax } : {}),
+    ...(config.contractMonths !== undefined && caps.contract ? { contractMonths: config.contractMonths } : {}),
+    ...(config.estimateAboveMarket !== undefined && caps.estimate ? { estimateAboveMarket: config.estimateAboveMarket } : {}),
+    ...(config.competition ? { profile: { ...prev.profile, competitions: [config.competition] } } : {}),
+  };
+}
 
 /** Données disponibles dans la saison chargée (l'instantané Transfermarkt ne couvre que la saison en cours) */
 export interface SeasonCapabilities {
@@ -67,17 +93,20 @@ export function effectiveThresholds(preset: RolePreset, strictness: number): Rec
 export interface ProspectFunnel {
   total: number;              // joueurs de la saison
   position: number;           // compatibles avec le poste
-  constraints: number;        // après contraintes
+  constraints: number;        // après contraintes (âge, valeur, contrat, estimation, minutes)
+  profile: number;            // après profil (filtres qualitatifs) ; égal à constraints sans filtre actif
   eligible: number;           // répondent aux critères du rôle
-  noMarketValue: number;      // compatibles, retenus par les autres contraintes, exclus faute de valeur connue
-  insufficientData: number;   // après contraintes, exclus seulement faute de percentile
-  belowThreshold: number;     // après contraintes, au moins un percentile connu sous le seuil
+  noMarketValue: number;      // compatibles, retenus par les autres contraintes et le profil, exclus faute de valeur connue
+  insufficientData: number;   // après profil, exclus seulement faute de percentile
+  belowThreshold: number;     // après profil, au moins un percentile connu sous le seuil
 }
 
 export interface ProspectSearch {
   players: PlayerData[];                 // éligibles, triés par indice du rôle
   thresholds: Record<string, number>;
   funnel: ProspectFunnel;
+  /** Par champ incomplet : joueurs des postes du rôle, retenus par toutes les autres contraintes, sans cette donnée */
+  missing: Record<MissingField, number>;
 }
 
 const knownNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -108,7 +137,6 @@ function checkConstraints(
     if (!market || !estimate || estimate / market < ESTIMATE_RATIO_MIN) return { pass: false, blockedByUnknownValue: false };
   }
   if ((Number(p['Minutes played']) || 0) < c.minutesMin) return { pass: false, blockedByUnknownValue: false };
-  if (c.competition && p.Competition !== c.competition) return { pass: false, blockedByUnknownValue: false };
   return { pass: !unknownValue, blockedByUnknownValue: unknownValue };
 }
 
@@ -125,9 +153,12 @@ export function filterProspects(
   contractDeadline.setMonth(contractDeadline.getMonth() + constraints.contractMonths);
 
   const funnel: ProspectFunnel = {
-    total: data.length, position: 0, constraints: 0, eligible: 0,
+    total: data.length, position: 0, constraints: 0, profile: 0, eligible: 0,
     noMarketValue: 0, insufficientData: 0, belowThreshold: 0,
   };
+  const missingData: Record<MissingField, number> = { nation: 0, foot: 0, height: 0 };
+  const profile = profileCheck(constraints.profile);
+  const include = constraints.profile.includeMissing;
   const players: PlayerData[] = [];
 
   data.forEach(p => {
@@ -135,11 +166,20 @@ export function filterProspects(
     funnel.position++;
 
     const check = checkConstraints(p, constraints, caps, contractDeadline);
-    if (!check.pass) {
-      if (check.blockedByUnknownValue) funnel.noMarketValue++;
+    if (!check.pass && !check.blockedByUnknownValue) return;
+    if (check.pass) funnel.constraints++;
+    // Profil : un critère qui échoue écarte ; une donnée absente écarte sauf option « inclure »
+    const absent = profile ? profile(p) : [];
+    if (absent === null) return;
+    const profileOk = retainedDespiteMissing(absent, include);
+    // Chaque compteur ne retient que les joueurs écartés pour cette seule raison
+    if (check.blockedByUnknownValue) {
+      if (profileOk) funnel.noMarketValue++;
       return;
     }
-    funnel.constraints++;
+    tallyMissing(missingData, absent, include);
+    if (!profileOk) return;
+    funnel.profile++;
 
     let missing = false;
     let below = false;
@@ -157,5 +197,5 @@ export function filterProspects(
   // Tri stable : à indice égal, l'ordre des données est conservé (comme avant)
   const indexed = players.map(p => ({ p, index: roleIndex(p, preset) }));
   indexed.sort((a, b) => b.index - a.index);
-  return { players: indexed.map(x => x.p), thresholds, funnel };
+  return { players: indexed.map(x => x.p), thresholds, funnel, missing: missingData };
 }

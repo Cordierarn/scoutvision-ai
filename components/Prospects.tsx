@@ -5,15 +5,17 @@
  * roleIndexBreakdown), le même calcul que la fiche joueur.
  */
 
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useId, useLayoutEffect, useRef } from 'react';
 import SmallSamples from './prospects/SmallSamples';
 import { PlayerData, TeamStats, extractSeason, getPlayerSeasonId, getPlayerSeasonTag, getSeasonLabel } from '../types';
 import {
   RolePreset, DEFAULT_ROLE_PRESETS, ROLE_CATEGORIES, MIDFIELD_PROFILE_BONUS, ROLE_CORE_WEIGHT, roleIndex, roleIndexBreakdown,
 } from '../utils/rolePresets';
 import {
-  DEFAULT_CONSTRAINTS, ESTIMATE_RATIO_MIN, ProspectConstraints, filterProspects, seasonCapabilities, effectiveThresholds,
+  DEFAULT_CONSTRAINTS, ESTIMATE_RATIO_MIN, ProspectConstraints, constraintsFromAi, filterProspects, seasonCapabilities, effectiveThresholds,
 } from '../utils/prospects';
+import { EMPTY_PROFILE, isProfileActive, profileChips } from '../utils/profileFilters';
+import { ProfileFiltersPanel, useProfileOptions } from './filters/ProfileFiltersPanel';
 import {
   POSITIONS, THRESHOLD_MAX, loadCustomPresets, parseThreshold, presetNameError, saveCustomPresets,
 } from '../utils/customPresets';
@@ -48,6 +50,7 @@ const memory = {
   strictness: 1,
   constraints: { ...DEFAULT_CONSTRAINTS } as ProspectConstraints,
   constraintsOpen: false,
+  profileOpen: false,
   scrollTop: 0,
   pageScrollTop: 0,
   signature: '',
@@ -56,6 +59,7 @@ const memory = {
 const VALUE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 50, 75, 100].map(m => m * 1_000_000);
 const CONTRACT_OPTIONS = [0, 6, 12, 18, 24];
 const STRICTNESS_STEP = 0.1;
+const NO_MISSING = { nation: 0, foot: 0, height: 0 };
 
 const fr = (v: number, digits: number) => v.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
@@ -78,6 +82,7 @@ const positionsText = (preset: RolePreset) => preset.positions.map(positionLabel
 let lastHunterView: 'base' | 'small' = 'base';
 
 const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPlayer, selectedId }) => {
+  const uid = useId();
   const [view, setViewState] = useState<'base' | 'small'>(lastHunterView);
   const setView = (v: 'base' | 'small') => { lastHunterView = v; setViewState(v); };
   // Réglages reçus par un lien de partage : appliqués une fois, avant la mémoire de la page
@@ -97,19 +102,22 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
       .map(key => ({ key, info: dataLoader.getCompetition(key) }))
       .sort((a, b) => (a.info?.tier ?? 9) - (b.info?.tier ?? 9) || (a.info?.name ?? a.key).localeCompare(b.info?.name ?? b.key, 'fr'));
   }, [data]);
-  const [constraints, setConstraints] = useState<ProspectConstraints>(() => ({
-    ...(shared?.constraints ?? memory.constraints),
-    // Compétition absente de la saison chargée : toutes
-    competition: competitions.some(c => c.key === (shared?.constraints ?? memory.constraints).competition) ? (shared?.constraints ?? memory.constraints).competition : '',
-  }));
+  // Compétitions absentes de la saison chargée : retirées de la sélection (aucune : toutes)
+  const inSeason = (c: ProspectConstraints): ProspectConstraints =>
+    ({ ...c, profile: { ...c.profile, competitions: c.profile.competitions.filter(k => competitions.some(x => x.key === k)) } });
+  const [constraints, setConstraints] = useState<ProspectConstraints>(() => inSeason(shared?.constraints ?? memory.constraints));
   const [constraintsOpen, setConstraintsOpen] = useState(memory.constraintsOpen);
+  const [profileOpen, setProfileOpen] = useState(memory.profileOpen || (!!shared && isProfileActive(shared.constraints.profile)));
   const [detailsOpen, setDetailsOpen] = useState(false);     // critères du rôle, sur téléphone
   const setConstraint = <K extends keyof ProspectConstraints>(key: K, value: ProspectConstraints[K]) =>
     setConstraints(prev => ({ ...prev, [key]: value }));
+  const profileOptions = useProfileOptions(data);
+  // Une seule compétition choisie : elle sert à l'avancée de la saison (seuil de minutes)
+  const singleCompetition = constraints.profile.competitions.length === 1 ? constraints.profile.competitions[0] : '';
 
   useEffect(() => {
-    Object.assign(memory, { role: roleName, strictness, constraints, constraintsOpen });
-  }, [roleName, strictness, constraints, constraintsOpen]);
+    Object.assign(memory, { role: roleName, strictness, constraints, constraintsOpen, profileOpen });
+  }, [roleName, strictness, constraints, constraintsOpen, profileOpen]);
 
   // ---------- Saison ----------
   const seasons = useMemo(() => Array.from(new Set(data.map(p => extractSeason(p.League)))), [data]);
@@ -122,8 +130,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
 
   // ---------- Seuil de minutes adapté à l'avancée de la saison ----------
   const progress = useMemo(() => (inProgress
-    ? seasonProgress({ season: seasons[0], seasonLabel: constraints.competition ? String(data.find(p => p.Competition === constraints.competition)?.Season ?? '') || undefined : undefined, generatedAt: dataIndex?.generatedAt, teams: teamStats, competition: constraints.competition || undefined })
-    : { progress: 1, basis: 'complete' as const }), [inProgress, seasons, data, dataIndex?.generatedAt, teamStats, constraints.competition]);
+    ? seasonProgress({ season: seasons[0], seasonLabel: singleCompetition ? String(data.find(p => p.Competition === singleCompetition)?.Season ?? '') || undefined : undefined, generatedAt: dataIndex?.generatedAt, teams: teamStats, competition: singleCompetition || undefined })
+    : { progress: 1, basis: 'complete' as const }), [inProgress, seasons, data, dataIndex?.generatedAt, teamStats, singleCompetition]);
   const suggestedMinutes = adaptiveMinutes(DEFAULT_CONSTRAINTS.minutesMin, progress.progress);
   const minutesAdjusted = inProgress && constraints.minutesMin === suggestedMinutes && suggestedMinutes !== DEFAULT_CONSTRAINTS.minutesMin;
   // Première ouverture d'une saison en cours : le seuil de base (500 min) devient le seuil adapté ; un seuil choisi n'est jamais écrasé
@@ -142,7 +150,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
   const applySavedFilters = (d: HunterFilters) => {
     if (d.role && presets[d.role]) setRoleName(d.role);
     setStrictness(d.strictness);
-    setConstraints({ ...d.constraints, competition: competitions.some(c => c.key === d.constraints.competition) ? d.constraints.competition : '' });
+    setConstraints(inSeason(d.constraints));
+    if (isProfileActive(d.constraints.profile)) setProfileOpen(true);
   };
 
   // ---------- Recherche ----------
@@ -232,6 +241,21 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
   };
 
   // ---------- Contraintes actives (puces) ----------
+  // Après un retrait, le focus va à la puce retirable suivante, sinon au bouton du profil (ou des contraintes sur téléphone), jamais à BODY
+  const chipsRef = useRef<HTMLDivElement>(null);
+  const profileBtnRef = useRef<HTMLButtonElement>(null);
+  const constraintsBtnRef = useRef<HTMLButtonElement>(null);
+  const removeChip = (el: HTMLButtonElement, onRemove: () => void) => {
+    const index = [...(chipsRef.current?.querySelectorAll('button') ?? [])].indexOf(el);
+    onRemove();
+    requestAnimationFrame(() => {
+      const left = chipsRef.current?.querySelectorAll<HTMLButtonElement>('button');
+      const visible = (b: HTMLElement | null) => (b && b.offsetParent !== null ? b : null);
+      (left && left.length ? left[Math.min(index, left.length - 1)] : visible(profileBtnRef.current) ?? visible(constraintsBtnRef.current))?.focus();
+    });
+  };
+  const profileChipList = profileChips(constraints.profile, { competition: profileOptions.competitionName, team: profileOptions.teamName });
+  const profileCount = profileChipList.length;
   const chips: { key: string; label: string; onRemove?: () => void }[] = [
     { key: 'age', label: `≤ ${constraints.ageMax} ans` },
     { key: 'min', label: `≥ ${constraints.minutesMin.toLocaleString('fr-FR')} min${minutesAdjusted ? ' · ajusté à la saison' : ''}` },
@@ -239,8 +263,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
       ? [{ key: 'value', label: `Valeur ≤ ${formatEuro(constraints.valueMax)}`, onRemove: () => setConstraint('valueMax', null) }] : []),
     ...(caps.contract && constraints.contractMonths > 0
       ? [{ key: 'contract', label: `Contrat ≤ ${constraints.contractMonths} mois`, onRemove: () => setConstraint('contractMonths', 0) }] : []),
-    ...(constraints.competition
-      ? [{ key: 'comp', label: dataLoader.getCompetition(constraints.competition)?.name ?? constraints.competition, onRemove: () => setConstraint('competition', '') }] : []),
+    ...profileChipList.map(c => ({ key: c.key, label: c.label, onRemove: () => setConstraint('profile', c.next) })),
     ...(caps.estimate && constraints.estimateAboveMarket
       ? [{ key: 'estimate', label: `Estimation ≥ ${fr(ESTIMATE_RATIO_MIN * 100, 0)} % du marché`, onRemove: () => setConstraint('estimateAboveMarket', false) }] : []),
   ];
@@ -261,15 +284,7 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
   }), [presets, availableMetrics, competitions, caps]);
   const applyAiConfig = (config: HunterConfig) => {
     if (config.role && presets[config.role]) chooseRole(config.role);
-    setConstraints(prev => ({
-      ...prev,
-      ...(config.ageMax !== undefined ? { ageMax: config.ageMax } : {}),
-      ...(config.minutesMin !== undefined ? { minutesMin: config.minutesMin } : {}),
-      ...(config.valueMax !== undefined && caps.marketValue ? { valueMax: config.valueMax } : {}),
-      ...(config.contractMonths !== undefined && caps.contract ? { contractMonths: config.contractMonths } : {}),
-      ...(config.estimateAboveMarket !== undefined && caps.estimate ? { estimateAboveMarket: config.estimateAboveMarket } : {}),
-      ...(config.competition !== undefined ? { competition: config.competition } : {}),
-    }));
+    setConstraints(prev => constraintsFromAi(prev, config, caps));
     // Critères supplémentaires : rôle personnalisé créé à partir du rôle choisi (seuils visibles et modifiables comme les autres)
     if (config.extraCriteria.length) {
       const base = config.role && presets[config.role] ? presets[config.role] : undefined;
@@ -509,14 +524,15 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
           {CONTRACT_OPTIONS.map(m => <option key={m} value={m}>{m === 0 ? 'Indifférent' : `Fin sous ${m} mois`}</option>)}
         </select>
       </label>
-      <label className="flex flex-col gap-1 min-w-0">
-        <span className="sv-label">Compétition</span>
-        <select className="sv-select sv-select-sm max-w-[12rem]" value={constraints.competition}
-          onChange={e => setConstraint('competition', e.target.value)} aria-label="Compétition">
-          <option value="">Toutes</option>
-          {competitions.map(c => <option key={c.key} value={c.key}>{c.info?.name ?? c.key}</option>)}
-        </select>
-      </label>
+      <div className="flex flex-col gap-1 min-w-0">
+        <span className="sv-label" id={`${uid}-profile-label`}>Profil</span>
+        <button ref={profileBtnRef} type="button" onClick={() => setProfileOpen(o => !o)} aria-expanded={profileOpen} aria-controls={`${uid}-profile`}
+          aria-describedby={`${uid}-profile-label`}
+          className={`sv-btn sv-btn-secondary sv-btn-sm ${profileCount > 0 ? '!border-accent/60 !text-accent' : ''}`}>
+          Compétition, club, pied, taille{profileCount > 0 && <span className="num"> ({profileCount})</span>}
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${profileOpen ? 'rotate-180' : ''}`} aria-hidden />
+        </button>
+      </div>
       <label className={`flex items-center gap-2 h-7 text-xs ${caps.estimate ? 'text-ink-2 cursor-pointer' : 'text-ink-4'}`}>
         <input type="checkbox" disabled={!caps.estimate} checked={caps.estimate && constraints.estimateAboveMarket}
           onChange={e => setConstraint('estimateAboveMarket', e.target.checked)} />
@@ -531,6 +547,17 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
       </button>
     </div>
   );
+  // Filtres qualitatifs : panneau partagé avec la Base joueurs (compteurs « sans donnée » parmi les joueurs des postes du rôle retenus par les autres contraintes)
+  const profilePanel = profileOpen && (
+    <div id={`${uid}-profile`} className="mt-2.5 pt-2.5 border-t border-line">
+      <div className="flex items-center justify-between mb-2">
+        <span className="sv-label">Profil</span>
+        {profileCount > 0 && <button type="button" onClick={() => setConstraint('profile', EMPTY_PROFILE)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6">Effacer le profil</button>}
+      </div>
+      <ProfileFiltersPanel value={constraints.profile} onChange={v => setConstraint('profile', v)} options={profileOptions}
+        missing={search?.missing ?? NO_MISSING} />
+    </div>
+  );
 
   // ---------- Rendu : entonnoir ----------
   const f = search?.funnel;
@@ -541,6 +568,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
       <span><span className="text-ink-2 font-semibold num">{f.position.toLocaleString('fr-FR')}</span> compatibles avec le poste</span>
       <ArrowRight className="w-3 h-3 text-ink-4" aria-hidden />
       <span><span className="text-ink-2 font-semibold num">{f.constraints.toLocaleString('fr-FR')}</span> après contraintes</span>
+      <ArrowRight className="w-3 h-3 text-ink-4" aria-hidden />
+      <span><span className="text-ink-2 font-semibold num">{f.profile.toLocaleString('fr-FR')}</span> après profil</span>
       <ArrowRight className="w-3 h-3 text-ink-4" aria-hidden />
       <span><span className="text-accent font-semibold num">{f.eligible.toLocaleString('fr-FR')}</span> répondent aux critères du rôle</span>
       {(f.insufficientData > 0 || f.noMarketValue > 0) && <span className="text-ink-4" aria-hidden>·</span>}
@@ -569,6 +598,8 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
     <EmptyState icon={SlidersHorizontal} title="Aucun joueur ne répond aux critères" className="h-full">
       {f && f.constraints === 0
         ? `Les contraintes excluent les ${f.position.toLocaleString('fr-FR')} joueurs compatibles avec le poste : élargissez l'âge, les minutes ou la valeur.`
+        : f && f.profile === 0
+        ? `Le profil exclut les ${f.constraints.toLocaleString('fr-FR')} joueurs retenus par les contraintes : retirez une compétition, un club ou un critère de pied, de taille ou de nationalité.`
         : f && `${f.belowThreshold.toLocaleString('fr-FR')} joueurs sous au moins un seuil${f.insufficientData ? `, ${f.insufficientData.toLocaleString('fr-FR')} avec des données insuffisantes` : ''} : baissez l'exigence ou élargissez les contraintes.`}
     </EmptyState>
   ) : (
@@ -766,15 +797,15 @@ const Prospects: React.FC<ProspectsProps> = ({ data, teamStats = [], onSelectPla
         <section className="flex-1 min-w-0 flex flex-col lg:min-h-0">
           <div className="px-4 sm:px-5 py-3 border-b border-line space-y-2.5">
             <div className="flex items-center justify-between gap-2 lg:hidden">
-              <button onClick={() => setConstraintsOpen(o => !o)} aria-expanded={constraintsOpen} className="sv-btn sv-btn-secondary sv-btn-sm">
+              <button ref={constraintsBtnRef} onClick={() => setConstraintsOpen(o => !o)} aria-expanded={constraintsOpen} className="sv-btn sv-btn-secondary sv-btn-sm">
                 <SlidersHorizontal className="w-3.5 h-3.5" /> Contraintes
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${constraintsOpen ? 'rotate-180' : ''}`} />
               </button>
             </div>
-            <div className={`${constraintsOpen ? '' : 'hidden'} lg:block`}>{constraintControls}</div>
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className={`${constraintsOpen ? '' : 'hidden'} lg:block`}>{constraintControls}{profilePanel}</div>
+            <div ref={chipsRef} className="flex flex-wrap items-center gap-1.5">
               {chips.map(c => c.onRemove ? (
-                <button key={c.key} onClick={c.onRemove} className="sv-chip sv-chip-on !h-6" aria-label={`Retirer : ${c.label}`}>
+                <button key={c.key} onClick={e => removeChip(e.currentTarget, c.onRemove!)} className="sv-chip sv-chip-on !h-6" aria-label={`Retirer : ${c.label}`}>
                   {c.label} <X className="w-3 h-3" />
                 </button>
               ) : (

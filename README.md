@@ -84,8 +84,11 @@ verdict on a player.
 - Eliminatory criteria (minimum percentile) and weighted ranking criteria per role.
 - A role index from 0 to 100, identical in the player profile, the Gem Hunter and recruitment,
   with a term-by-term breakdown.
-- **Gem Hunter**: selection funnel (position, constraints, role criteria), adjustable strictness,
-  custom roles. During a season in progress the default minutes threshold follows the share of
+- **Gem Hunter**: selection funnel (position, constraints, profile, role criteria), adjustable
+  strictness, custom roles. The same profile filters as the player database (several
+  competitions, level, clubs, nationalities, strong foot, height), also in the small-samples
+  tab, with the number of players left out for missing data next to the filter and the option to
+  include them. During a season in progress the default minutes threshold follows the share of
   the season already played (see [methodology](docs/methodology.md#minutes-threshold-during-a-season-in-progress)).
 
 ### Team & recruitment
