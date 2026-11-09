@@ -63,7 +63,11 @@ verdict on a player.
 
 ### Player scouting
 - **Player database**: every player of the loaded seasons, sortable and configurable stat
-  columns, combined stat filters, CSV export.
+  columns, combined stat filters, CSV export. Profile filters: competitions and competition level,
+  clubs of the loaded season, nationalities (French names, EU / EEA shortcuts that only tick the
+  countries), strong foot and height. A player with no value for a filtered field never matches;
+  the number of players left out for missing data is shown next to the filter, with an option to
+  include them. A stat condition never treats a missing value as 0.
 - **Player profile**: percentiles by role and competition level, radar, best roles, RAPM,
   finishing skill, pass-network role, estimated value vs Transfermarkt, development projection,
   shot map, heatmap, PDF export.

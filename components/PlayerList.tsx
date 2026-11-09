@@ -6,6 +6,8 @@ import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/s
 import { getMetricKeys } from '../utils/positionMetrics';
 import { isRowActivation } from '../utils/rowKeys';
 import { matchesConditions } from '../utils/playerFilters';
+import { EMPTY_PROFILE, ProfileFilters, applyProfileFilters, profileChips } from '../utils/profileFilters';
+import { ProfileFiltersPanel, useProfileOptions } from './filters/ProfileFiltersPanel';
 import { FilterData, PlayersFilters, consumeSharedFilters } from '../utils/savedFilters';
 import { SavedFiltersMenu } from './filters/SavedFiltersMenu';
 import { formatEuro } from '../utils/format';
@@ -46,6 +48,7 @@ const memory = {
   sortOrder: 'desc' as SortOrder,
   positionFilter: 'All',
   activeFilters: [] as FilterCondition[],
+  profile: EMPTY_PROFILE as ProfileFilters,
   showAdvancedFilters: false,
   visibleCount: 100,
   scrollTop: 0,
@@ -112,12 +115,14 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   const [positionFilter, setPositionFilter] = useState<string>(shared?.positionFilter ?? memory.positionFilter);
 
   // Advanced Filters State
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(shared ? shared.conditions.length > 0 : memory.showAdvancedFilters);
+  const [profile, setProfile] = useState<ProfileFilters>(shared?.profile ?? memory.profile);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(shared ? shared.conditions.length > 0 || profileChips(shared.profile, { competition: k => k, team: k => k }).length > 0 : memory.showAdvancedFilters);
   const [activeFilters, setActiveFilters] = useState<FilterCondition[]>(shared ? conditionsToFilters(shared.conditions) : memory.activeFilters);
-  const currentFilters: FilterData = { page: 'players', data: { searchTerm, positionFilter, sortField: String(sortField), sortOrder, conditions: activeFilters.map(f => ({ key: f.key, min: f.min === '' ? '' : Number(f.min), max: f.max === '' ? '' : Number(f.max) })) } };
+  const currentFilters: FilterData = { page: 'players', data: { searchTerm, positionFilter, sortField: String(sortField), sortOrder, conditions: activeFilters.map(f => ({ key: f.key, min: f.min === '' ? '' : Number(f.min), max: f.max === '' ? '' : Number(f.max) })), profile } };
   const applySavedFilters = (d: PlayersFilters) => {
     setSearchTerm(d.searchTerm); setSortField(d.sortField as SortField); setSortOrder(d.sortOrder); setPositionFilter(d.positionFilter);
-    setActiveFilters(conditionsToFilters(d.conditions)); if (d.conditions.length) setShowAdvancedFilters(true);
+    setActiveFilters(conditionsToFilters(d.conditions)); setProfile(d.profile);
+    if (d.conditions.length || profileChips(d.profile, { competition: k => k, team: k => k }).length) setShowAdvancedFilters(true);
   };
 
   // Colonnes statistiques choisies
@@ -131,8 +136,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    Object.assign(memory, { searchTerm, sortField, sortOrder, positionFilter, activeFilters, showAdvancedFilters });
-  }, [searchTerm, sortField, sortOrder, positionFilter, activeFilters, showAdvancedFilters]);
+    Object.assign(memory, { searchTerm, sortField, sortOrder, positionFilter, activeFilters, profile, showAdvancedFilters });
+  }, [searchTerm, sortField, sortOrder, positionFilter, activeFilters, profile, showAdvancedFilters]);
 
   // Update watchlist IDs for UI
   useEffect(() => {
@@ -261,7 +266,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   // suivent en priorité basse (interruptibles) au lieu de bloquer la saisie
   const deferredSearch = useDeferredValue(searchTerm);
 
-  const filteredAndSortedData = useMemo(() => {
+  const profileOptions = useProfileOptions(data);
+  const chips = profileChips(profile, { competition: profileOptions.competitionName, team: profileOptions.teamName });
+
+  const { list: filteredAndSortedData, missing: profileMissing } = useMemo(() => {
     let result = [...data];
 
     // Text Search - avec vérification null et type
@@ -285,6 +293,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
       result = result.filter(p => matchesConditions(p as unknown as Record<string, unknown>, activeFilters));
     }
 
+    // Filtres qualitatifs : une valeur absente ne correspond pas ; écartés faute de donnée comptés par champ
+    const prof = applyProfileFilters(result, profile);
+    result = prof.rows;
+
     // Tri : valeurs absentes toujours en fin de liste, texte selon l'ordre alphabétique français
     const dir = sortOrder === 'asc' ? 1 : -1;
     result.sort((a, b) => {
@@ -299,12 +311,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
       return 0;
     });
 
-    return result;
-  }, [data, deferredSearch, positionFilter, sortField, sortOrder, activeFilters]);
+    return { list: result, missing: prof.missing };
+  }, [data, deferredSearch, positionFilter, sortField, sortOrder, activeFilters, profile]);
 
   // Revenir au début de la liste quand la recherche, les filtres, le tri ou la saison changent ;
   // au retour d'une fiche (mêmes critères), la position de lecture est conservée
-  const signature = JSON.stringify([deferredSearch, positionFilter, sortField, sortOrder, activeFilters, data.length]);
+  const signature = JSON.stringify([deferredSearch, positionFilter, sortField, sortOrder, activeFilters, profile, data.length]);
   useEffect(() => {
     if (memory.signature === signature) return;
     memory.signature = signature;
@@ -367,7 +379,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
   const sortedCell = (field: string) => (sortField === field ? 'bg-accent/[0.035]' : '');
 
   const seasonText = seasons.length === 1 ? getSeasonLabel(seasons[0]) : 'Toutes les saisons';
-  const filterCount = activeFilters.length + (positionFilter !== 'All' ? 1 : 0) + (searchTerm ? 1 : 0);
+  const filterCount = activeFilters.length + chips.length + (positionFilter !== 'All' ? 1 : 0) + (searchTerm ? 1 : 0);
   const columnLabel = (k: string) => k === 'Contract expires' ? 'Fin de contrat' : metricLabel(k);
   const pickable = [...CONTEXT_COLUMNS.slice().reverse(), ...numericKeys].filter(k => !LOCKED_STATS.includes(k)
     && (!columnSearch || k.toLowerCase().includes(columnSearch.toLowerCase()) || columnLabel(k).toLowerCase().includes(columnSearch.toLowerCase())));
@@ -413,13 +425,13 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
           <button
             onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
             aria-expanded={showAdvancedFilters}
-            className={`sv-btn sv-btn-secondary ${showAdvancedFilters || activeFilters.length > 0 ? '!border-accent/60 !text-accent' : ''}`}
+            className={`sv-btn sv-btn-secondary ${showAdvancedFilters || activeFilters.length + chips.length > 0 ? '!border-accent/60 !text-accent' : ''}`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
             Filtres
-            {activeFilters.length > 0 && (
+            {activeFilters.length + chips.length > 0 && (
               <span className="min-w-[18px] h-[18px] px-1 rounded-sm bg-accent text-accent-ink text-2xs font-bold flex items-center justify-center">
-                {activeFilters.length}
+                {activeFilters.length + chips.length}
               </span>
             )}
           </button>
@@ -494,6 +506,14 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
         {/* Filtres statistiques : toutes les conditions sont requises */}
         {showAdvancedFilters && (
           <div className="sv-panel p-3 animate-fade-in-down">
+            {/* Profil : compétition, niveau, club, nationalité, pied fort, taille */}
+            <div className="mb-3 pb-3 border-b border-line">
+              <div className="flex items-center justify-between mb-2">
+                <span className="sv-label">Profil</span>
+                {chips.length > 0 && <button onClick={() => setProfile(EMPTY_PROFILE)} className="sv-btn sv-btn-ghost sv-btn-sm !h-6">Effacer le profil</button>}
+              </div>
+              <ProfileFiltersPanel value={profile} onChange={setProfile} options={profileOptions} missing={profileMissing} />
+            </div>
             <div className="flex items-center justify-between mb-2">
               <span className="sv-label">Conditions <span className="normal-case tracking-normal font-normal text-ink-4">(toutes requises)</span></span>
               <button onClick={addFilter} className="sv-btn sv-btn-ghost sv-btn-sm !text-accent">
@@ -543,7 +563,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
         )}
 
         {/* Filtres actifs, visibles même panneau fermé */}
-        {!showAdvancedFilters && (activeFilters.length > 0 || positionFilter !== 'All') && (
+        {!showAdvancedFilters && (activeFilters.length > 0 || chips.length > 0 || positionFilter !== 'All') && (
           <div className="flex flex-wrap items-center gap-1.5">
             {positionFilter !== 'All' && (
               <button onClick={() => setPositionFilter('All')} className="sv-chip sv-chip-on !h-6" aria-label={`Retirer le filtre ${positionName(positionFilter)}`}>
@@ -559,7 +579,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
                 <X className="w-3 h-3" />
               </button>
             ))}
-            <button onClick={() => { setActiveFilters([]); setPositionFilter('All'); }} className="sv-btn sv-btn-ghost sv-btn-sm !h-6">Tout effacer</button>
+            {chips.map(c => (
+              <button key={c.key} onClick={() => setProfile(c.next)} className="sv-chip sv-chip-on !h-6" aria-label={`Retirer le filtre ${c.label}`}>
+                {c.label} <X className="w-3 h-3" />
+              </button>
+            ))}
+            <button onClick={() => { setActiveFilters([]); setPositionFilter('All'); setProfile(EMPTY_PROFILE); }} className="sv-btn sv-btn-ghost sv-btn-sm !h-6">Tout effacer</button>
           </div>
         )}
       </div>

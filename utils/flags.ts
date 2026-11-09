@@ -4,7 +4,7 @@
  * ou une subdivision (gb-eng pour l'Angleterre).
  */
 
-const FIFA_TO_ISO: Record<string, string> = {
+export const FIFA_TO_ISO: Record<string, string> = {
   AFG: 'af', ALB: 'al', ALG: 'dz', AND: 'ad', ANG: 'ao', ARG: 'ar', ARM: 'am', ARU: 'aw',
   ATG: 'ag', AUS: 'au', AUT: 'at', AZE: 'az', BAH: 'bs', BAN: 'bd', BDI: 'bi', BEL: 'be',
   BEN: 'bj', BER: 'bm', BFA: 'bf', BHR: 'bh', BIH: 'ba', BLR: 'by', BOL: 'bo', BOT: 'bw',
@@ -29,6 +29,8 @@ const FIFA_TO_ISO: Record<string, string> = {
   SWZ: 'sz', SYR: 'sy', TAN: 'tz', THA: 'th', TJK: 'tj', TKM: 'tm', TOG: 'tg', TPE: 'tw',
   TRI: 'tt', TUN: 'tn', TUR: 'tr', UAE: 'ae', UGA: 'ug', UKR: 'ua', URU: 'uy', USA: 'us',
   UZB: 'uz', VEN: 've', VIE: 'vn', WAL: 'gb-wls', YEM: 'ye', ZAM: 'zm', ZIM: 'zw',
+  // Territoires présents dans les données sans entrée jusqu'ici
+  BLZ: 'bz', MGL: 'mn', MSR: 'ms', SRI: 'lk', STL: 'lc', TCA: 'tc', USV: 'vi', VAN: 'vu', VIN: 'vc',
 };
 
 /**
