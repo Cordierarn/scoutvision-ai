@@ -16,6 +16,7 @@ import LabPage from './components/lab/LabPage';
 import { PlayerData, TeamStats, ViewState, getPlayerSeasonId } from './types';
 import { dataLoader, DataIndex, LoadingState } from './services/dataLoader';
 import { queryService } from './services/queryService';
+import { resolveView, useAuth, viewAllowed } from './services/authService';
 
 const ALL_SEASONS = 'All';
 
@@ -97,7 +98,11 @@ const App: React.FC = () => {
   // donc immédiats.
   const [, startTransition] = useTransition();
 
-  const handleNavigate = (newView: string) => {
+  // Compte pro : Pronostics n'est pas proposé (le serveur refuse ses ressources) ; une demande
+  // d'ouvrir cette vue mène à l'Analyse d'équipe, vue d'accueil
+  const { role } = useAuth();
+  const handleNavigate = (requested: string) => {
+    const newView = resolveView(role, requested, ViewState.TEAM_ANALYSIS);
     setView(newView);
     if (newView !== ViewState.PLAYER_DETAIL) {
       setSelectedPlayer(null);
@@ -178,7 +183,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {view === ViewState.FORECAST && <Forecast />}
+      {view === ViewState.FORECAST && viewAllowed(role, view) && <Forecast />}
 
       {view === ViewState.LAB && <LabPage playerData={players} />}
 

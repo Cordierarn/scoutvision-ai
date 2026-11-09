@@ -146,6 +146,12 @@ The pro account may use the AI functions (reports, comparison, opposition, prosp
 most **20 times per day** (Paris time), all functions together; the 21st call answers `429` with a
 French message. The counter lives in memory and restarts with the dyno. Its session lasts 1 day.
 
+In the browser, `GET /api/auth/session` returns the role; for the pro account the navigation does
+not show Pronostics and any request to open that view leads to Team analysis (`viewAllowed` and
+`resolveView` in `services/authService.ts`), so the app never asks for a refused resource. This is
+convenience only: an unknown or missing role is shown as the owner's, and the server stays the
+only protection.
+
 ### CSRF and origin
 
 The session cookie is `SameSite=Lax`: browsers do not send it on cross-site POST, fetch or
