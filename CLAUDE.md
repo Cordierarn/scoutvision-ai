@@ -68,4 +68,5 @@ npm run build              # client + serveur SSR ; supprimer dist/ et dist-serv
 - Si un chiffre, un comportement ou une règle change : mettre à jour la doc concernée (`docs/`, README,
   skill) dans la même PR.
 - Correction de CI : reproduire l'étape en local, écrire d'abord un test qui échoue, puis corriger.
+- Un test ne dépend jamais de la date du jour : horloge figée (vi.setSystemTime, ou date injectée côté Python).
 - En cas de doute sur le périmètre, demander plutôt que trancher.

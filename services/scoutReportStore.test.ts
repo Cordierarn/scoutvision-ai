@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addObservation, addSummary, createReport, deleteReport, exportFileName, exportReportsJson, findReportForPlayer, getReport, importReportsJson, loadReports,
   parseRecord, removeObservation, reveal, saveReports, SCOUT_REPORTS_KEY, setBlind, setRole, setStatus, setTags, StorageLike, subscribeReports, updateObservation,
@@ -25,7 +25,9 @@ const snapshot = (): ReportDataSnapshot => ({
 });
 
 let storage: MemoryStorage;
-beforeEach(() => { storage = new MemoryStorage(); });
+// Horloge figée au jour des données de test : les dates « plus récentes » des fixtures le restent quelle que soit la date du jour
+beforeEach(() => { storage = new MemoryStorage(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-29T12:00:00Z')); });
+afterEach(() => { vi.useRealTimers(); });
 
 describe('stockage : créer, lire, modifier, supprimer', () => {
   it('crée un dossier brouillon sans synthèse ni observation, retrouvé par playerSeasonId', () => {
