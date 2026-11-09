@@ -5,6 +5,7 @@ import { exportToCSV } from '../utils/exportUtils';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/storageService';
 import { getMetricKeys } from '../utils/positionMetrics';
 import { isRowActivation } from '../utils/rowKeys';
+import { matchesConditions } from '../utils/playerFilters';
 import { FilterData, PlayersFilters, consumeSharedFilters } from '../utils/savedFilters';
 import { SavedFiltersMenu } from './filters/SavedFiltersMenu';
 import { formatEuro } from '../utils/format';
@@ -280,14 +281,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ data, onSelectPlayer, selectedI
 
     // Advanced Numeric Filters
     if (activeFilters.length > 0) {
-      result = result.filter(p => {
-        return activeFilters.every(filter => {
-           const val = Number(p[filter.key]) || 0;
-           const min = filter.min === '' ? -Infinity : Number(filter.min);
-           const max = filter.max === '' ? Infinity : Number(filter.max);
-           return val >= min && val <= max;
-        });
-      });
+      // Une valeur absente ne correspond jamais (elle n'est pas comptée comme 0)
+      result = result.filter(p => matchesConditions(p as unknown as Record<string, unknown>, activeFilters));
     }
 
     // Tri : valeurs absentes toujours en fin de liste, texte selon l'ordre alphabétique français
