@@ -52,5 +52,10 @@ export function formatMetricValue(key: string, value: number | null): string {
   return fr(value, digits);
 }
 
+/** Total ou valeur simple au format français (« 17,4 ») ; « – » si absent (jamais 0) */
+export function formatTotal(value: number | null, digits: number): string {
+  return value === null ? '–' : fr(value, digits);
+}
+
 /** Libellé d'axe de radar : « par 90 » abrégé en « /90 », comme dans les tableaux */
 export const radarAxisLabel = (label: string) => label.replace(/ par 90$/, ' /90');

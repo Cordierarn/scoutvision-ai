@@ -160,14 +160,15 @@ const PairRadar: React.FC<{ result: SimilarityResult; names: [string, string] }>
   );
 };
 
-const PairValue: React.FC<{ label: string; a: number; b: number; bar?: 'index' }> = ({ label, a, b }) => (
+// Valeur absente (aucun percentile du rôle) : « – » et pas de barre, jamais 0
+const PairValue: React.FC<{ label: string; a: number | null; b: number | null; bar?: 'index' }> = ({ label, a, b }) => (
   <div className="py-1.5 border-b border-line last:border-0">
     <div className="flex items-center justify-between gap-2 text-xs">
       <span className="text-ink-2">{label}</span>
-      <span className="num whitespace-nowrap"><span className="font-semibold text-ink">{a}</span><span className="text-ink-4 mx-1.5">↔</span><span className="font-semibold text-ink">{b}</span></span>
+      <span className="num whitespace-nowrap"><span className={`font-semibold ${a === null ? 'text-ink-4' : 'text-ink'}`}>{a ?? '–'}</span><span className="text-ink-4 mx-1.5">↔</span><span className={`font-semibold ${b === null ? 'text-ink-4' : 'text-ink'}`}>{b ?? '–'}</span></span>
     </div>
     <div className="grid grid-cols-2 gap-1 mt-1">
-      <IndexBar value={a} /><IndexBar value={b} />
+      {a === null ? <span /> : <IndexBar value={a} />}{b === null ? <span /> : <IndexBar value={b} />}
     </div>
   </div>
 );

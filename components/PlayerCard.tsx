@@ -15,6 +15,7 @@ import { ScoutReportRecord } from '../types/scoutReport';
 import { draftDossier, generateAndStore } from './reports/generateReport';
 import { downloadReportPdf } from '../utils/scoutReportPdf';
 import { rankPresets, ROLE_CORE_WEIGHT, MIDFIELD_PROFILE_BONUS } from '../utils/rolePresets';
+import { formatTotal, metricValue } from '../utils/metricFormat';
 import { getRadarMetricsForPosition, filterAvailableMetrics, getPositionCategory, getPositionCategoryLabel, getMetricKeys, isMetricKey } from '../utils/positionMetrics';
 import ReactMarkdown from 'react-markdown';
 import { getFlagUrl } from '../utils/flags';
@@ -494,10 +495,10 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onBack, allPlayers }) =
           <Stat className="px-3 sm:px-4 py-2.5" label="Minutes" value={minutes.toLocaleString('fr-FR')}
             sub={typeof player['Minutes share'] === 'number' ? `${Math.round(player['Minutes share'] * 100)} % des minutes de l'équipe` : undefined} />
           <Stat className="px-3 sm:px-4 py-2.5" label="Matchs" value={player['Matches played']} sub={`${player.Starts ?? 0} titularisations`} />
-          <Stat className="px-3 sm:px-4 py-2.5" label="Buts · xG" value={<>{player.Goals ?? 0} <span className="text-ink-3 font-normal text-sm">· {fixed(Number(player.xG) || 0, 1)}</span></>}
+          <Stat className="px-3 sm:px-4 py-2.5" label="Buts · xG" value={<>{formatTotal(metricValue(player, 'Goals'), 0)} <span className="text-ink-3 font-normal text-sm">· {formatTotal(metricValue(player, 'xG'), 1)}</span></>}
             help="Buts et expected goals cumulés sur la saison sélectionnée"
             sub={typeof player['Goals per 90'] === 'number' ? `${fixed(player['Goals per 90'] as number, 2)} but par 90` : undefined} />
-          <Stat className="px-3 sm:px-4 py-2.5" label={<MobileLabel short="PD · xA" full="Passes déc. · xA" />} value={<>{player.Assists ?? 0} <span className="text-ink-3 font-normal text-sm">· {fixed(Number(player.xA) || 0, 1)}</span></>}
+          <Stat className="px-3 sm:px-4 py-2.5" label={<MobileLabel short="PD · xA" full="Passes déc. · xA" />} value={<>{formatTotal(metricValue(player, 'Assists'), 0)} <span className="text-ink-3 font-normal text-sm">· {formatTotal(metricValue(player, 'xA'), 1)}</span></>}
             help="Passes décisives et expected assists cumulées sur la saison sélectionnée"
             sub={typeof player['xA per 90'] === 'number' ? `${fixed(player['xA per 90'] as number, 2)} xA par 90` : undefined} />
           <Stat className="px-3 sm:px-4 py-2.5" label="Note" value={typeof player.Rating === 'number' ? fixed(player.Rating, 2) : 'N/D'}
