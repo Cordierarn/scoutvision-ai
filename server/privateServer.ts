@@ -8,6 +8,8 @@
  *   PitchAPI privées, servies hors de dist/), /cdn/* (proxy d'images limité aux photos et logos),
  *   /api/* (rapports Gemini et futurs endpoints privés).
  * Sans session : 302 vers /login pour une navigation, 401 pour tout le reste, jamais le contenu.
+ * Compte pro (rôle du jeton signé, revérifié à chaque requête) : 403 sur toute ressource de la page Pronostics
+ * (`forbiddenForRole`) et 20 appels IA par jour au plus (`AiQuota`).
  * Mutations (POST) : origine vérifiée en plus du cookie SameSite=Lax.
  * En-têtes de sécurité sur toutes les réponses ; CSP stricte hors développement.
  */
@@ -17,7 +19,7 @@ import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createGzip } from 'node:zlib';
 import {
-  AuthConfig, LoginLimiter, RevocationList, SessionPayload, checkCredentials, clearSessionCookie, createDeviceToken, createSessionToken,
+  AuthConfig, LoginLimiter, RevocationList, Role, SessionPayload, authenticate, clearSessionCookie, createDeviceToken, createSessionToken,
   deviceCookie, deviceCookieName, readCookie, sessionCookie, sessionCookieName, verifyDeviceToken, verifySessionToken,
 } from './auth';
 import { readBody } from './scoutReportPlugin';
@@ -58,6 +60,10 @@ export interface PrivateServerOptions {
   /** Données prêtes (téléchargement initial terminé) */
   dataReady?: () => boolean;
   log?: (message: string) => void;
+  /** Horloge (tests) */
+  now?: () => number;
+  /** Limite IA du compte pro (20 appels par jour par défaut) */
+  aiQuota?: AiQuota;
 }
 
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -100,6 +106,50 @@ export const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
+
+// ============================================
+// COMPTE PRO : PAGE PRONOSTICS INTERDITE, IA LIMITÉE
+// ============================================
+
+/**
+ * Ressource de la page Pronostics (et de son Labo paris) refusée au compte pro : prévisions, replays, comparaison au
+ * marché, suggestions de paris et assistant IA du Labo. Règle large et insensible à la casse : tout chemin qui contient
+ * « /data/forecast » (y compris /public/… ou /@fs/… servis par Vite en développement) et toute route /api/ai/betting….
+ * Appliquée au chemin décodé et normalisé, avant tout autre traitement.
+ */
+export function forbiddenForRole(role: Role | undefined, p: string): boolean {
+  if (role !== 'pro') return false;
+  const lower = p.toLowerCase();
+  return lower.includes('/data/forecast') || lower.startsWith('/api/ai/betting');
+}
+
+/** Chemin brut ramené à sa forme canonique (décodé, « . » et « .. » résolus, barres doubles fusionnées) ; null s'il est illisible */
+export function canonicalPath(rawUrl: string | undefined): string | null {
+  const raw = (rawUrl ?? '/').split('?')[0].split('#')[0] || '/';
+  let decoded: string;
+  try { decoded = decodeURIComponent(raw); } catch { return null; }
+  return path.posix.normalize(decoded.replace(/\\/g, '/').replace(/\0/g, '')).replace(/\/{2,}/g, '/');
+}
+
+/** Fonctions IA (rapports et IA ancrée) : comptées dans la limite du compte pro */
+const isAiCall = (p: string) => p === '/api/scout-report' || p.startsWith('/api/ai/');
+export const PRO_AI_DAILY_LIMIT = 20;
+
+/** Appels IA par compte et par jour (heure de Paris), en mémoire : remis à zéro au redémarrage */
+export class AiQuota {
+  private counts = new Map<string, { day: string; count: number }>();
+  constructor(private limit = PRO_AI_DAILY_LIMIT) {}
+  private static day(now: number) { return new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris' }).format(now); }
+  /** Prend un appel ; false si la limite du jour est atteinte */
+  take(user: string, now = Date.now()): boolean {
+    const day = AiQuota.day(now);
+    const e = this.counts.get(user);
+    if (!e || e.day !== day) { this.counts.set(user, { day, count: 1 }); return true; }
+    if (e.count >= this.limit) return false;
+    e.count++;
+    return true;
+  }
+}
 
 // ============================================
 // OUTILS HTTP
@@ -292,9 +342,12 @@ export function createPrivateServer(opts: PrivateServerOptions) {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const loginAssets = opts.distDir && opts.mode !== 'dev' ? loginAssetsFromManifest(opts.distDir) : new Set<string>();
   const cookieName = sessionCookieName(opts.secureCookies);
+  const clock = opts.now ?? (() => Date.now());
+  const aiQuota = opts.aiQuota ?? new AiQuota();
 
   const session = (req: IncomingMessage): SessionPayload | null =>
-    opts.auth ? verifySessionToken(opts.auth, readCookie(req.headers.cookie, cookieName), revoked) : null;
+    opts.auth ? verifySessionToken(opts.auth, readCookie(req.headers.cookie, cookieName), revoked, clock()) : null;
+  const forbidden = (res: ServerResponse) => sendJson(res, 403, { error: 'Accès réservé.' });
 
   // ----- /api/auth/* -----
   async function authRoute(req: IncomingMessage, res: ServerResponse, p: string) {
@@ -303,7 +356,7 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       if (!opts.auth) return sendJson(res, 200, { authenticated: true, user: null, open: true });
       const s = session(req);
       // Sans session : 200 { authenticated: false } (état, pas une erreur ; aucune information de plus)
-      return sendJson(res, 200, s ? { authenticated: true, user: s.u } : { authenticated: false });
+      return sendJson(res, 200, s ? { authenticated: true, user: s.u, role: s.r } : { authenticated: false });
     }
     if (p === '/api/auth/login' || p === '/api/auth/logout') {
       if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return sendJson(res, 405, { error: 'Méthode non autorisée.' }); }
@@ -325,19 +378,19 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       // Tentative réservée de façon synchrone, avant le calcul du hash (pas de contournement par rafale)
       const ip = clientIp(req, opts.trustProxy);
       const device = verifyDeviceToken(opts.auth, readCookie(req.headers.cookie, deviceCookieName(opts.secureCookies)));
-      const slot = limiter.reserve(ip, Date.now(), device);
+      const slot = limiter.reserve(ip, clock(), device);
       if ('retryAfter' in slot) return sendJson(res, 429, { error: 'Trop de tentatives. Réessayez plus tard.', retryAfter: slot.retryAfter }, { 'Retry-After': String(slot.retryAfter) });
-      let ok = false;
+      let account = null;
       try {
         if (slot.ok && slot.slow) await new Promise(resolve => setTimeout(resolve, 1000));
-        ok = await checkCredentials(opts.auth, username, password);
+        account = await authenticate(opts.auth, username, password);
       } finally {
-        limiter.release(ip, ok, slot.ok && slot.trusted, device);
+        limiter.release(ip, account !== null, slot.ok && slot.trusted, device);
       }
-      if (!ok) return sendJson(res, 401, { error: 'Identifiants incorrects.' });
-      const { token, payload } = createSessionToken(opts.auth);
-      res.setHeader('Set-Cookie', [sessionCookie(token, opts.secureCookies), deviceCookie(createDeviceToken(opts.auth), opts.secureCookies)]);
-      return sendJson(res, 200, { authenticated: true, user: payload.u });
+      if (!account) return sendJson(res, 401, { error: 'Identifiants incorrects.' });
+      const { token, payload } = createSessionToken(opts.auth, clock(), undefined, account);
+      res.setHeader('Set-Cookie', [sessionCookie(token, opts.secureCookies, account.sessionTtlMs), deviceCookie(createDeviceToken(opts.auth, clock(), account), opts.secureCookies)]);
+      return sendJson(res, 200, { authenticated: true, user: payload.u, role: payload.r });
     }
     return sendJson(res, 404, { error: 'Introuvable.' });
   }
@@ -391,12 +444,19 @@ export function createPrivateServer(opts: PrivateServerOptions) {
       return res.end();
     }
     const p = requestPath(req);
-    if (p === null) return sendText(res, 400, 'Requête invalide.');
+    if (p === null) {
+      // Chemin détourné (« .. » encodé ou non) : refusé à tous ; pour le compte pro, 403 s'il vise Pronostics
+      const canonical = canonicalPath(req.url);
+      if (canonical && forbiddenForRole(session(req)?.r, canonical)) return forbidden(res);
+      return sendText(res, 400, 'Requête invalide.');
+    }
     if (p === '/healthz') return sendText(res, 200, 'ok');
     if (p.startsWith('/api/auth/')) return authRoute(req, res, p);
 
     const s = session(req);
     const authed = !opts.auth || !!s;
+    // Compte pro : Pronostics refusé avant toute lecture de fichier, tout appel d'API et toute page servie
+    if (s && forbiddenForRole(s.r, p)) return forbidden(res);
 
     // Page de connexion (déjà connecté : retour à l'application)
     if (p === LOGIN_PATH || p === '/login.html') {
@@ -432,6 +492,9 @@ export function createPrivateServer(opts: PrivateServerOptions) {
 
     if (isApi) {
       if (req.method !== 'GET' && req.method !== 'HEAD' && !sameOriginRequest(req, opts)) return sendJson(res, 403, { error: 'Origine de la requête refusée.' });
+      if (s?.r === 'pro' && req.method === 'POST' && isAiCall(p) && !aiQuota.take(s.u, clock())) {
+        return sendJson(res, 429, { error: `Limite atteinte : ${PRO_AI_DAILY_LIMIT} analyses IA aujourd'hui pour ce compte, toutes fonctions confondues. Réessayez demain.`, status: 429 });
+      }
       if (opts.api) {
         let passed = false;
         await opts.api(req, res, () => { passed = true; });

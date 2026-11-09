@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createServer, Server } from 'node:http';
+import { createServer, request, Server } from 'node:http';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -83,7 +83,7 @@ describe('connexion', () => {
     const res = await login('arnaud', PASSWORD);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(JSON.parse(body)).toEqual({ authenticated: true, user: 'arnaud' });
+    expect(JSON.parse(body)).toEqual({ authenticated: true, user: 'arnaud', role: 'owner' });
     expect(body).not.toMatch(/scrypt|hash|secret/i);
     const set = res.headers.get('set-cookie')!;
     expect(set).toMatch(/^__Host-sv_session=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+;/);
@@ -134,7 +134,7 @@ describe('connexion', () => {
 describe('session', () => {
   it('session valide, absente, expirée', async () => {
     const c = await cookie();
-    expect(await (await get('/api/auth/session', { Cookie: c })).json()).toEqual({ authenticated: true, user: 'arnaud' });
+    expect(await (await get('/api/auth/session', { Cookie: c })).json()).toEqual({ authenticated: true, user: 'arnaud', role: 'owner' });
     expect(await (await get('/api/auth/session')).json()).toEqual({ authenticated: false });
     const expired = createSessionToken(auth, Date.now() - 8 * 24 * 3600 * 1000).token;
     expect(await (await get('/api/auth/session', { Cookie: `__Host-sv_session=${expired}` })).json()).toEqual({ authenticated: false });
@@ -361,5 +361,148 @@ describe('mode local ouvert', () => {
     expect(await (await get('/api/auth/session')).json()).toEqual({ authenticated: true, user: null, open: true });
     server.close();
     await start();
+  });
+});
+
+// ============================================
+// COMPTE PRO : toute l'application sauf Pronostics
+// ============================================
+
+describe('compte pro', () => {
+  const PRO = 'compte-pro-test';
+  const PRO_PASSWORD = 'mot-de-passe-pro-synthétique';
+  const FORECAST = JSON.stringify({ matches: [{ home: 'Club A', away: 'Club B' }], columns: ['x'], rows: [] });
+  let proRoot: string;
+  let proServer: Server;
+  let proBase: string;
+  let aiCalls: Record<string, number>;
+  let now: number;
+
+  beforeAll(async () => {
+    proRoot = mkdtempSync(path.join(tmpdir(), 'sv-pro-'));
+    for (const d of ['dist', 'data/forecast/replays/ENG', 'data/forecast/suggestions', 'data/lab', 'data/players']) mkdirSync(path.join(proRoot, d), { recursive: true });
+    writeFileSync(path.join(proRoot, 'dist/index.html'), '<html>APPLICATION PRIVÉE</html>');
+    writeFileSync(path.join(proRoot, 'dist/login.html'), '<html>CONNEXION</html>');
+    for (const f of ['forecast.json', 'forecast/market_benchmark.json', 'forecast/replays/index.json', 'forecast/replays/summary.json', 'forecast/replays/ENG/2026-27.json', 'forecast/suggestions/index.json']) {
+      writeFileSync(path.join(proRoot, 'data', f), FORECAST);
+    }
+    writeFileSync(path.join(proRoot, 'data/lab/experiments.json'), DATA);
+    writeFileSync(path.join(proRoot, 'data/players/2026-27.json'), DATA);
+    const proAuth = loadAuthConfig({
+      SCOUTVISION_AUTH_USER: 'arnaud', SCOUTVISION_AUTH_PASSWORD_HASH: await hashPassword(PASSWORD, { N: 2 ** 14, r: 8, p: 1 }),
+      SCOUTVISION_PRO_USER: PRO, SCOUTVISION_PRO_PASSWORD_HASH: await hashPassword(PRO_PASSWORD, { N: 2 ** 14, r: 8, p: 1 }),
+      SCOUTVISION_SESSION_SECRET: Buffer.alloc(32, 5).toString('base64url'),
+    })!;
+    aiCalls = {};
+    now = Date.parse('2026-11-09T10:00:00Z');
+    const handler = createPrivateServer({
+      mode: 'production', auth: proAuth, distDir: path.join(proRoot, 'dist'), dataDir: path.join(proRoot, 'data'),
+      secureCookies: false, trustProxy: false, hsts: false, cdn: 'proxy', limiter: new LoginLimiter(50, 15 * 60 * 1000, 500), log: () => {},
+      now: () => now,
+      api: (req, res, next) => {
+        const p = (req.url ?? '').split('?')[0];
+        if (p === '/api/scout-report' || p.startsWith('/api/ai/')) { aiCalls[p] = (aiCalls[p] ?? 0) + 1; res.statusCode = 200; res.end('{"ok":true,"contenu":"réponse IA"}'); return; }
+        next();
+      },
+    });
+    await new Promise<void>(resolve => {
+      proServer = createServer((req, res) => { void handler(req, res); });
+      proServer.listen(0, '127.0.0.1', () => { proBase = `http://127.0.0.1:${(proServer.address() as AddressInfo).port}`; resolve(); });
+    });
+  });
+  afterAll(() => { proServer?.close(); rmSync(proRoot, { recursive: true, force: true }); });
+
+  const signIn = async (user: string, password: string) => {
+    const res = await fetch(`${proBase}/api/auth/login`, { method: 'POST', headers: { Origin: proBase, 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password }) });
+    expect(res.status).toBe(200);
+    return { body: await res.json(), cookie: res.headers.get('set-cookie')!.split(';')[0], header: res.headers.get('set-cookie')! };
+  };
+  /** Requête brute : le chemin part tel quel (fetch normaliserait « .. » et « // » avant l'envoi) */
+  const raw = (rawPath: string, cookie?: string, method = 'GET', body?: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const url = new URL(proBase);
+    const req = request({ host: url.hostname, port: url.port, path: rawPath, method,
+      headers: { ...(cookie ? { Cookie: cookie } : {}), ...(body ? { 'Content-Type': 'application/json', Origin: proBase } : {}) } }, res => {
+      let out = '';
+      res.on('data', c => { out += c; });
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: out }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+
+  const INVENTORY = ['/data/forecast.json', '/data/forecast/market_benchmark.json', '/data/forecast/replays/index.json', '/data/forecast/replays/summary.json',
+    '/data/forecast/replays/ENG/2026-27.json', '/data/forecast/suggestions/index.json'];
+  const VARIANTS = (p: string) => [
+    p, `${p}?x=1`, `${p}/`, p.replace('/data/', '/data//'), p.replace('/data/', '//data/'),
+    p.replace('/data/', '/data/./'), p.replace('/data/', '/data/lab/../'), p.replace('/data/', '/data/lab/%2e%2e/'),
+    encodeURI(p).replace('forecast', '%66orecast'), p.replace('forecast', 'Forecast'), p.replace('forecast', 'FORECAST'),
+  ];
+
+  it('connexion pro : rôle « pro » renvoyé, session d\'un jour ; propriétaire : rôle « owner », sept jours', async () => {
+    const pro = await signIn(PRO, PRO_PASSWORD);
+    expect(pro.body).toEqual({ authenticated: true, user: PRO, role: 'pro' });
+    expect(pro.header).toContain('Max-Age=86400');
+    const owner = await signIn('arnaud', PASSWORD);
+    expect(owner.body.role).toBe('owner');
+    expect(owner.header).toContain(`Max-Age=${7 * 24 * 3600}`);
+    const session = await (await fetch(`${proBase}/api/auth/session`, { headers: { Cookie: pro.cookie } })).json();
+    expect(session).toEqual({ authenticated: true, user: PRO, role: 'pro' });
+  });
+
+  it('pro : 403 sur toute ressource de Pronostics, quelle que soit la forme du chemin, jamais le contenu', async () => {
+    const { cookie } = await signIn(PRO, PRO_PASSWORD);
+    for (const p of INVENTORY) for (const v of VARIANTS(p)) for (const method of ['GET', 'HEAD']) {
+      const res = await raw(v, cookie, method);
+      expect([v, method, res.status]).toEqual([v, method, 403]);
+      expect(res.body).not.toContain('Club A');
+    }
+    for (const v of ['/data/forecast', '/data/forecast/', '/data/forecast/inexistant.json', '/public/data/forecast.json']) expect((await raw(v, cookie)).status).toBe(403);
+  });
+
+  it('pro : 403 sur l\'assistant du Labo paris, l\'endpoint n\'est jamais atteint', async () => {
+    const { cookie } = await signIn(PRO, PRO_PASSWORD);
+    for (const p of ['/api/ai/betting-news', '/api/ai/betting-plan', '/api/ai/betting-plan?x=1', '/api/ai//betting-plan', '/api/ai/Betting-plan', '/api/ai/lab/../betting-news']) {
+      const res = await raw(p, cookie, 'POST', '{"matchIds":["m1"]}');
+      expect([p, res.status]).toEqual([p, 403]);
+    }
+    expect(aiCalls['/api/ai/betting-news'] ?? 0).toBe(0);
+    expect(aiCalls['/api/ai/betting-plan'] ?? 0).toBe(0);
+  });
+
+  it('pro : le reste de l\'application reste servi (application, joueurs, Laboratoire)', async () => {
+    const { cookie } = await signIn(PRO, PRO_PASSWORD);
+    expect((await raw('/', cookie)).body).toContain('APPLICATION PRIVÉE');
+    expect((await raw('/data/players/2026-27.json', cookie)).status).toBe(200);
+    expect((await raw('/data/lab/experiments.json', cookie)).status).toBe(200);
+  });
+
+  it('propriétaire : 200 sur Pronostics et l\'assistant ; sans session : 401 inchangé', async () => {
+    const { cookie } = await signIn('arnaud', PASSWORD);
+    for (const p of INVENTORY) {
+      const res = await raw(p, cookie);
+      expect([p, res.status]).toEqual([p, 200]);
+      expect(res.body).toContain('Club A');
+      expect((await raw(p)).status).toBe(401);
+    }
+    expect((await raw('/api/ai/betting-plan', cookie, 'POST', '{}')).status).toBe(200);
+  });
+
+  it('pro : 20 appels IA par jour toutes fonctions confondues, puis 429 avec un message en français ; propriétaire sans limite', async () => {
+    const { cookie } = await signIn(PRO, PRO_PASSWORD);
+    const paths = ['/api/scout-report', '/api/ai/compare', '/api/ai/opposition', '/api/ai/hunter'];
+    for (let i = 0; i < 20; i++) expect((await raw(paths[i % paths.length], cookie, 'POST', '{}')).status).toBe(200);
+    const over = await raw('/api/ai/compare', cookie, 'POST', '{}');
+    expect(over.status).toBe(429);
+    expect(JSON.parse(over.body).error).toMatch(/20 .*IA.*aujourd'hui/);
+    expect((await raw('/api/scout-report', cookie, 'POST', '{}')).status).toBe(429);
+    const again = await signIn(PRO, PRO_PASSWORD);                                   // nouvelle session : même compte, même compteur
+    expect((await raw('/api/ai/hunter', again.cookie, 'POST', '{}')).status).toBe(429);
+    const owner = await signIn('arnaud', PASSWORD);
+    for (let i = 0; i < 25; i++) expect((await raw('/api/ai/compare', owner.cookie, 'POST', '{}')).status).toBe(200);
+    now += 24 * 3600 * 1000;                                                          // jour suivant (heure de Paris) : compteur remis à zéro
+    expect((await raw('/api/ai/compare', cookie, 'POST', '{}')).status).toBe(401);  // session pro d'un jour expirée
+    const fresh = await signIn(PRO, PRO_PASSWORD);
+    expect((await raw('/api/ai/compare', fresh.cookie, 'POST', '{}')).status).toBe(200);
   });
 });

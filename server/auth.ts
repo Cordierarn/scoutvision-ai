@@ -1,5 +1,6 @@
 /**
- * ScoutVision - authentification privée mono-utilisateur (serveur uniquement)
+ * ScoutVision - authentification privée (serveur uniquement) : le compte propriétaire et, facultatif, un compte
+ * « pro » qui a toute l'application sauf la page Pronostics (rôle porté par le jeton signé, revérifié à chaque requête).
  *
  * - Mot de passe : jamais stocké en clair. SCOUTVISION_AUTH_PASSWORD_HASH contient un hash scrypt
  *   (node:crypto, primitive reconnue, paramètres dans le hash) au format
@@ -79,17 +80,28 @@ export async function verifyPassword(password: string, stored: PasswordHash): Pr
 // CONFIGURATION
 // ============================================
 
-export interface AuthConfig {
+export type Role = 'owner' | 'pro';
+
+/** Un compte : identifiant, hash du mot de passe, empreinte (liée à ses sessions), rôle et durée de session */
+export interface Account {
   user: string;
   password: PasswordHash;
-  sessionSecret: Buffer;
-  /** Empreinte du hash : liée aux sessions, un nouveau mot de passe les invalide toutes */
   passwordFingerprint: string;
+  role: Role;
+  sessionTtlMs: number;
+}
+
+export interface AuthConfig extends Account {
+  sessionSecret: Buffer;
+  /** Compte pro facultatif : toute l'application sauf la page Pronostics (null : pas de compte pro) */
+  pro: Account | null;
 }
 
 export class AuthConfigError extends Error {}
 
 export const AUTH_ENV = ['SCOUTVISION_AUTH_USER', 'SCOUTVISION_AUTH_PASSWORD_HASH', 'SCOUTVISION_SESSION_SECRET'] as const;
+export const PRO_ENV = ['SCOUTVISION_PRO_USER', 'SCOUTVISION_PRO_PASSWORD_HASH'] as const;
+const USER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const MIN_SECRET_BYTES = 32;
 
 /**
@@ -104,15 +116,31 @@ export function loadAuthConfig(env: Record<string, string | undefined>): AuthCon
   const missing = AUTH_ENV.filter(k => !present.includes(k));
   if (missing.length) throw new AuthConfigError(`Authentification incomplète : variable(s) manquante(s) ${missing.join(', ')}.`);
   const user = env.SCOUTVISION_AUTH_USER!.trim();
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(user)) throw new AuthConfigError('SCOUTVISION_AUTH_USER invalide (lettres, chiffres, . _ -).');
+  if (!USER_PATTERN.test(user)) throw new AuthConfigError('SCOUTVISION_AUTH_USER invalide (lettres, chiffres, . _ -).');
   const password = parsePasswordHash(env.SCOUTVISION_AUTH_PASSWORD_HASH);
   if (!password) throw new AuthConfigError('SCOUTVISION_AUTH_PASSWORD_HASH invalide : générez-le avec npm run auth:secret.');
   const rawSecret = env.SCOUTVISION_SESSION_SECRET!.trim();
   const sessionSecret = /^[A-Za-z0-9_-]+$/.test(rawSecret) ? fromB64u(rawSecret) : Buffer.from(rawSecret, 'utf8');
   if (sessionSecret.length < MIN_SECRET_BYTES) throw new AuthConfigError(`SCOUTVISION_SESSION_SECRET trop court (${MIN_SECRET_BYTES} octets aléatoires au minimum).`);
-  const passwordFingerprint = b64u(createHmac('sha256', sessionSecret).update('password:').update(password.hash).digest().subarray(0, 12));
-  return { user, password, sessionSecret, passwordFingerprint };
+  const fingerprint = (hash: PasswordHash) => b64u(createHmac('sha256', sessionSecret).update('password:').update(hash.hash).digest().subarray(0, 12));
+  // Compte pro : les deux variables ou aucune ; identifiant distinct du propriétaire (casse ignorée)
+  const proPresent = PRO_ENV.filter(k => (env[k] ?? '').trim() !== '');
+  let pro: Account | null = null;
+  if (proPresent.length) {
+    const proMissing = PRO_ENV.filter(k => !proPresent.includes(k));
+    if (proMissing.length) throw new AuthConfigError(`Compte pro incomplet : variable(s) manquante(s) ${proMissing.join(', ')}.`);
+    const proUser = env.SCOUTVISION_PRO_USER!.trim();
+    if (!USER_PATTERN.test(proUser)) throw new AuthConfigError('SCOUTVISION_PRO_USER invalide (lettres, chiffres, . _ -).');
+    if (proUser.toLowerCase() === user.toLowerCase()) throw new AuthConfigError('SCOUTVISION_PRO_USER et SCOUTVISION_AUTH_USER sont identiques : deux comptes distincts sont attendus.');
+    const proPassword = parsePasswordHash(env.SCOUTVISION_PRO_PASSWORD_HASH);
+    if (!proPassword) throw new AuthConfigError('SCOUTVISION_PRO_PASSWORD_HASH invalide : générez-le avec npm run auth:secret -- --pro.');
+    pro = { user: proUser, password: proPassword, passwordFingerprint: fingerprint(proPassword), role: 'pro', sessionTtlMs: PRO_SESSION_TTL_MS };
+  }
+  return { user, password, sessionSecret, passwordFingerprint: fingerprint(password), role: 'owner', sessionTtlMs: SESSION_TTL_MS, pro };
 }
+
+/** Comptes configurés : le propriétaire, puis le compte pro s'il existe */
+export const accounts = (config: AuthConfig): Account[] => (config.pro ? [config, config.pro] : [config]);
 
 // ============================================
 // CONNEXION
@@ -125,9 +153,21 @@ const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
  * l'identifiant comparé à temps constant : la réponse et sa durée ne disent pas lequel est faux.
  */
 export async function checkCredentials(config: AuthConfig, username: string, password: string): Promise<boolean> {
-  const userOk = timingSafeEqual(digest(username), digest(config.user));
-  const passwordOk = await verifyPassword(password, config.password);
-  return userOk && passwordOk;
+  return (await authenticate(config, username, password)) !== null;
+}
+
+/**
+ * Compte authentifié, ou null. Tous les identifiants sont comparés à temps constant, puis un seul hash est calculé :
+ * celui du compte désigné, ou celui du propriétaire si aucun ne correspond (même durée, aucune indication de
+ * l'existence d'un identifiant). Le rôle vient du compte, jamais de la requête.
+ */
+export async function authenticate(config: AuthConfig, username: string, password: string): Promise<Account | null> {
+  const given = digest(username);
+  let match: Account | null = null;
+  for (const account of accounts(config)) if (timingSafeEqual(given, digest(account.user)) && !match) match = account;
+  const target = match ?? config;
+  const passwordOk = await verifyPassword(password, target.password);
+  return match && passwordOk ? match : null;
 }
 
 // ============================================
@@ -135,6 +175,8 @@ export async function checkCredentials(config: AuthConfig, username: string, pas
 // ============================================
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Session du compte pro : un jour (appareil partagé ou perdu) */
+export const PRO_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface SessionPayload {
   u: string;      // utilisateur
@@ -142,12 +184,13 @@ export interface SessionPayload {
   exp: number;    // expiration (ms)
   jti: string;    // identifiant de session (révocation)
   k: string;      // empreinte du hash du mot de passe
+  r?: Role;       // rôle (absent dans les jetons émis avant le compte pro : lu comme propriétaire)
 }
 
 const sign = (secret: Buffer, data: string) => createHmac('sha256', secret).update(data).digest();
 
-export function createSessionToken(config: AuthConfig, now = Date.now(), ttlMs = SESSION_TTL_MS): { token: string; payload: SessionPayload } {
-  const payload: SessionPayload = { u: config.user, iat: now, exp: now + ttlMs, jti: b64u(randomBytes(16)), k: config.passwordFingerprint };
+export function createSessionToken(config: AuthConfig, now = Date.now(), ttlMs?: number, account: Account = config): { token: string; payload: SessionPayload } {
+  const payload: SessionPayload = { u: account.user, iat: now, exp: now + (ttlMs ?? account.sessionTtlMs), jti: b64u(randomBytes(16)), k: account.passwordFingerprint, r: account.role };
   const body = b64u(Buffer.from(JSON.stringify(payload), 'utf8'));
   return { token: `${body}.${b64u(sign(config.sessionSecret, body))}`, payload };
 }
@@ -160,7 +203,11 @@ export class RevocationList {
   private purge(now = Date.now()) { this.revoked.forEach((exp, jti) => { if (exp <= now) this.revoked.delete(jti); }); }
 }
 
-/** Jeton valide (signature, expiration, utilisateur, mot de passe courant, non révoqué) ; null sinon */
+/**
+ * Jeton valide (signature, expiration, compte configuré, rôle cohérent avec ce compte, mot de passe courant de ce
+ * compte, non révoqué) ; null sinon. Le rôle renvoyé est toujours celui du compte. Un jeton sans rôle (émis avant le
+ * compte pro) n'est accepté que pour le propriétaire.
+ */
 export function verifySessionToken(config: AuthConfig, token: string | undefined, revoked?: RevocationList, now = Date.now()): SessionPayload | null {
   if (!token || token.length > 1024) return null;
   const dot = token.indexOf('.');
@@ -176,9 +223,11 @@ export function verifySessionToken(config: AuthConfig, token: string | undefined
   if (!payload || typeof payload !== 'object') return null;
   if (typeof payload.exp !== 'number' || payload.exp <= now) return null;
   if (typeof payload.iat !== 'number' || payload.iat > now + 60_000) return null;
-  if (payload.u !== config.user || payload.k !== config.passwordFingerprint) return null;
+  const account = accounts(config).find(a => a.user === payload.u);
+  if (!account || payload.k !== account.passwordFingerprint) return null;
+  if (payload.r === undefined ? account.role !== 'owner' : payload.r !== account.role) return null;
   if (typeof payload.jti !== 'string' || (revoked && revoked.has(payload.jti))) return null;
-  return payload;
+  return { ...payload, r: account.role };
 }
 
 // ============================================
@@ -193,8 +242,8 @@ export const DEVICE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
  * réservée quand des tiers saturent la connexion. Signé avec le secret de session, préfixe distinct
  * des jetons de session (jamais interchangeables).
  */
-export function createDeviceToken(config: AuthConfig, now = Date.now()): string {
-  const body = b64u(Buffer.from(JSON.stringify({ t: 'device', u: config.user, k: config.passwordFingerprint, exp: now + DEVICE_TTL_MS, d: b64u(randomBytes(12)) }), 'utf8'));
+export function createDeviceToken(config: AuthConfig, now = Date.now(), account: Account = config): string {
+  const body = b64u(Buffer.from(JSON.stringify({ t: 'device', u: account.user, k: account.passwordFingerprint, exp: now + DEVICE_TTL_MS, d: b64u(randomBytes(12)) }), 'utf8'));
   return `${body}.${b64u(sign(config.sessionSecret, `device.${body}`))}`;
 }
 
@@ -208,7 +257,8 @@ export function verifyDeviceToken(config: AuthConfig, token: string | undefined,
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
   try {
     const payload = JSON.parse(fromB64u(body).toString('utf8'));
-    const valid = payload?.t === 'device' && payload.u === config.user && payload.k === config.passwordFingerprint
+    const account = accounts(config).find(a => a.user === payload?.u);
+    const valid = payload?.t === 'device' && !!account && payload.k === account.passwordFingerprint
       && typeof payload.exp === 'number' && payload.exp > now && typeof payload.d === 'string';
     return valid ? payload.d : null;
   } catch { return null; }

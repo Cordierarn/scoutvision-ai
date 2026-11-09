@@ -3,12 +3,18 @@
  * ScoutVision - vérification d'une instance déployée SANS session (aucun cookie, aucun secret)
  *
  *   npm run verify:private -- https://<app>.herokuapp.com
+ *   printf '%s\n%s\n' "$PRO_USER" "$PRO_PASSWORD" | npm run verify:private -- https://<app>.herokuapp.com --pro
+ *
+ * Avec --pro, l'identifiant et le mot de passe du compte pro sont lus sur l'entrée standard (jamais en
+ * argument) : le script se connecte, puis échoue si une ressource de la page Pronostics répond autrement
+ * que 403 ou laisse passer du contenu, ou si le reste de l'application ne lui est pas servi.
  *
  * Échoue (code 1) si une ressource privée répond sans authentification : application, données,
  * CDN, API. Vérifie aussi que la page de connexion répond et que les en-têtes de sécurité sont là.
  */
 
-const base = (process.argv[2] ?? '').replace(/\/+$/, '');
+const base = (process.argv.slice(2).find(a => !a.startsWith('--')) ?? '').replace(/\/+$/, '');
+const proMode = process.argv.includes('--pro');
 if (!/^https?:\/\//.test(base)) {
   console.error('Usage : npm run verify:private -- https://<instance>');
   process.exit(2);
@@ -78,5 +84,40 @@ for (const [name, ok] of Object.entries(headers)) {
   console.log(`${pass ? 'OK   ' : 'ÉCHEC'}  en-tête ${name}`);
 }
 
-console.log(failed ? `\n${failed} vérification(s) en échec.` : '\nAucune ressource privée accessible sans session.');
+// Compte pro : la page Pronostics ne lui répond jamais
+if (proMode) {
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  const [username = '', password = ''] = Buffer.concat(chunks).toString('utf8').split(/\r?\n/);
+  const res = await fetch(`${base}/api/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ username, password }) });
+  const body = await res.json().catch(() => ({}));
+  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
+  const loggedIn = res.status === 200 && body.role === 'pro' && !!cookie;
+  if (!loggedIn) failed++;
+  console.log(`${loggedIn ? 'OK   ' : 'ÉCHEC'}  connexion du compte pro → ${res.status}${body.role ? ` (rôle ${body.role})` : ''}`);
+  if (loggedIn) {
+    const denied = [
+      ['GET', '/data/forecast.json'], ['GET', '/data/forecast/market_benchmark.json'], ['GET', '/data/forecast/replays/index.json'],
+      ['GET', '/data/forecast/replays/summary.json'], ['GET', '/data/forecast/suggestions/index.json'], ['HEAD', '/data/forecast.json'],
+      ['GET', '/data//forecast.json'], ['GET', '/data/forecast.json?x=1'], ['GET', '/data/%66orecast.json'],
+      ['POST', '/api/ai/betting-news'], ['POST', '/api/ai/betting-plan'],
+    ];
+    for (const [method, path] of denied) {
+      const r = await fetch(`${base}${path}`, { method, redirect: 'manual', headers: { Cookie: cookie, ...(method === 'POST' ? { 'Content-Type': 'application/json', Origin: base } : {}) }, body: method === 'POST' ? '{"matchIds":["m1"]}' : undefined });
+      const text = await r.text();
+      const pass = r.status === 403 && !/"matches"\s*:|"replays"\s*:|"profiles"\s*:|"summary"\s*:/.test(text);
+      if (!pass) failed++;
+      console.log(`${pass ? 'OK   ' : 'ÉCHEC'}  [pro] ${method} ${path} → ${r.status} (attendu 403, sans contenu)`);
+    }
+    for (const path of ['/', '/data/index.json']) {
+      const r = await fetch(`${base}${path}`, { redirect: 'manual', headers: { Cookie: cookie } });
+      const pass = r.status === 200;
+      if (!pass) failed++;
+      console.log(`${pass ? 'OK   ' : 'ÉCHEC'}  [pro] GET ${path} → ${r.status} (attendu 200)`);
+    }
+    await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Cookie: cookie, Origin: base } });
+  }
+}
+
+console.log(failed ? `\n${failed} vérification(s) en échec.` : proMode ? '\nAucune ressource privée sans session, aucune ressource de Pronostics pour le compte pro.' : '\nAucune ressource privée accessible sans session.');
 process.exit(failed ? 1 : 0);
