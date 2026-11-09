@@ -273,8 +273,10 @@ encre neutre.
   proportionnellement), puis est réglée ; `evening show` donne le tableau soirée par soirée avec le cumul. Avant
   l'audit du 6 novembre 2026, chaque soirée misait la fraction de 300 € sans plafond : la somme des mises d'un soir
   dépassait plusieurs fois la bankroll et le cumul affiché n'était pas jouable.
-- Publication : archive du Labo (odds, vues, journal, historique des soirées, phase 2, résultats) dans la
-  release privée `betting-odds` ; artefact des suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
+- Publication : archive du Labo (odds, vues, journal, historique des soirées, résultats et, depuis le 9 novembre 2026,
+  `phase2/` sans ses tables `*_rows.parquet` ; liste unique `archive.PUBLISHED`, `python3 -m betting.archive pack|restore`)
+  dans la release privée `betting-odds` ; artefact des suggestions dans `scoutvision-data.tar.gz` lue par le serveur.
+  L'archive est restaurée avant l'amorce, qui l'emporte donc sur ses propres fichiers (variante, calibration, ajustements).
 - Premier passage : l'archive de cotes se reconstitue par lots de 400 matchs par passage (non décomptés) ;
   les artefacts de phase 2 (variante, calibration, ajustements) sont créés s'ils manquent.
 - Secrets : `ODDSPAPI_API_KEY` (sinon les étapes de cotes sont sautées avec un avertissement),
@@ -422,7 +424,8 @@ voit que le marché sharp (`scripts/betting/gate.py`, `python3 -m betting.gate [
   du pool contre la clôture seule, intervalle bootstrap à 90 % (2 000 tirages, graine fixe).
 - **Verdict** par famille × compétition : `trop_peu_de_matchs` (moins de 150 matchs sur l'une des deux
   saisons), `poids_nul` (w = 0 déjà en validation), `gain_non_significatif` (w > 0 mais borne basse ≤ 0),
-  `valide` (w > 0 et borne basse > 0). Seuls les segments `valide` entrent dans
+  `valide` (w > 0 et borne basse > 0 ; depuis le 9 novembre 2026, p corrigé par Bonferroni, voir « Porte : correction
+  des tests multiples »). Seuls les segments `valide` entrent dans
   `.research/betting/phase2/pool_weights.json` ; le fichier est écrit même vide, le produit lit alors w = 0.
   Le rapport complet (tous les segments, log-loss par poids) est dans `gate.json`.
 - **Cycle** : recalcul à chaque amorce du Labo (`update-data.yml`, après `betting.adjust`), fichiers
@@ -666,6 +669,85 @@ Même conclusion que pour les lots 1 et 2 : partout, le log-loss croît avec le 
 validation, et les sélections du moteur seul sont surestimées d'une quinzaine de points. Les marchés de mi-temps ne
 sont pas plus mal pricés par Winamax que ceux du match entier. Par compétition, aucun segment n'atteint 150 matchs
 par partie. Relecture quotidienne automatique dans `betting-odds.yml` à mesure que l'archive grandit.
+
+## Porte : correction des tests multiples et persistance de `phase2/` (9 novembre 2026)
+
+Constat d'audit (P2). Chaque passage de la porte juge jusqu'à 24 segments A (2 familles × 11 compétitions et
+« toutes ») et plus d'une centaine de segments B (11 familles × chaque compétition de l'archive et « toutes »), chacun
+seul : valide si la borne basse de l'intervalle bootstrap à 90 % du gain est positive, soit un test unilatéral à 5 %
+par segment. Sous l'hypothèse nulle
+(aucun segment n'apporte rien), m × 5 % fausses validations sont attendues par passage, de l'ordre de cinq pour une
+centaine de segments testés, et chacune ouvrirait la publication de paris réels.
+
+### Ce qui compte comme un test
+
+- Un segment est **testé** quand w > 0 a été choisi sur la première partie et qu'il a au moins 150 matchs par partie ;
+  il est alors jugé **une seule fois**, sur la seconde partie (gain moyen de log-loss du pool contre la référence).
+- La **grille de 21 poids** ne multiplie pas les tests : elle sert à choisir w sur la partie d'ajustement, disjointe de la
+  partie jugée (saison suivante en A, 40 % chronologiques suivants en B). La sélection des segments testés (w > 0) se
+  fait elle aussi sur la partie d'ajustement : la garantie tient à sélection donnée.
+- m = nombre de segments **A et B** testés au passage (`gate.json`, `multipleTesting.tests`). Les segments à poids nul
+  ou trop courts ne comptent pas ; la **catégorie C**, qui n'ouvre jamais le produit, garde un verdict nominal (p ≤ 5 %,
+  même test t que ci-dessous, si bien qu'un segment C au bord du seuil peut changer de verdict) et n'entre pas dans m.
+- La **porte de bande** (biais directionnel) n'est pas corrigée : elle ferme un segment quand un biais est significatif,
+  la corriger la rendrait plus permissive.
+
+### Choix : Bonferroni (FWER) plutôt que Benjamini-Hochberg (FDR)
+
+- **Contrôle visé.** Le propriétaire veut qu'aucun segment sans effet ne soit validé, parce qu'une validation ouvre des
+  paris réels : c'est la probabilité d'au moins une fausse validation par passage (FWER), fixée à α = 5 %. Le FDR tolère
+  une proportion de fausses validations parmi les validations, acceptable pour explorer, pas pour ouvrir un produit. Et
+  dans la situation actuelle (aucun segment validé, hypothèse nulle globale plausible), FDR et FWER coïncident : BH ne
+  gagnerait de la puissance qu'une fois de vraies validations acquises.
+- **Dépendance.** Les tests sont corrélés : « toutes » contient chaque compétition, plus/moins, plus/moins équipe et
+  BTTS portent sur les mêmes matchs. Bonferroni tient sous n'importe quelle dépendance ; BH exige l'indépendance ou une
+  dépendance positive (PRDS), sinon sa variante Benjamini-Yekutieli, plus conservatrice encore.
+- **Perte de puissance, acceptée.** Le seuil passe de z ≈ 1,64 (un segment seul) à z ≈ 3,3 pour m ≈ 100 : à effectif
+  égal, un effet doit être environ deux fois plus marqué, ou demander environ quatre fois plus de matchs. Bonferroni est
+  conservateur sous corrélation positive ; la variante de Holm donnerait la même garantie avec un peu plus de puissance,
+  sans intérêt tant qu'aucun segment n'approche du seuil.
+
+### Mise en œuvre (`gate.py`)
+
+- `evaluate` publie, en plus de l'intervalle bootstrap à 90 % (désormais descriptif), l'erreur type `se` et le p
+  unilatéral `pValue` d'un test t de Student sur le gain par match (`one_sided_p`) : 2 000 tirages bootstrap ne résolvent
+  pas un niveau de 0,05 / m (une fraction de tirage dès m ≈ 100), la loi t si.
+- `correct_multiple_tests`, appelé par `assemble` avant d'écrire `pool_weights.json` : un segment A ou B testé est
+  significatif si p ≤ α / m ; verdict recalculé à partir des seuls champs bruts (poids, p, porte de bande), donc
+  idempotent, y compris pour une catégorie A reprise d'un rapport antérieur sans `pValue` (erreur type tirée de la
+  largeur de l'intervalle à 90 %). Chaque segment testé porte aussi `gainLowCorrected`, borne basse au niveau corrigé ;
+  le résumé de la ligne de commande affiche m et le seuil par test.
+- Tests synthétiques (`MultipleTestingTests`, `test_betting_gate.py`, quelques secondes) : 400 passages de 91 segments
+  sans effet (7 familles × 12 compétitions et « toutes », imbriqués), gain par match d'espérance exactement nulle. Sans
+  correction, environ 99 % des passages valident au moins un segment (environ 4,5 fausses validations par passage) ;
+  avec Bonferroni, environ 5 %, sous la borne α + trois écarts types de Monte-Carlo. Un vrai effet net reste validé au
+  milieu de ces 91 segments. À travers le vrai pipeline (`run_gate_b` puis `assemble`, modèle sans information face à
+  une référence exacte, 100 passages synthétiques), la part des passages avec au moins une fausse validation passe
+  d'environ 88 % à environ 1 %.
+- Sur les données réelles du 9 novembre 2026, aucun segment n'était validé avant la correction et aucun ne l'est après :
+  le produit reste à w = 0 et à la référence sharp.
+
+### Persistance de `phase2/`
+
+L'archive publiée `betting-odds.tar.gz` ne contenait pas `phase2/`, contrairement à ce qu'annonçait cette page : le
+rapport de la porte (`gate.json`) et `pool_weights.json` du cycle quotidien étaient perdus à chaque passage, et sans
+`replay_market.parquet` dans l'amorce, la catégorie A « reprise du rapport précédent » repartait vide. Désormais
+`phase2/` est publié (sans ses tables `*_rows.parquet`, tables de recherche fournies par l'amorce et seules lourdes du
+dossier : le surcoût est négligeable devant l'archive de cotes), par une liste unique `archive.PUBLISHED` et
+`python3 -m betting.archive pack|restore` (extraction filtrée : ni chemin absolu, ni sortie du dossier, ni lien). Au
+passage suivant, l'archive est restaurée **avant** l'amorce : la variante, la calibration et les ajustements de l'amorce
+l'emportent, `gate.json` et `pool_weights.json` restent ceux du dernier passage. Tests : `PublishedArchiveTests`
+(`test_betting_archive.py`).
+
+### Limites
+
+- **Lignes d'un même match.** En catégorie B, plusieurs lignes d'un même match (plus/moins à plusieurs seuils, par
+  exemple) sont traitées comme indépendantes, par le bootstrap comme par le test t : l'erreur type est sous-estimée et les
+  p trop petits. La garantie de Bonferroni suppose des p valides ; une erreur type par grappes de match est le prochain
+  chantier de la porte.
+- **Relectures répétées.** La garantie vaut par passage. La porte relit chaque jour une partie test qui grandit : sur une
+  saison, la probabilité qu'un segment sans effet passe un jour le seuil dépasse α. Un segment validé doit le rester aux
+  passages suivants avant d'être pris au sérieux.
 
 ## Suivi de l'ancien moteur et onglet « Mon test » (6 novembre 2026)
 

@@ -61,7 +61,10 @@ jobs:
 
       - name: Amorce et archive précédente du Labo (release privée betting-odds)
         # betting-seed.tar.gz : prévisions figées, résultats détaillés, variante, calibration, ajustements, publiés par
-        # update-data.yml (lundi et vendredi) ; betting-odds.tar.gz : archive de cotes, journal, historique des soirées
+        # update-data.yml (lundi et vendredi) ; betting-odds.tar.gz : archive de cotes, journal, historique des soirées et
+        # phase2/ du passage précédent (rapport de la porte, pool_weights.json ; liste dans betting/archive.py:PUBLISHED).
+        # L'archive est restaurée avant l'amorce : pour les fichiers que l'amorce fournit (variante, calibration,
+        # ajustements), la version de l'amorce l'emporte ; gate.json et pool_weights.json restent ceux du dernier passage.
         run: |
           mkdir -p .research/betting
           if ! gh release view betting-odds -R "$DATA_REPO" >/dev/null 2>&1; then
@@ -70,13 +73,12 @@ jobs:
           if ! gh release download betting-odds -R "$DATA_REPO" -p betting-seed.tar.gz -D "$RUNNER_TEMP" --clobber; then
             echo "::error::betting-seed.tar.gz absent de la release betting-odds : lancer d'abord le workflow « Mise à jour des données ScoutVision »."; exit 1
           fi
-          tar -xzf "$RUNNER_TEMP/betting-seed.tar.gz"
           if gh release download betting-odds -R "$DATA_REPO" -p betting-odds.tar.gz -D "$RUNNER_TEMP" --clobber 2>/dev/null; then
-            tar -xzf "$RUNNER_TEMP/betting-odds.tar.gz" -C .research/betting
-            echo "archive de cotes restaurée"
+            (cd scripts && python3 -m betting.archive restore "$RUNNER_TEMP/betting-odds.tar.gz")
           else
             echo "aucune archive de cotes : premier passage"
           fi
+          tar -xzf "$RUNNER_TEMP/betting-seed.tar.gz"
 
       - name: Journal du passage (créneaux planifiés manqués)
         run: cd scripts && python3 -m betting.cycle record --event "${{ github.event_name }}"
@@ -139,10 +141,9 @@ jobs:
           python3 -m betting.product export
 
       - name: Publication de l'archive du Labo (release privée)
+        # entrées publiées : betting/archive.py:PUBLISHED (dont phase2/, sans ses tables *_rows.parquet fournies par l'amorce)
         run: |
-          cd .research/betting
-          tar -czf ../../betting-odds.tar.gz $(ls -d odds views journal product fixtures.parquet matches.parquet match_failures.parquet aliases.json aliases_theoddsapi.json history_fetched.json cycle_log.json quota.json quota_theoddsapi.json results_web.parquet markets_catalogue.json 2>/dev/null)
-          cd ../..
+          (cd scripts && python3 -m betting.archive pack "$GITHUB_WORKSPACE/betting-odds.tar.gz")
           gh release view betting-odds --repo "$DATA_REPO" >/dev/null 2>&1 || gh release create betting-odds --repo "$DATA_REPO" --title "Labo paris — archive de cotes" --notes "Archive privée du Labo paris (cotes Winamax FR via OddsPapi, journal, historique des soirées), mise à jour par betting-odds.yml" --prerelease
           gh release upload betting-odds betting-odds.tar.gz --repo "$DATA_REPO" --clobber
 
