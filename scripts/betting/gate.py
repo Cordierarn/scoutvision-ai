@@ -15,8 +15,12 @@ Trois catégories, trois jeux de données :
      référence est la fréquence de base de la saison de validation (par compétition), 2024-25 → 2025-26.
 
 Trois portes, hors échantillon, pour ouvrir un segment :
-  1. gain de log-loss du pool p ∝ p_modèle^w · p_référence^(1−w) contre la référence seule, w > 0, intervalle
-     bootstrap à 90 % entièrement positif, au moins 150 matchs par partie ;
+  1. gain de log-loss du pool p ∝ p_modèle^w · p_référence^(1−w) contre la référence seule, w > 0, au moins 150 matchs
+     par partie, gain significatif après correction de Bonferroni : p unilatéral ≤ α / m, α = 5 %, m = nombre de
+     segments A et B testés au passage (w > 0 et assez de matchs ; le poids est choisi sur la première partie, chaque
+     segment n'est testé qu'une fois sur la seconde). Probabilité de valider à tort au moins un segment sans effet
+     ≤ 5 % par passage, quelle que soit la corrélation entre segments (`correct_multiple_tests`). L'intervalle
+     bootstrap à 90 % reste publié, à titre descriptif ; la catégorie C, hors produit, garde son verdict nominal ;
   2. porte de calibration par bande (catégorie B) : parmi les sélections que le coupe-circuit prendrait (espérance
      p_pool · cote Winamax − 1 ≥ seuil de la famille), ni le côté « haut » (plus / oui) ni le côté « bas » (moins /
      non) ne doit montrer un biais directionnel significatif (fréquence observée − probabilité du pool, IC 90 %
@@ -37,10 +41,12 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import sys
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from . import BOOKMAKER, COMPETITIONS, RESEARCH, ROOT
 from . import circuit
@@ -60,6 +66,8 @@ WEIGHT_GRID = [round(w, 2) for w in np.arange(0.0, 1.0001, 0.05)]
 MIN_MATCHES = 150          # par segment et par partie
 BOOTSTRAP = 2000
 CONFIDENCE = 0.90
+ALPHA = 0.05                        # (1 − CONFIDENCE) / 2, 5 % unilatéral : le niveau d'un segment seul (IC 90 % au-dessus de 0), contrôlé par passage
+CORRECTED_CATEGORIES = ("A", "B")   # les segments qui peuvent ouvrir le produit (C n'y entre jamais)
 SEED = 11
 N_SIMS = 4000
 MIN_SELECTIONS = 20        # sélections par côté pour juger un biais directionnel
@@ -158,8 +166,25 @@ def fit_weight(pm: np.ndarray, ps: np.ndarray, y: np.ndarray, grid=WEIGHT_GRID) 
     return best, scores
 
 
+def one_sided_p(diff: np.ndarray) -> float:
+    """p unilatéral de H0 « gain moyen ≤ 0 » : test t de Student sur le gain par match (erreur type sd / √n, n − 1 degrés
+    de liberté). Le bootstrap à 2 000 tirages ne résout pas les niveaux corrigés (0,05 / m, une fraction de tirage dès
+    m ≈ 100) ; la loi t, si (la loi normale, elle, sous-estime la queue à ces niveaux quand n est de l'ordre de 150)."""
+    diff = np.asarray(diff, dtype=float)
+    n = len(diff)
+    se = float(diff.std(ddof=1)) / math.sqrt(n) if n > 1 else 0.0
+    return _t_p(float(diff.mean()) if n else 0.0, se, n)
+
+
+def _t_p(gain: float, se: float, n: int) -> float:
+    if se <= 0.0:
+        return 0.0 if gain > 0 else 1.0
+    return float(stats.t.sf(gain / se, df=max(n - 1, 1)))
+
+
 def evaluate(pm: np.ndarray, ps: np.ndarray, y: np.ndarray, w: float, n_boot: int = BOOTSTRAP, seed: int = SEED) -> dict:
-    """Gain de log-loss du pool contre la référence seule, hors échantillon, avec intervalle bootstrap à 90 %."""
+    """Gain de log-loss du pool contre la référence seule, hors échantillon : intervalle bootstrap à 90 % (descriptif),
+    erreur type et p unilatéral (`one_sided_p`), que juge `correct_multiple_tests`."""
     ll_sharp = log_loss(pool_matrix(pm, ps, 0.0), y)
     ll_pool = log_loss(pool_matrix(pm, ps, w), y)
     diff = ll_sharp - ll_pool                                 # > 0 : le pool fait mieux
@@ -167,8 +192,54 @@ def evaluate(pm: np.ndarray, ps: np.ndarray, y: np.ndarray, w: float, n_boot: in
     n = len(diff)
     means = np.array([diff[rng.integers(0, n, n)].mean() for _ in range(n_boot)]) if n else np.array([0.0])
     lo, hi = np.quantile(means, [(1 - CONFIDENCE) / 2, 1 - (1 - CONFIDENCE) / 2])
+    se = float(diff.std(ddof=1)) / math.sqrt(n) if n > 1 else 0.0
     return {"matches": int(n), "logLossSharp": round(float(ll_sharp.mean()), 5), "logLossPool": round(float(ll_pool.mean()), 5),
-            "gain": round(float(diff.mean()), 5), "gainLow": round(float(lo), 5), "gainHigh": round(float(hi), 5)}
+            "gain": round(float(diff.mean()), 5), "gainLow": round(float(lo), 5), "gainHigh": round(float(hi), 5),
+            "se": round(se, 6), "pValue": float(f"{one_sided_p(diff):.4g}")}
+
+
+def _standard_error(test: dict) -> float:
+    """Erreur type du bloc `test` ; pour un rapport antérieur sans `se` (catégorie A reprise), tirée de la largeur de
+    l'intervalle bootstrap à 90 %."""
+    if test.get("se") is not None:
+        return float(test["se"])
+    return (test["gainHigh"] - test["gainLow"]) / (2 * stats.norm.ppf(1 - ALPHA))
+
+
+def _p_value(test: dict) -> float:
+    if test.get("pValue") is not None:
+        return float(test["pValue"])
+    return _t_p(test["gain"], _standard_error(test), test["matches"])
+
+
+def _verdict(seg: dict, significant: bool) -> str:
+    """Verdict d'un segment testé : poids nul, gain non significatif, biais directionnel (porte de bande, B) ou valide."""
+    if seg["weight"] == 0.0:
+        return "poids_nul"
+    if not significant:
+        return "gain_non_significatif"
+    band = seg.get("band")
+    if band is not None and not band["passed"]:
+        return "biais_directionnel"
+    return "valide"
+
+
+def correct_multiple_tests(segments: list[dict], alpha: float = ALPHA) -> dict:
+    """Correction de Bonferroni sur les segments testés des catégories A et B (w > 0 et un bloc `test`) : un segment est
+    significatif si p ≤ α / m. Contrôle la probabilité de valider à tort au moins un segment sans effet (FWER ≤ α) sous
+    n'importe quelle dépendance entre segments (imbriqués, familles corrélées). La grille de poids ne compte pas : w est
+    choisi sur la première partie, et chaque segment n'est testé qu'une fois, sur la seconde. Réécrit le verdict à partir
+    des seuls champs bruts (poids, p, porte de bande) : idempotent. Renvoie le résumé publié dans `gate.json`."""
+    tested = [s for s in segments if s.get("category") in CORRECTED_CATEGORIES and s.get("test") and s.get("weight", 0.0) > 0.0]
+    m = len(tested)
+    level = alpha / max(m, 1)
+    for s in tested:
+        t = s["test"]
+        p = t["pValue"] = float(f"{_p_value(t):.4g}")
+        quantile = float(stats.t.ppf(1 - level, df=max(t["matches"] - 1, 1)))
+        t["gainLowCorrected"] = round(t["gain"] - quantile * _standard_error(t), 5)      # borne basse unilatérale au niveau corrigé
+        s["verdict"] = _verdict(s, p <= level)
+    return {"method": "bonferroni", "alpha": alpha, "tests": m, "levelPerTest": level, "categories": list(CORRECTED_CATEGORIES)}
 
 
 def expected_calibration_error(p: np.ndarray, y: np.ndarray, bins: int = ECE_BINS) -> float:
@@ -265,7 +336,7 @@ def run_gate(d: pd.DataFrame, validation: str = VALIDATION_SEASON, test: str = T
             seg["validationLogLossByWeight"] = {str(k): round(s, 5) for k, s in scores.items()}
             seg["test"] = evaluate(pmt, pst, yt, w)
             seg["ece"] = round(_ece_multi(pool_matrix(pmt, pst, w), yt), 4)
-            seg["verdict"] = "poids_nul" if w == 0.0 else "valide" if seg["test"]["gainLow"] > 0 else "gain_non_significatif"
+            seg["verdict"] = _verdict(seg, seg["test"]["pValue"] <= ALPHA)      # nominal ; corrigé par `assemble`
             segments.append(seg)
     return {"validationSeason": validation, "testSeason": test, "minMatches": min_matches, "reference": "pinnacle_closing_football_data", "segments": segments}
 
@@ -389,14 +460,7 @@ def run_gate_b(rows: pd.DataFrame, min_matches: int = MIN_MATCHES, share: float 
             seg["eceModelAlone"] = round(expected_calibration_error(t["p_model"].to_numpy(float), t["y"].to_numpy(float)), 4)
             seg["band"] = band_gate(pool_t, t["y"].to_numpy(float), t["odds_high"].to_numpy(float), t["odds_low"].to_numpy(float), family)
             seg["bandModelAlone"] = band_gate(t["p_model"].to_numpy(float), t["y"].to_numpy(float), t["odds_high"].to_numpy(float), t["odds_low"].to_numpy(float), family)
-            if w == 0.0:
-                seg["verdict"] = "poids_nul"
-            elif seg["test"]["gainLow"] <= 0:
-                seg["verdict"] = "gain_non_significatif"
-            elif not seg["band"]["passed"]:
-                seg["verdict"] = "biais_directionnel"
-            else:
-                seg["verdict"] = "valide"
+            seg["verdict"] = _verdict(seg, seg["test"]["pValue"] <= ALPHA)      # nominal ; corrigé par `assemble`
             segments.append(seg)
     return {"season": ARCHIVE_SEASON, "split": share, "segments": segments}
 
@@ -493,14 +557,7 @@ def run_gate_m(data: dict[str, dict], min_matches: int = MIN_MATCHES, share: flo
             seg["eceModelAlone"] = round(_ece_multi(d["pm"][t], d["y"][t]), 4)
             seg["band"] = band_gate_multi(pool_t, d["y"][t], d["odds"][t], family)
             seg["bandModelAlone"] = band_gate_multi(d["pm"][t], d["y"][t], d["odds"][t], family)
-            if w == 0.0:
-                seg["verdict"] = "poids_nul"
-            elif seg["test"]["gainLow"] <= 0:
-                seg["verdict"] = "gain_non_significatif"
-            elif not seg["band"]["passed"]:
-                seg["verdict"] = "biais_directionnel"
-            else:
-                seg["verdict"] = "valide"
+            seg["verdict"] = _verdict(seg, seg["test"]["pValue"] <= ALPHA)      # nominal ; corrigé par `assemble`
             segments.append(seg)
     return segments
 
@@ -590,7 +647,7 @@ def run_gate_c(data: dict[str, dict], validation: str = VALIDATION_SEASON, test:
             seg["validationLogLossByWeight"] = {str(kk): round(s, 5) for kk, s in scores.items()}
             seg["test"] = evaluate(d["pm"][t], pst, d["y"][t], w)
             seg["ece"] = round(_ece_multi(pool_matrix(d["pm"][t], pst, w), d["y"][t]), 4)
-            seg["verdict"] = "poids_nul" if w == 0.0 else "valide" if seg["test"]["gainLow"] > 0 else "gain_non_significatif"
+            seg["verdict"] = _verdict(seg, seg["test"]["pValue"] <= ALPHA)      # nominal : C, hors produit, n'est pas corrigé
             segments.append(seg)
     return {"validationSeason": validation, "testSeason": test, "segments": segments}
 
@@ -600,7 +657,9 @@ def run_gate_c(data: dict[str, dict], validation: str = VALIDATION_SEASON, test:
 def assemble(a: dict, b: dict, c: dict) -> dict:
     """Rapport complet et tables du produit : poids, marges (ECE) et référence des seuls segments validés (jamais la
     ligne « toutes » d'une catégorie A ; pour B la ligne « toutes » s'écrit sous la clé de la famille seule, que
-    `PoolWeights` lit comme repli pour toutes les compétitions)."""
+    `PoolWeights` lit comme repli pour toutes les compétitions). Les verdicts A et B y passent la correction de Bonferroni
+    (`correct_multiple_tests`) avant d'ouvrir quoi que ce soit."""
+    correction = correct_multiple_tests(a["segments"] + b["segments"])
     weights, margins, references = {}, {}, {}
     for seg in a["segments"] + b["segments"] + c["segments"]:
         if seg["verdict"] != "valide" or seg["category"] == "C":
@@ -610,7 +669,7 @@ def assemble(a: dict, b: dict, c: dict) -> dict:
         key = seg["family"] if seg["competition"] == "toutes" else f"{seg['family']}|{seg['competition']}"
         weights[key] = seg["weight"]; margins[key] = seg.get("ece", 0.0); references[key] = seg["reference"]
     return {"generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "confidence": CONFIDENCE, "grid": WEIGHT_GRID, "devig": "shin",
-            "minMatches": MIN_MATCHES, "categoryA": a, "categoryB": b, "categoryC": c, "weights": weights, "margins": margins, "references": references}
+            "minMatches": MIN_MATCHES, "multipleTesting": correction, "categoryA": a, "categoryB": b, "categoryC": c, "weights": weights, "margins": margins, "references": references}
 
 
 def write_weights(report: dict, path=POOL_WEIGHTS) -> None:
@@ -629,7 +688,7 @@ def summary_lines(report: dict) -> list[str]:
             t = s.get("test")
             line = f"  {s['family']:22s} {s['competition']:7s} n={s['validationMatches']}/{s['testMatches']:<5} w={s['weight']:.2f}"
             if t:
-                line += f" gain={t['gain']:+.5f} [{t['gainLow']:+.5f}; {t['gainHigh']:+.5f}] ece={s.get('ece', 0):.3f}"
+                line += f" gain={t['gain']:+.5f} [{t['gainLow']:+.5f}; {t['gainHigh']:+.5f}] p={t.get('pValue', float('nan')):.2g} ece={s.get('ece', 0):.3f}"
             band = s.get("band")
             if band:
                 sides = band["sides"]
@@ -637,6 +696,10 @@ def summary_lines(report: dict) -> list[str]:
                 if band["judged"]:
                     line += " " + ", ".join(f"{k}:{v.get('verdict', '-')}" for k, v in sides.items() if v.get("judged"))
             out.append(line + f"  → {s['verdict']}")
+    mt = report.get("multipleTesting")
+    if mt:
+        out.append(f"Correction de Bonferroni (catégories A et B) : {mt['tests']} segment(s) testé(s), p ≤ {mt['levelPerTest']:.2g} exigé "
+                   f"(au moins une fausse validation : probabilité ≤ {mt['alpha'] * 100:.0f} % par passage)")
     validated = ", ".join(f"{k} w={v} ece={report['margins'][k]:.3f}" for k, v in report["weights"].items()) or "aucun"
     out.append(f"Segments validés : {len(report['weights'])} ({validated})")
     return out

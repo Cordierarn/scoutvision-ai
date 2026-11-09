@@ -43,6 +43,10 @@ règle, de chiffre ou de comportement.
   coupe-circuit (`product.playable`, `CIRCUIT_START`) ; critère d'arrêt du 18 décembre dans `criterion` de l'export ; rendement
   et CLV avec intervalle à 95 % par grappes de match (`cluster_ci`) ; bilan daté du moteur (`engine_fingerprint`), recalculé
   quand il change ; soirées suivies sur la bankroll courante, jamais plus (`evening.rebuild`).
+- **Porte de validation** (`betting/gate.py`) : un segment n'ouvre le produit que si son gain hors échantillon passe la
+  correction de Bonferroni sur tous les segments A et B testés au passage (`correct_multiple_tests`, au plus 5 % de
+  risque de valider à tort au moins un segment sans effet) ; ne jamais revenir à un seuil par segment. `phase2/` (rapport
+  de la porte, `pool_weights.json`) est publié avec l'archive (`archive.PUBLISHED`) et restauré avant l'amorce.
 - **Un résultat négatif est un résultat** : il s'affiche tel quel (porte à poids nul, espérance négative) ; les profils retirés
   restent documentés avec leur résultat dans `docs/betting-lab.md`.
 

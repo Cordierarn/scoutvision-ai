@@ -8,12 +8,19 @@ L'écriture est idempotente : réécrire la même réponse ne crée aucun doublo
 Vues dérivées par (fixture, bookmaker, marché, issue, joueur) : premier relevé, H−24, H−1 et dernier
 relevé strictement antérieur au coup d'envoi. Un relevé postérieur au coup d'envoi n'est jamais retenu ;
 sans relevé dans la fenêtre, la vue vaut null (jamais une cote inventée).
+
+Archive publiée d'un passage du cycle au suivant (`betting-odds.tar.gz`, liste `PUBLISHED`, dont `phase2/`) :
+  cd scripts && python3 -m betting.archive pack ../betting-odds.tar.gz | restore ../betting-odds.tar.gz
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
+import fnmatch
 import os
+import sys
+import tarfile
 from pathlib import Path
 
 import numpy as np
@@ -159,3 +166,55 @@ def season_of(start_time: pd.Timestamp) -> str:
     """Saison européenne d'une date : juillet → juin."""
     y = start_time.year if start_time.month >= 7 else start_time.year - 1
     return f"{y}-{str(y + 1)[-2:]}"
+
+
+# ----- archive publiée (`betting-odds.tar.gz`, release privée du dépôt de données) -----
+
+# Entrées de `.research/betting` publiées d'un passage du cycle au suivant ; une entrée absente est sautée.
+# `phase2` porte le rapport de la porte (`gate.json`, dont la catégorie A reprise quand le dataset de la recherche manque)
+# et `pool_weights.json` ; ses tables de lignes (`*_rows.parquet`, recherche, fournies par l'amorce) n'y sont pas.
+PUBLISHED = ("odds", "views", "journal", "product", "phase2", "fixtures.parquet", "matches.parquet", "match_failures.parquet",
+             "aliases.json", "aliases_theoddsapi.json", "history_fetched.json", "cycle_log.json", "quota.json", "quota_theoddsapi.json",
+             "results_web.parquet", "markets_catalogue.json")
+UNPUBLISHED = ("phase2/*_rows.parquet",)
+
+
+def pack(dest: Path, root: Path = RESEARCH) -> list[str]:
+    """Archive gzip des entrées publiées de `root` (chemins relatifs à `root`) ; renvoie les entrées présentes."""
+    present = [name for name in PUBLISHED if (root / name).exists()]
+    skip = lambda info: None if any(fnmatch.fnmatch(info.name, pat) for pat in UNPUBLISHED) else info
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(dest, "w:gz") as tar:
+        for name in present:
+            tar.add(root / name, arcname=name, filter=skip)
+    return present
+
+
+def restore(src: Path, root: Path = RESEARCH) -> list[str]:
+    """Extrait l'archive publiée dans `root` (filtre « data » : ni chemin absolu, ni sortie de `root`, ni lien) ; renvoie
+    les entrées de premier niveau restaurées."""
+    root.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(src, "r:gz") as tar:
+        names = sorted({m.name.split("/")[0] for m in tar.getmembers()})
+        tar.extractall(root, filter="data")
+    return names
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Archive publiée du Labo paris (betting-odds.tar.gz).")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("pack", help="construit l'archive depuis .research/betting").add_argument("dest", type=Path)
+    sub.add_parser("restore", help="restaure l'archive dans .research/betting").add_argument("src", type=Path)
+    args = parser.parse_args(argv)
+    if args.command == "pack":
+        names = pack(args.dest)
+        size = f"{args.dest.stat().st_size / 1e6:.1f}".replace(".", ",")
+        print(f"{args.dest.name} : {len(names)} entrée(s), {size} Mo ({', '.join(names)})")
+    else:
+        names = restore(args.src)
+        print(f"archive restaurée : {', '.join(names) or 'vide'}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

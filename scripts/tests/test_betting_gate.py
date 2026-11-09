@@ -2,7 +2,9 @@
 Tests de la porte de validation universelle (scripts/betting/gate.py), sur des données synthétiques : catégorie A
 (modèle exact validé, modèle faux jamais, segment court non jugé), catégorie B (référence Winamax dé-viguée,
 porte de calibration par bande qui bloque un modèle biaisé vers le côté « bas », ECE), catégorie C (fréquence de
-base), assemblage des poids / marges / références écrits pour le produit.
+base), correction de Bonferroni des tests multiples (segments sans effet simulés : presque chaque passage en valide un
+sans correction, au plus 5 % des passages avec ; un vrai effet reste validé), assemblage des poids / marges / références
+écrits pour le produit.
 
   python3 -m unittest tests.test_betting_gate -v        # ou : npm run test:data
 """
@@ -221,9 +223,99 @@ class CategoryCTests(unittest.TestCase):
         self.assertEqual(seg["verdict"], "poids_nul")
 
 
+def null_segment(competition: str, diff: np.ndarray, family: str = "famille 0", weight: float = 0.05) -> dict:
+    """Segment B testé (w > 0, assez de matchs) dont le gain par match est `diff` ; verdict nominal comme `run_gate_b`
+    le rend : chaque segment jugé seul, à 5 % unilatéral."""
+    p = gate.one_sided_p(diff)
+    return {"category": "B", "family": family, "competition": competition, "reference": "winamax", "weight": weight, "ece": 0.01, "band": {"passed": True},
+            "test": {"matches": int(len(diff)), "gain": float(diff.mean()), "se": float(diff.std(ddof=1) / np.sqrt(len(diff))), "pValue": p}, "verdict": "valide" if p <= gate.ALPHA else "gain_non_significatif"}
+
+
+def null_pass(rng: np.random.Generator, families: int = 7, competitions: int = 12, n: int = 150) -> list[dict]:
+    """Un passage de la porte sous l'hypothèse nulle, à la taille du lot 3 : par famille, un segment par compétition et le
+    segment « toutes » qui les contient (tests imbriqués, donc corrélés). Gain de log-loss par match d = (y − p)·e : le terme
+    principal du gain d'un pool dont le modèle n'apporte rien (y tiré de la vraie probabilité p, écart e du modèle
+    indépendant du résultat), d'espérance exactement nulle."""
+    segments = []
+    for f in range(families):
+        diffs = []
+        for c in range(competitions):
+            p = rng.uniform(0.3, 0.7, n)
+            d = ((rng.random(n) < p) - p) * rng.normal(0.0, 0.1, n)
+            diffs.append(d)
+            segments.append(null_segment(f"C{c}", d, family=f"famille {f}"))
+        segments.append(null_segment("toutes", np.concatenate(diffs), family=f"famille {f}"))
+    return segments
+
+
+class MultipleTestingTests(unittest.TestCase):
+    """Correction de Bonferroni sur les segments A et B testés : une validation ouvre des paris réels, donc la porte
+    contrôle la probabilité de valider à tort au moins un segment sans effet (FWER ≤ 5 % par passage)."""
+
+    def test_null_segments_are_falsely_validated_without_correction_and_rarely_with_it(self):
+        rng = np.random.default_rng(2026)
+        passes, nominal_any, nominal_total, corrected_any = 400, 0, 0, 0
+        for _ in range(passes):
+            segments = null_pass(rng)
+            nominal = sum(s["verdict"] == "valide" for s in segments)
+            gate.correct_multiple_tests(segments)
+            corrected = sum(s["verdict"] == "valide" for s in segments)
+            nominal_any += nominal > 0; nominal_total += nominal; corrected_any += corrected > 0
+        # sans correction : 91 tests à 5 %, presque chaque passage valide au moins un segment sans effet (≈ 4,5 par passage)
+        self.assertGreater(nominal_any / passes, 0.8)
+        self.assertGreater(nominal_total / passes, 3.0)
+        # avec Bonferroni : au plus α, à l'erreur de Monte-Carlo près (trois écarts types)
+        self.assertLessEqual(corrected_any / passes, gate.ALPHA + 3 * np.sqrt(gate.ALPHA * (1 - gate.ALPHA) / passes))
+
+    def test_a_real_effect_stays_validated_among_many_null_segments(self):
+        # la correction coûte de la puissance (seuil z de 1,64 à 3,3 pour m ≈ 100) : il faut un effet net, ici un modèle exact
+        # face à une clôture très bruitée, 800 matchs par compétition et par saison
+        a = gate.run_gate(synthetic(800, "exact", sharp_noise=0.5), min_matches=150)
+        report = gate.assemble(a, {"segments": null_pass(np.random.default_rng(7))}, {"segments": []})
+        self.assertGreaterEqual(report["multipleTesting"]["tests"], 91)
+        self.assertIn("résultat|AAA", report["weights"]); self.assertIn("résultat|BBB", report["weights"])
+        self.assertFalse(any(k.startswith("famille") for k in report["weights"]))
+
+    def test_assemble_counts_tested_a_and_b_segments_only_and_is_idempotent(self):
+        def seg(cat, comp, p, weight=0.3, band=True, family="plus/moins"):
+            test = {"matches": 300, "gain": 0.004, "gainLow": 0.003, "gainHigh": 0.005}
+            if p is not None:
+                test["pValue"] = p
+            return {"category": cat, "family": family, "competition": comp, "reference": "winamax", "weight": weight, "ece": 0.01, "band": {"passed": band},
+                    "test": test, "verdict": "valide" if p is None or p <= gate.ALPHA else "gain_non_significatif"}
+        b = [seg("B", f"C{i}", 0.5) for i in range(36)]
+        b += [seg("B", "C36", 0.01), seg("B", "C37", 1e-6), seg("B", "C38", 1e-6, band=False)]
+        b += [seg("B", "C39", 0.9, weight=0.0) | {"verdict": "poids_nul"},
+              {"category": "B", "family": "plus/moins", "competition": "C40", "weight": 0.0, "verdict": "trop_peu_de_matchs"}]
+        a = [seg("A", "AAA", None, family="résultat")]          # rapport antérieur sans pValue : erreur type tirée de l'IC à 90 %
+        c = [seg("C", "toutes", 1e-9, family="nombre de buts")]
+        report = gate.assemble({"segments": a}, {"segments": b}, {"segments": c})
+        mt = report["multipleTesting"]
+        self.assertEqual((mt["method"], mt["tests"]), ("bonferroni", 40))     # 39 segments B et 1 segment A testés ; ni w = 0, ni trop court, ni C
+        self.assertAlmostEqual(mt["levelPerTest"], gate.ALPHA / 40)
+        verdict = {s["competition"]: s["verdict"] for s in b + a}
+        self.assertEqual(verdict["C36"], "gain_non_significatif")              # p = 0,01 : significatif seul, pas parmi 40 tests
+        self.assertEqual(verdict["C38"], "biais_directionnel")
+        self.assertEqual((verdict["C39"], verdict["C40"]), ("poids_nul", "trop_peu_de_matchs"))
+        self.assertEqual(set(report["weights"]), {"plus/moins|C37", "résultat|AAA"})
+        self.assertLess(a[0]["test"]["pValue"], gate.ALPHA / 40)
+        self.assertEqual(c[0]["verdict"], "valide")                               # C : hors produit, verdict nominal inchangé
+        again = gate.assemble({"segments": a}, {"segments": b}, {"segments": c})
+        self.assertEqual((again["weights"], again["multipleTesting"]), (report["weights"], mt))
+
+    def test_one_sided_p_value(self):
+        self.assertAlmostEqual(gate.one_sided_p(np.array([0.0, 2.0])), 0.25, places=6)       # moyenne 1, erreur type 1, t à 1 degré : P(T > 1) = 1/4
+        self.assertEqual(gate.one_sided_p(np.full(10, 0.2)), 0.0)
+        self.assertEqual(gate.one_sided_p(np.zeros(10)), 1.0)
+        self.assertEqual(gate.one_sided_p(np.array([])), 1.0)
+        pm, ps, y = gate.segment_arrays(synthetic(200, "exact"), "ou25")
+        good = gate.evaluate(pm, ps, y, 0.5, n_boot=200)
+        self.assertGreater(good["se"], 0.0); self.assertLess(good["pValue"], 0.5)
+
+
 class AssembleTests(unittest.TestCase):
     def test_only_validated_segments_are_written_with_margin_and_reference_and_loaded_by_pool_weights(self):
-        a = gate.run_gate(synthetic(500, "exact"), min_matches=150)
+        a = gate.run_gate(synthetic(800, "exact", sharp_noise=0.5), min_matches=150)      # effet assez net pour passer la correction des tests multiples
         b = gate.run_gate_b(rows_b(1500, "exact", wx_noise=0.3), min_matches=150)
         c = gate.run_gate_c({"nombre de buts": {"pm": np.full((400, 8), 1 / 8), "y": np.zeros(400, int), "competition": np.array(["AAA"] * 400), "season": np.array(["2024-25"] * 200 + ["2025-26"] * 200)}}, min_matches=150)
         report = gate.assemble(a, b, c)

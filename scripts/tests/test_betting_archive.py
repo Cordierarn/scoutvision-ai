@@ -8,6 +8,8 @@ sur la forme réelle (phase 0) : équipes « Club A / Club B », joueurs « Joue
 from __future__ import annotations
 
 import datetime as dt
+import io
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +19,7 @@ import pandas as pd
 from betting import archive, fetch
 
 KO = "2026-11-01T15:00:00.000Z"
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "betting-odds.yml"
 
 
 def snap(at: str, price: float, limit=None, active=True) -> dict:
@@ -160,3 +163,45 @@ class StaleFixturesTests(unittest.TestCase):
         self.assertEqual(list(todo["fixture_id"]), ["stale", "never"])        # triées par coup d'envoi ; hors fenêtre et jouées ignorées
         self.assertTrue(fetch.stale_fixtures(fx, last, now, days=7, hours=60).query("fixture_id == 'stale'").empty)
         self.assertEqual(list(fetch.stale_fixtures(fx, pd.Series(dtype="datetime64[ns, UTC]"), now, 7, 2)["fixture_id"]), ["fresh", "stale", "never"])
+
+
+class PublishedArchiveTests(unittest.TestCase):
+    """Archive publiée `betting-odds.tar.gz` : phase2/ (rapport de la porte, poids du pool) persiste d'un passage au suivant."""
+
+    def research(self, root: Path) -> None:
+        files = {"odds/AAA/2026-27.parquet": b"cotes", "journal/suggestions.parquet": b"journal", "fixtures.parquet": b"rencontres",
+                 "phase2/gate.json": b'{"categoryA": {"segments": []}}', "phase2/pool_weights.json": b'{"weights": {}}',
+                 "phase2/variant.json": b"{}", "phase2/calibration_rows.parquet": b"lignes", ".lock": b"", "brouillon.txt": b"hors archive"}
+        for name, content in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(content)
+
+    def test_pack_includes_phase2_without_row_tables_and_restore_puts_it_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst, out = Path(tmp) / "src", Path(tmp) / "dst", Path(tmp) / "betting-odds.tar.gz"
+            self.research(src)
+            self.assertEqual(archive.pack(out, root=src), ["odds", "journal", "phase2", "fixtures.parquet"])     # entrées absentes sautées
+            with tarfile.open(out) as tar:
+                names = set(tar.getnames())
+            self.assertTrue({"phase2/gate.json", "phase2/pool_weights.json", "phase2/variant.json", "odds/AAA/2026-27.parquet"} <= names)
+            self.assertFalse({"phase2/calibration_rows.parquet", ".lock", "brouillon.txt"} & names)
+            self.assertEqual(archive.restore(out, root=dst), ["fixtures.parquet", "journal", "odds", "phase2"])
+            for name in ("phase2/gate.json", "phase2/pool_weights.json", "odds/AAA/2026-27.parquet", "journal/suggestions.parquet"):
+                self.assertEqual((dst / name).read_bytes(), (src / name).read_bytes())
+
+    def test_restore_refuses_a_member_outside_the_research_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "piege.tar.gz"
+            with tarfile.open(out, "w:gz") as tar:
+                info = tarfile.TarInfo("../piege.json"); info.size = 2
+                tar.addfile(info, io.BytesIO(b"{}"))
+            with self.assertRaises(tarfile.TarError):
+                archive.restore(out, root=Path(tmp) / "dst")
+            self.assertFalse((Path(tmp) / "piege.json").exists())
+
+    def test_workflow_publishes_and_restores_through_the_module_before_the_seed(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("python3 -m betting.archive pack", workflow)
+        self.assertNotIn("tar -czf ../../betting-odds.tar.gz", workflow)                           # une seule liste d'entrées : archive.PUBLISHED
+        # archive restaurée avant l'amorce : pour la variante, la calibration et les ajustements, l'amorce l'emporte
+        self.assertLess(workflow.index("python3 -m betting.archive restore"), workflow.index('tar -xzf "$RUNNER_TEMP/betting-seed.tar.gz"'))
