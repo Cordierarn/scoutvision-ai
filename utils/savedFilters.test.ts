@@ -3,9 +3,11 @@ import {
   SAVED_FILTERS_KEY, consumeSharedFilters, decodeShare, encodeShare, loadSavedFilters, removeSavedFilter, saveFilter, setPendingSharedFilters, shareUrl, sharedFromHash,
   validateHunterFilters, validatePlayersFilters, validateSimilarFilters, StorageLike,
 } from './savedFilters';
+import { EMPTY_PROFILE } from './profileFilters';
 
 class MemoryStorage implements StorageLike { map = new Map<string, string>(); getItem(k: string) { return this.map.get(k) ?? null; } setItem(k: string, v: string) { this.map.set(k, v); } }
-const players = { searchTerm: 'dupo', positionFilter: 'ST', sortField: 'xG per 90', sortOrder: 'desc' as const, conditions: [{ key: 'Age', min: 18, max: 23 }, { key: 'Minutes played', min: 500, max: '' as const }] };
+const legacyPlayers = { searchTerm: 'dupo', positionFilter: 'ST', sortField: 'xG per 90', sortOrder: 'desc' as const, conditions: [{ key: 'Age', min: 18, max: 23 }, { key: 'Minutes played', min: 500, max: '' as const }] };
+const players = { ...legacyPlayers, profile: EMPTY_PROFILE };
 const hunter = { role: 'Renard des surfaces', strictness: 0.9, constraints: { ageMax: 23, minutesMin: 300, valueMax: 20_000_000, contractMonths: 12, estimateAboveMarket: true, competition: 'FRA' } };
 const similar = { samePosition: true, ageMax: 26, minMinutes: 450, competition: '', tier: 1 };
 
@@ -14,6 +16,7 @@ afterEach(() => { setPendingSharedFilters(null); vi.unstubAllGlobals(); });
 describe('validation par page', () => {
   it('garde les champs attendus, refuse l\'illisible, écarte les conditions invalides', () => {
     expect(validatePlayersFilters(players)).toEqual(players);
+    expect(validatePlayersFilters(legacyPlayers)).toEqual(players);
     expect(validatePlayersFilters({ ...players, conditions: [{ key: 'Age', min: 'x', max: 23 }, 42, { key: 'Goals', min: 1, max: 5 }] })?.conditions).toEqual([{ key: 'Goals', min: 1, max: 5 }]);
     expect(validatePlayersFilters({ ...players, sortOrder: 'up' })).toBeNull();
     expect(validateHunterFilters(hunter)).toEqual(hunter);
@@ -65,5 +68,35 @@ describe('lien de partage', () => {
     expect(consumeSharedFilters('players')).toBeNull();
     expect(consumeSharedFilters('hunter')).toEqual(hunter);
     expect(consumeSharedFilters('hunter')).toBeNull();
+  });
+});
+
+describe('filtres qualitatifs de la Base joueurs (champ profile)', () => {
+  // Lien produit avant l'ajout des filtres qualitatifs (schéma v1 sans « profile »)
+  const OLD_LINK = 'eyJ2IjoxLCJwYWdlIjoicGxheWVycyIsImRhdGEiOnsic2VhcmNoVGVybSI6ImR1cG8iLCJwb3NpdGlvbkZpbHRlciI6IlNUIiwic29ydEZpZWxkIjoieEcgcGVyIDkwIiwic29ydE9yZGVyIjoiZGVzYyIsImNvbmRpdGlvbnMiOlt7ImtleSI6IkFnZSIsIm1pbiI6MTgsIm1heCI6MjN9XX19';
+
+  it('un ancien lien reste valide : filtres qualitatifs vides', () => {
+    const fd = decodeShare(OLD_LINK);
+    expect(fd?.page).toBe('players');
+    const d = fd?.data as ReturnType<typeof validatePlayersFilters>;
+    expect(d?.positionFilter).toBe('ST');
+    expect(d?.conditions).toEqual([{ key: 'Age', min: 18, max: 23 }]);
+    expect(d?.profile).toEqual(EMPTY_PROFILE);
+  });
+
+  it('un nouveau lien transporte les filtres qualitatifs, validés', () => {
+    const profile = { ...EMPTY_PROFILE, competitions: ['AAA'], teams: ['t_club1'], nations: ['FRA'], feet: ['Left' as const], heightMin: 180, includeMissing: { nation: false, foot: true, height: false } };
+    const fd = decodeShare(encodeShare({ page: 'players', data: { ...players, profile } }));
+    expect((fd?.data as { profile: unknown }).profile).toEqual(profile);
+    const bad = decodeShare(encodeShare({ page: 'players', data: { ...players, profile: { feet: ['Gauche'], heightMin: 9999, nations: 'FRA' } as never } }));
+    expect((bad?.data as { profile: unknown }).profile).toEqual(EMPTY_PROFILE);
+  });
+
+  it('un ancien filtre enregistré reste lisible', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(SAVED_FILTERS_KEY, JSON.stringify([{ id: 'a', name: 'Ancien', page: 'players', createdAt: '2026-10-01T00:00:00Z', data: legacyPlayers }]));
+    const [saved] = loadSavedFilters('players', storage);
+    expect(saved.name).toBe('Ancien');
+    expect((saved.data as { profile: unknown }).profile).toEqual(EMPTY_PROFILE);
   });
 });

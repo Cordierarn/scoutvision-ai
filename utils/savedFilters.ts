@@ -9,6 +9,7 @@
 
 import type { ProspectConstraints } from './prospects';
 import type { SimilarityFilters } from './similarity';
+import { ProfileFilters, validateProfileFilters } from './profileFilters';
 
 export const SAVED_FILTERS_KEY = 'scoutvision_saved_filters_v1';
 export const SHARE_PARAM = 'partage';
@@ -23,6 +24,8 @@ export interface PlayersFilters {
   sortField: string;
   sortOrder: 'asc' | 'desc';
   conditions: { key: string; min: number | ''; max: number | '' }[];
+  /** Filtres qualitatifs ; absents d'un ancien lien ou filtre enregistré : vides */
+  profile: ProfileFilters;
 }
 
 export interface HunterFilters {
@@ -67,7 +70,7 @@ export function validatePlayersFilters(raw: unknown): PlayersFilters | null {
       return key && min !== undefined && max !== undefined ? [{ key, min, max }] : [];
     })
     : [];
-  return { searchTerm: str(raw.searchTerm) ?? '', positionFilter: str(raw.positionFilter, 20) ?? 'All', sortField, sortOrder, conditions };
+  return { searchTerm: str(raw.searchTerm) ?? '', positionFilter: str(raw.positionFilter, 20) ?? 'All', sortField, sortOrder, conditions, profile: validateProfileFilters(raw.profile) };
 }
 
 export function validateHunterFilters(raw: unknown): HunterFilters | null {
