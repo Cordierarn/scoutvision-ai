@@ -771,12 +771,18 @@ def forecast_cups(results: pd.DataFrame, competitions: dict, leagues: dict, cove
     return rows, check
 
 
+def team_logos(teams_ref: pd.DataFrame) -> dict:
+    """Logo par identifiant d'équipe. Une équipe sans logo est absente du dictionnaire, donc null dans le JSON : avec
+    pandas 3, une chaîne absente du Parquet est lue en NaN, que write_json refuse (allow_nan=False)."""
+    return teams_ref.set_index("id")["image_url"].dropna().to_dict() if not teams_ref.empty else {}
+
+
 def build_forecast(forecast: pd.DataFrame, teams_ref: pd.DataFrame) -> dict:
     """Pronostics 1-N-2 des matchs à venir du pipeline (toutes compétitions, jusqu'à la fin
     de saison), avec les logos des équipes retrouvés par identifiant."""
     if forecast.empty:
         return {"matches": []}
-    logos = teams_ref.set_index("id")["image_url"].to_dict() if not teams_ref.empty else {}
+    logos = team_logos(teams_ref)
     rows = []
     for _, m in forecast.sort_values(["date", "league_key"]).iterrows():
         rows.append({
@@ -794,7 +800,7 @@ def build_tables(table: pd.DataFrame, teams_ref: pd.DataFrame) -> dict:
     """Classements projetés du pipeline : points actuels + points attendus sur les matchs restants."""
     if table.empty:
         return {}
-    logos = teams_ref.set_index("id")["image_url"].to_dict() if not teams_ref.empty else {}
+    logos = team_logos(teams_ref)
     out: dict[str, list[dict]] = {}
     for comp, g in table.groupby("league_key"):
         out[comp] = [{
