@@ -12,6 +12,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 
@@ -131,6 +132,16 @@ class ParseTests(unittest.TestCase):
             merged = results_web.save(again, p)
             self.assertEqual(merged.set_index("source_id").loc["1", "match_id"], "m1")
 
+
+    def test_a_day_without_any_match_is_not_an_error(self):
+        # trêve internationale : aucune rencontre dans aucune compétition la veille (ESPN renvoie `events` vide). La
+        # sélection des rencontres terminées doit rester un tableau vide avec ses colonnes, pas une erreur.
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "r.parquet"
+            save = results_web.save
+            with mock.patch.object(results_web, "fetch", return_value={"events": []}), \
+                 mock.patch.object(results_web, "save", lambda df: save(df, p)):
+                self.assertEqual(results_web.main(["--date", "2026-11-16"]), 0)
 
 class MergeTests(unittest.TestCase):
     def test_web_results_get_team_ids_and_feed_features(self):
