@@ -196,7 +196,9 @@ def main(argv=None) -> int:
     for day in days:
         df = collect(day)
         merged = save(df)
-        done = df[df["completed"]]
+        # masque booléen explicite : un jour sans rencontre (trêve internationale) donne une colonne vide de type objet,
+        # que pandas lirait comme une liste de colonnes (tableau sans colonnes, puis KeyError sur ht_home)
+        done = df[df["completed"].fillna(False).astype(bool)]
         known = done["ht_home"].notna()
         print(f"{day} : {len(df)} rencontres lues, {len(done)} terminées dont {int(known.sum())} avec mi-temps reconstruite, "
               f"{int(done['match_id'].notna().sum())} appariées PitchAPI ; {len(merged)} au total dans {OUT}")
